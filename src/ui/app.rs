@@ -1,6 +1,8 @@
 use egui::{Context, TextureHandle, TextureOptions, Ui, Vec2};
 
+use crate::blueprint;
 use crate::export::r_source::{self, RuleSet};
+use crate::file_filter::{BLUEPRINT, RPP_SOURCE, TILESET_IMAGE};
 use crate::file_picker::{FilePicker, PickedFile};
 use crate::file_saver::FileSaver;
 use crate::model::group::{GroupMode, TileGroup};
@@ -51,6 +53,7 @@ pub struct AutomapperApp {
     project: Project,
     rule_set_name: String,
     picker: FilePicker,
+    blueprint_picker: FilePicker,
     saver: FileSaver,
     status: StatusLine,
     dialog: Option<TileDialog>,
@@ -66,7 +69,8 @@ impl Default for AutomapperApp {
             workspace: Workspace::NoImage,
             project: Project::default(),
             rule_set_name: String::new(),
-            picker: FilePicker::new(),
+            picker: FilePicker::new(TILESET_IMAGE),
+            blueprint_picker: FilePicker::new(BLUEPRINT),
             saver: FileSaver::new(),
             status: StatusLine::default(),
             dialog: None,
@@ -83,10 +87,11 @@ impl eframe::App for AutomapperApp {
         let ctx = ui.ctx().clone();
 
         self.receive_picked_file(&ctx);
+        self.receive_blueprint_file(&ctx);
         self.receive_saved_file(&ctx);
         self.handle_shortcuts(&ctx);
 
-        self.show_menu_bar(ui);
+        self.show_menu_bar(ui, &ctx);
         self.show_status_bar(ui);
         self.show_side_panel(ui, &ctx);
         self.show_tileset(ui, &ctx);
@@ -103,6 +108,60 @@ impl AutomapperApp {
 
         match result {
             Ok(picked) => self.load_tileset(ctx, picked),
+            Err(error) => self.status.warning(ctx, error.to_string()),
+        }
+    }
+
+    fn receive_blueprint_file(&mut self, ctx: &Context) {
+        let Some(result) = self.blueprint_picker.poll() else {
+            return;
+        };
+
+        match result {
+            Ok(picked) => self.load_blueprint(ctx, picked),
+            Err(error) => self.status.warning(ctx, error.to_string()),
+        }
+    }
+
+    fn load_blueprint(&mut self, ctx: &Context, picked: PickedFile) {
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
+        };
+
+        let text = match std::str::from_utf8(&picked.bytes) {
+            Ok(text) => text,
+            Err(_) => {
+                self.status
+                    .warning(ctx, format!("{} is not text", picked.name));
+                return;
+            }
+        };
+
+        match blueprint::from_json(text, &loaded.tileset.stem) {
+            Ok(blueprint) => {
+                self.project = blueprint.project;
+                self.rule_set_name = blueprint.rule_set;
+                self.dialog = None;
+                self.group_dialog = None;
+                self.drag_anchor = None;
+                self.status.info(ctx, format!("Loaded {}", picked.name));
+            }
+            Err(error) => self
+                .status
+                .warning(ctx, format!("{}: {error}", picked.name)),
+        }
+    }
+
+    fn save_blueprint(&mut self, ctx: &Context) {
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
+        };
+
+        let stem = &loaded.tileset.stem;
+        match blueprint::to_json(&self.project, stem, &self.rule_set_name) {
+            Ok(text) => self
+                .saver
+                .save_text(BLUEPRINT, &format!("{stem}.json"), text),
             Err(error) => self.status.warning(ctx, error.to_string()),
         }
     }
@@ -132,9 +191,10 @@ impl AutomapperApp {
         };
 
         match r_source::render(&rule_set) {
-            Ok(source) => self
-                .saver
-                .save_text(&format!("{}.r", loaded.tileset.stem), source),
+            Ok(source) => {
+                self.saver
+                    .save_text(RPP_SOURCE, &format!("{}.r", loaded.tileset.stem), source)
+            }
             Err(error) => self.status.warning(ctx, error.to_string()),
         }
     }
@@ -172,31 +232,46 @@ impl AutomapperApp {
 
     fn handle_shortcuts(&mut self, ctx: &Context) {
         if ctx.input_mut(|input| input.consume_shortcut(&open_image_shortcut())) {
-            self.picker.open_image();
+            self.picker.open();
         }
     }
 
-    fn show_menu_bar(&mut self, ui: &mut Ui) {
+    fn show_menu_bar(&mut self, ui: &mut Ui, ctx: &Context) {
+        let mut save_blueprint = false;
+
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     let open = egui::Button::new("Open image…")
                         .shortcut_text(ui.ctx().format_shortcut(&open_image_shortcut()));
                     if ui.add(open).clicked() {
-                        self.picker.open_image();
+                        self.picker.open();
                         ui.close();
                     }
 
                     ui.separator();
 
-                    // TODO: blueprint save/load.
-                    ui.add_enabled(false, egui::Button::new("Load blueprint…"));
-                    ui.add_enabled(false, egui::Button::new("Save blueprint…"));
+                    let has_image = matches!(self.workspace, Workspace::Ready(_));
+                    if ui
+                        .add_enabled(has_image, egui::Button::new("Load blueprint…"))
+                        .clicked()
+                    {
+                        self.blueprint_picker.open();
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(has_image, egui::Button::new("Save blueprint…"))
+                        .clicked()
+                    {
+                        save_blueprint = true;
+                        ui.close();
+                    }
                 });
 
                 ui.menu_button("Help", |ui| {
                     ui.label(concat!(
-                        "SimpleDDNetAutomapper ",
+                        env!("CARGO_PKG_NAME"),
+                        " ",
                         env!("CARGO_PKG_VERSION"),
                         "\nGenerates rpp sources for DDNet automappers."
                     ));
@@ -206,6 +281,10 @@ impl AutomapperApp {
                 self.show_selection_picker(ui);
             });
         });
+
+        if save_blueprint {
+            self.save_blueprint(ctx);
+        }
     }
 
     fn show_selection_picker(&mut self, ui: &mut Ui) {
@@ -357,7 +436,7 @@ impl AutomapperApp {
                     ui.vertical_centered(|ui| {
                         ui.add_space(ui.available_height() * 0.4);
                         if ui.button("Select Image").clicked() {
-                            self.picker.open_image();
+                            self.picker.open();
                         }
                     });
                     GridResponse::default()

@@ -19,18 +19,20 @@ impl TileState {
 }
 
 pub fn tile_state(tileset: &Tileset, project: &Project, tile: usize) -> TileState {
+    if project.group_at(tile).is_some() {
+        return TileState::Grouped;
+    }
+    if let Some(rule) = project.rule(tile) {
+        return TileState::Configured(*rule);
+    }
+
     let TileKind::Guess(guess) = tileset.tiles[tile].kind else {
         return TileState::Locked;
     };
 
-    if project.group_at(tile).is_some() {
-        return TileState::Grouped;
-    }
-
-    match project.rule(tile) {
-        Some(rule) => TileState::Configured(*rule),
-        None if project.is_removed(tile) => TileState::Removed,
-        None => TileState::Guessed(guess),
+    match project.is_removed(tile) {
+        true => TileState::Removed,
+        false => TileState::Guessed(guess),
     }
 }
 

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::model::group::TileGroup;
 use crate::model::tile::TileRule;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Project {
     rules: BTreeMap<usize, TileRule>,
     removed: BTreeSet<usize>,
@@ -33,6 +33,10 @@ impl Project {
         self.removed.remove(&tile);
     }
 
+    pub fn removed_tiles(&self) -> Vec<usize> {
+        self.removed.iter().copied().collect()
+    }
+
     pub fn rule_count(&self) -> usize {
         self.rules.len()
     }
@@ -51,6 +55,11 @@ impl Project {
     /// New groups take priority over existing ones, so they go to the front.
     pub fn add_group(&mut self, group: TileGroup) {
         self.groups.insert(0, group);
+    }
+
+    /// Keeps the given order, unlike `add_group`, which promotes to the front.
+    pub fn append_group(&mut self, group: TileGroup) {
+        self.groups.push(group);
     }
 
     pub fn replace_group(&mut self, index: usize, group: TileGroup) {

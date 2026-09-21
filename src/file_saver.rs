@@ -2,6 +2,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use thiserror::Error;
 
+use crate::file_filter::FileFilter;
+
 #[derive(Debug, Error)]
 #[error("could not save `{name}`: {message}")]
 pub struct SaveError {
@@ -23,8 +25,8 @@ impl FileSaver {
         Self { sender, receiver }
     }
 
-    pub fn save_text(&self, file_name: &str, contents: String) {
-        spawn_dialog(self.sender.clone(), file_name.to_owned(), contents);
+    pub fn save_text(&self, filter: FileFilter, file_name: &str, contents: String) {
+        spawn_dialog(self.sender.clone(), filter, file_name.to_owned(), contents);
     }
 
     pub fn poll(&self) -> Option<SaveResult> {
@@ -39,10 +41,15 @@ impl Default for FileSaver {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_dialog(sender: Sender<SaveResult>, file_name: String, contents: String) {
+fn spawn_dialog(
+    sender: Sender<SaveResult>,
+    filter: FileFilter,
+    file_name: String,
+    contents: String,
+) {
     std::thread::spawn(move || {
         let dialog = rfd::FileDialog::new()
-            .add_filter("rpp source", &["r"])
+            .add_filter(filter.name, filter.extensions)
             .set_file_name(&file_name);
         let Some(path) = dialog.save_file() else {
             return;
@@ -66,7 +73,12 @@ fn spawn_dialog(sender: Sender<SaveResult>, file_name: String, contents: String)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn spawn_dialog(sender: Sender<SaveResult>, file_name: String, contents: String) {
+fn spawn_dialog(
+    sender: Sender<SaveResult>,
+    _filter: FileFilter,
+    file_name: String,
+    contents: String,
+) {
     let result = match download(&file_name, &contents) {
         Ok(()) => Ok(file_name),
         Err(message) => Err(SaveError {

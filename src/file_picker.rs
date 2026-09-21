@@ -2,7 +2,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use thiserror::Error;
 
-const IMAGE_EXTENSIONS: [&str; 4] = ["png", "jpg", "jpeg", "bmp"];
+use crate::file_filter::FileFilter;
 
 #[derive(Debug, Clone)]
 pub struct PickedFile {
@@ -22,18 +22,23 @@ type PickResult = Result<PickedFile, PickError>;
 
 /// Cancelling sends nothing; it is not an outcome the UI reports.
 pub struct FilePicker {
+    filter: FileFilter,
     sender: Sender<PickResult>,
     receiver: Receiver<PickResult>,
 }
 
 impl FilePicker {
-    pub fn new() -> Self {
+    pub fn new(filter: FileFilter) -> Self {
         let (sender, receiver) = channel();
-        Self { sender, receiver }
+        Self {
+            filter,
+            sender,
+            receiver,
+        }
     }
 
-    pub fn open_image(&self) {
-        spawn_dialog(self.sender.clone());
+    pub fn open(&self) {
+        spawn_dialog(self.sender.clone(), self.filter);
     }
 
     pub fn poll(&self) -> Option<PickResult> {
@@ -41,16 +46,10 @@ impl FilePicker {
     }
 }
 
-impl Default for FilePicker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_dialog(sender: Sender<PickResult>) {
+fn spawn_dialog(sender: Sender<PickResult>, filter: FileFilter) {
     std::thread::spawn(move || {
-        let dialog = rfd::FileDialog::new().add_filter("Tileset image", &IMAGE_EXTENSIONS);
+        let dialog = rfd::FileDialog::new().add_filter(filter.name, filter.extensions);
         let Some(path) = dialog.pick_file() else {
             return;
         };
@@ -73,9 +72,9 @@ fn spawn_dialog(sender: Sender<PickResult>) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn spawn_dialog(sender: Sender<PickResult>) {
+fn spawn_dialog(sender: Sender<PickResult>, filter: FileFilter) {
     wasm_bindgen_futures::spawn_local(async move {
-        let dialog = rfd::AsyncFileDialog::new().add_filter("Tileset image", &IMAGE_EXTENSIONS);
+        let dialog = rfd::AsyncFileDialog::new().add_filter(filter.name, filter.extensions);
         let Some(handle) = dialog.pick_file().await else {
             return;
         };

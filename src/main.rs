@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod blueprint;
 mod export;
+mod file_filter;
 mod file_picker;
 mod file_saver;
 mod model;
@@ -10,7 +12,7 @@ mod tileset;
 mod ui;
 
 #[cfg(not(target_arch = "wasm32"))]
-const APP_TITLE: &str = "SimpleDDNetAutomapper";
+const APP_TITLE: &str = env!("CARGO_PKG_NAME");
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
