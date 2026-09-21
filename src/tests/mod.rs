@@ -1,3 +1,4 @@
+mod group;
 mod neighbor;
 mod project;
 mod r_source;

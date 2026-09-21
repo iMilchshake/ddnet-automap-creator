@@ -1,11 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::model::group::TileGroup;
 use crate::model::tile::TileRule;
 
 #[derive(Debug, Clone, Default)]
 pub struct Project {
     rules: BTreeMap<usize, TileRule>,
     removed: BTreeSet<usize>,
+    groups: Vec<TileGroup>,
 }
 
 impl Project {
@@ -40,5 +42,49 @@ impl Project {
             .iter()
             .map(|(&tile, &rule)| (tile, rule))
             .collect()
+    }
+
+    pub fn groups(&self) -> &[TileGroup] {
+        &self.groups
+    }
+
+    /// New groups take priority over existing ones, so they go to the front.
+    pub fn add_group(&mut self, group: TileGroup) {
+        self.groups.insert(0, group);
+    }
+
+    pub fn replace_group(&mut self, index: usize, group: TileGroup) {
+        if let Some(slot) = self.groups.get_mut(index) {
+            *slot = group;
+        }
+    }
+
+    pub fn remove_group(&mut self, index: usize) {
+        if index < self.groups.len() {
+            self.groups.remove(index);
+        }
+    }
+
+    pub fn raise_group(&mut self, index: usize) {
+        if index > 0 && index < self.groups.len() {
+            self.groups.swap(index - 1, index);
+        }
+    }
+
+    pub fn lower_group(&mut self, index: usize) {
+        if index + 1 < self.groups.len() {
+            self.groups.swap(index, index + 1);
+        }
+    }
+
+    pub fn group_at(&self, tile: usize) -> Option<usize> {
+        self.groups.iter().position(|group| group.covers(tile))
+    }
+
+    pub fn unused_group_name(&self) -> String {
+        (0..)
+            .map(|number| format!("group{number}"))
+            .find(|name| self.groups.iter().all(|group| group.name != *name))
+            .expect("the candidate names never run out")
     }
 }

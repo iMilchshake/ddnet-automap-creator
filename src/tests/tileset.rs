@@ -1,7 +1,8 @@
 use image::{Rgba, RgbaImage};
 
 use crate::model::neighbor::NeighborState;
-use crate::tileset::{TILE_COUNT, TileKind, decode_tileset, file_stem};
+use crate::model::tile::TILE_COUNT;
+use crate::tileset::{TileKind, decode_tileset, file_stem};
 
 fn opaque_image(width: u32, height: u32) -> Vec<u8> {
     encode(RgbaImage::from_pixel(width, height, Rgba([255, 0, 0, 255])))

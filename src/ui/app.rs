@@ -1,17 +1,28 @@
-use egui::{Context, TextureHandle, TextureOptions, Ui};
+use egui::{Context, TextureHandle, TextureOptions, Ui, Vec2};
 
 use crate::export::r_source::{self, RuleSet};
 use crate::file_picker::{FilePicker, PickedFile};
 use crate::file_saver::FileSaver;
+use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::project::Project;
+use crate::model::tile::{Chance, TILESET_SIDE};
 use crate::tileset::{self, Tileset};
 use crate::ui::grid::{self, GridResponse, GridView};
+use crate::ui::group_dialog::{GroupAction, GroupDialog, mode_label};
 use crate::ui::status::StatusLine;
 use crate::ui::tile_dialog::{DialogAction, TileDialog};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 
 const SIDE_PANEL_WIDTH: f32 = 260.0;
+const SWATCH_SIZE: f32 = 12.0;
+
+enum GroupCommand {
+    Configure(usize),
+    Raise(usize),
+    Lower(usize),
+    Remove(usize),
+}
 
 enum Workspace {
     NoImage,
@@ -31,6 +42,9 @@ pub struct AutomapperApp {
     saver: FileSaver,
     status: StatusLine,
     dialog: Option<TileDialog>,
+    group_dialog: Option<GroupDialog>,
+    define_groups: bool,
+    drag_anchor: Option<usize>,
     hovered_tile: Option<usize>,
 }
 
@@ -44,6 +58,9 @@ impl Default for AutomapperApp {
             saver: FileSaver::new(),
             status: StatusLine::default(),
             dialog: None,
+            group_dialog: None,
+            define_groups: false,
+            drag_anchor: None,
             hovered_tile: None,
         }
     }
@@ -62,6 +79,7 @@ impl eframe::App for AutomapperApp {
         self.show_side_panel(ui, &ctx);
         self.show_tileset(ui, &ctx);
         self.show_dialog(&ctx);
+        self.show_group_dialog(&ctx);
     }
 }
 
@@ -98,6 +116,7 @@ impl AutomapperApp {
             image_stem: &loaded.tileset.stem,
             name: &self.rule_set_name,
             tiles: &rules,
+            groups: self.project.groups(),
         };
 
         match r_source::render(&rule_set) {
@@ -133,6 +152,8 @@ impl AutomapperApp {
         self.project = Project::default();
         self.rule_set_name = stem.clone();
         self.dialog = None;
+        self.group_dialog = None;
+        self.drag_anchor = None;
         self.hovered_tile = None;
         self.workspace = Workspace::Ready(LoadedTileset { tileset, texture });
     }
@@ -191,6 +212,7 @@ impl AutomapperApp {
     fn show_side_panel(&mut self, ui: &mut Ui, ctx: &Context) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
         let mut export = false;
+        let mut pending = None;
 
         egui::Panel::right("tools")
             .resizable(false)
@@ -202,10 +224,15 @@ impl AutomapperApp {
                         ui.label("Rule set");
                         ui.text_edit_singleline(&mut self.rule_set_name);
                     });
-                    ui.label(format!("{} tiles configured", self.project.rule_count()));
+                    ui.label(format!(
+                        "{} tiles, {} groups configured",
+                        self.project.rule_count(),
+                        self.project.groups().len()
+                    ));
 
                     ui.add_space(4.0);
-                    let exportable = self.project.rule_count() > 0;
+                    let exportable =
+                        self.project.rule_count() > 0 || !self.project.groups().is_empty();
                     if ui
                         .add_enabled(exportable, egui::Button::new("Export .r…"))
                         .clicked()
@@ -216,13 +243,61 @@ impl AutomapperApp {
                     ui.separator();
 
                     ui.heading("Group editor");
-                    // TODO: tile groups.
-                    ui.label("Not implemented yet.");
+                    ui.checkbox(&mut self.define_groups, "Define groups")
+                        .on_hover_text(
+                            "Drag across the tileset to add a group, click one to edit it, \
+                             right-click to remove it.",
+                        );
+                    ui.weak(
+                        "Groups are placed top to bottom, and whoever comes first gets first pick.",
+                    );
+
+                    ui.add_space(4.0);
+                    self.show_group_list(ui, &mut pending);
                 });
             });
 
+        match pending {
+            Some(GroupCommand::Configure(index)) => self.open_group_dialog(index),
+            Some(GroupCommand::Raise(index)) => self.project.raise_group(index),
+            Some(GroupCommand::Lower(index)) => self.project.lower_group(index),
+            Some(GroupCommand::Remove(index)) => self.project.remove_group(index),
+            None => {}
+        }
+
         if export {
             self.export_rules(ctx);
+        }
+    }
+
+    fn show_group_list(&self, ui: &mut Ui, pending: &mut Option<GroupCommand>) {
+        if self.project.groups().is_empty() {
+            ui.weak("No groups yet.");
+            return;
+        }
+
+        for (index, group) in self.project.groups().iter().enumerate() {
+            ui.horizontal(|ui| {
+                let (rect, _response) =
+                    ui.allocate_exact_size(Vec2::splat(SWATCH_SIZE), egui::Sense::hover());
+                ui.painter()
+                    .rect_filled(rect, 2.0, grid::group_color(index));
+
+                if ui.button("▲").clicked() {
+                    *pending = Some(GroupCommand::Raise(index));
+                }
+                if ui.button("▼").clicked() {
+                    *pending = Some(GroupCommand::Lower(index));
+                }
+                if ui.button("✕").clicked() {
+                    *pending = Some(GroupCommand::Remove(index));
+                }
+
+                let label = ui.selectable_label(false, describe_group(group));
+                if label.clicked() {
+                    *pending = Some(GroupCommand::Configure(index));
+                }
+            });
         }
     }
 
@@ -246,6 +321,8 @@ impl AutomapperApp {
                                 tileset: &loaded.tileset,
                                 project: &self.project,
                                 texture: &loaded.texture,
+                                group_editing: self.define_groups,
+                                drag_anchor: self.drag_anchor,
                             },
                         )
                     })
@@ -264,6 +341,11 @@ impl AutomapperApp {
             return;
         };
 
+        if self.define_groups {
+            self.handle_group_grid(ctx, response);
+            return;
+        }
+
         if let Some(tile) = response.clicked
             && !matches!(
                 tile_state(&loaded.tileset, &self.project, tile),
@@ -276,6 +358,74 @@ impl AutomapperApp {
 
         if let Some(tile) = response.secondary_clicked {
             self.toggle_removed(ctx, tile);
+        }
+    }
+
+    fn handle_group_grid(&mut self, ctx: &Context, response: GridResponse) {
+        if let Some(tile) = response.drag_started {
+            self.drag_anchor = Some(tile);
+        }
+
+        if let Some(tile) = response.secondary_clicked
+            && let Some(index) = self.project.group_at(tile)
+        {
+            let name = self.project.groups()[index].name.clone();
+            self.project.remove_group(index);
+            self.status.info(ctx, format!("Removed group {name}"));
+            self.drag_anchor = None;
+            return;
+        }
+
+        let Some(anchor) = self.drag_anchor.take() else {
+            return;
+        };
+        let Some(corner) = response.drag_released else {
+            self.drag_anchor = Some(anchor);
+            return;
+        };
+
+        match self.project.group_at(anchor) {
+            Some(index) if anchor == corner => self.open_group_dialog(index),
+            Some(_) => self
+                .status
+                .warning(ctx, "That rectangle starts inside another group"),
+            None => self.create_group(ctx, anchor, corner),
+        }
+    }
+
+    fn create_group(&mut self, ctx: &Context, anchor: usize, corner: usize) {
+        let (top_left, bottom_right) = grid::corners(anchor, corner);
+        let group = TileGroup {
+            name: self.project.unused_group_name(),
+            top_left,
+            width: bottom_right % TILESET_SIDE - top_left % TILESET_SIDE + 1,
+            height: bottom_right / TILESET_SIDE - top_left / TILESET_SIDE + 1,
+            mode: GroupMode::Fill,
+            chance: Chance::FULL,
+        };
+
+        if group
+            .footprint()
+            .iter()
+            .any(|tile| self.project.group_at(*tile).is_some())
+        {
+            self.status
+                .warning(ctx, "That rectangle overlaps an existing group");
+            return;
+        }
+        if let Err(error) = group.validate() {
+            self.status.warning(ctx, error.to_string());
+            return;
+        }
+
+        self.status.info(ctx, format!("Added group {}", group.name));
+        self.project.add_group(group);
+        self.open_group_dialog(0);
+    }
+
+    fn open_group_dialog(&mut self, index: usize) {
+        if let Some(group) = self.project.groups().get(index) {
+            self.group_dialog = Some(GroupDialog::new(index, group));
         }
     }
 
@@ -293,6 +443,21 @@ impl AutomapperApp {
             _ => {
                 self.project.remove(tile);
                 self.status.info(ctx, format!("Tile {tile} removed"));
+            }
+        }
+    }
+
+    fn show_group_dialog(&mut self, ctx: &Context) {
+        let Some(dialog) = &mut self.group_dialog else {
+            return;
+        };
+
+        match dialog.show(ctx, self.project.groups()) {
+            GroupAction::Pending => {}
+            GroupAction::Cancel => self.group_dialog = None,
+            GroupAction::Commit { index, group } => {
+                self.project.replace_group(index, group);
+                self.group_dialog = None;
             }
         }
     }
@@ -367,4 +532,19 @@ fn upload_atlas(ctx: &Context, tileset: &Tileset) -> TextureHandle {
     );
 
     ctx.load_texture("tileset_atlas", image, TextureOptions::NEAREST)
+}
+
+fn describe_group(group: &TileGroup) -> String {
+    let mut text = format!(
+        "{} — {}×{}, {}",
+        group.name,
+        group.width,
+        group.height,
+        mode_label(group.mode)
+    );
+    if !group.chance.is_full() {
+        text.push_str(&format!(", {}%", group.chance.percent()));
+    }
+
+    text
 }

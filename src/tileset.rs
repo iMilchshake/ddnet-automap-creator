@@ -2,9 +2,7 @@ use image::{GenericImageView, RgbaImage};
 use thiserror::Error;
 
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
-
-pub const TILESET_SIDE: u32 = 16;
-pub const TILE_COUNT: usize = (TILESET_SIDE * TILESET_SIDE) as usize;
+use crate::model::tile::{TILE_COUNT, TILESET_SIDE};
 
 #[derive(Debug, Error)]
 pub enum TilesetError {
@@ -43,7 +41,8 @@ pub fn decode_tileset(bytes: &[u8], stem: &str) -> Result<Tileset, TilesetError>
     let rgba = image::load_from_memory(bytes)?.to_rgba8();
     let (width, height) = rgba.dimensions();
 
-    let tile_size = [width / TILESET_SIDE, height / TILESET_SIDE];
+    let side = TILESET_SIDE as u32;
+    let tile_size = [width / side, height / side];
     if tile_size[0] == 0 || tile_size[1] == 0 {
         return Err(TilesetError::TooSmall { width, height });
     }
@@ -76,8 +75,8 @@ pub fn file_stem(file_name: &str) -> String {
 /// Origins follow the fractional stride, so images whose size is not a
 /// multiple of 16 do not drift off the art by the end of a row.
 fn slice_tile(rgba: &RgbaImage, index: usize, tile_size: [u32; 2], stride: [f32; 2]) -> TileSlice {
-    let column = index as u32 % TILESET_SIDE;
-    let row = index as u32 / TILESET_SIDE;
+    let column = (index % TILESET_SIDE) as u32;
+    let row = (index / TILESET_SIDE) as u32;
     let origin = [
         (column as f32 * stride[0]) as u32,
         (row as f32 * stride[1]) as u32,
