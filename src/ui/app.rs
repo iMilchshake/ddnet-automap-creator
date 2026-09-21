@@ -1,16 +1,16 @@
-//! Application shell: layout, menu, and the path from picked file to grid.
-
 use egui::{Context, TextureHandle, TextureOptions, Ui};
 
 use crate::file_picker::{FilePicker, PickedFile};
-use crate::model::neighbor::NeighborState;
-use crate::tileset::{self, TileKind, Tileset};
-use crate::ui::{grid, status::StatusLine};
+use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::project::Project;
+use crate::tileset::{self, Tileset};
+use crate::ui::grid::{self, GridResponse, GridView};
+use crate::ui::status::StatusLine;
+use crate::ui::tile_dialog::{DialogAction, TileDialog};
+use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 
 const SIDE_PANEL_WIDTH: f32 = 260.0;
 
-/// The tools are dead until an image is loaded, so the two states are modelled
-/// directly rather than as an absent tileset.
 enum Workspace {
     NoImage,
     Ready(LoadedTileset),
@@ -23,8 +23,10 @@ struct LoadedTileset {
 
 pub struct AutomapperApp {
     workspace: Workspace,
+    project: Project,
     picker: FilePicker,
     status: StatusLine,
+    dialog: Option<TileDialog>,
     hovered_tile: Option<usize>,
 }
 
@@ -32,8 +34,10 @@ impl Default for AutomapperApp {
     fn default() -> Self {
         Self {
             workspace: Workspace::NoImage,
+            project: Project::default(),
             picker: FilePicker::new(),
             status: StatusLine::default(),
+            dialog: None,
             hovered_tile: None,
         }
     }
@@ -49,7 +53,8 @@ impl eframe::App for AutomapperApp {
         self.show_menu_bar(ui);
         self.show_status_bar(ui);
         self.show_side_panel(ui);
-        self.show_tileset(ui);
+        self.show_tileset(ui, &ctx);
+        self.show_dialog(&ctx);
     }
 }
 
@@ -65,7 +70,6 @@ impl AutomapperApp {
         }
     }
 
-    /// Replaces the whole workspace, so loading an image resets all state.
     fn load_tileset(&mut self, ctx: &Context, picked: PickedFile) {
         let stem = tileset::file_stem(&picked.name);
         let tileset = match tileset::decode_tileset(&picked.bytes, &stem) {
@@ -88,6 +92,8 @@ impl AutomapperApp {
             ),
         );
 
+        self.project = Project::default();
+        self.dialog = None;
         self.hovered_tile = None;
         self.workspace = Workspace::Ready(LoadedTileset { tileset, texture });
     }
@@ -136,7 +142,7 @@ impl AutomapperApp {
                     if let (Workspace::Ready(loaded), Some(index)) =
                         (&self.workspace, self.hovered_tile)
                     {
-                        ui.weak(describe_tile(&loaded.tileset, index));
+                        ui.weak(describe_tile(&loaded.tileset, &self.project, index));
                     }
                 });
             });
@@ -156,7 +162,7 @@ impl AutomapperApp {
                     if let Workspace::Ready(loaded) = &self.workspace {
                         ui.label(format!("Rule set: {}", loaded.tileset.stem));
                     }
-                    ui.label("Not implemented yet.");
+                    ui.label(format!("{} tiles configured", self.project.rule_count()));
 
                     ui.separator();
 
@@ -167,49 +173,125 @@ impl AutomapperApp {
             });
     }
 
-    fn show_tileset(&mut self, ui: &mut Ui) {
-        egui::CentralPanel::default().show(ui, |ui| match &self.workspace {
-            Workspace::NoImage => {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(ui.available_height() * 0.4);
-                    if ui.button("Select Image").clicked() {
-                        self.picker.open_image();
-                    }
-                });
-            }
-            Workspace::Ready(loaded) => {
-                ui.vertical_centered(|ui| {
-                    let response = grid::show(ui, &loaded.tileset, &loaded.texture);
-                    self.hovered_tile = response.hovered;
+    fn show_tileset(&mut self, ui: &mut Ui, ctx: &Context) {
+        let response = egui::CentralPanel::default()
+            .show(ui, |ui| match &self.workspace {
+                Workspace::NoImage => {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() * 0.4);
+                        if ui.button("Select Image").clicked() {
+                            self.picker.open_image();
+                        }
+                    });
+                    GridResponse::default()
+                }
+                Workspace::Ready(loaded) => {
+                    ui.vertical_centered(|ui| {
+                        grid::show(
+                            ui,
+                            GridView {
+                                tileset: &loaded.tileset,
+                                project: &self.project,
+                                texture: &loaded.texture,
+                            },
+                        )
+                    })
+                    .inner
+                }
+            })
+            .inner;
 
-                    // TODO: open the per-tile config dialog, plus undo/redo
-                    // once it can mutate anything.
-                    if let Some(index) = response.clicked {
-                        log::debug!("clicked tile {index}");
-                    }
-                });
+        self.handle_grid(ctx, response);
+    }
+
+    fn handle_grid(&mut self, ctx: &Context, response: GridResponse) {
+        self.hovered_tile = response.hovered;
+
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
+        };
+
+        if let Some(tile) = response.clicked
+            && !matches!(
+                tile_state(&loaded.tileset, &self.project, tile),
+                TileState::Locked
+            )
+        {
+            let rule = seed_rule(&loaded.tileset, &self.project, tile);
+            self.dialog = Some(TileDialog::new(tile, rule));
+        }
+
+        if let Some(tile) = response.secondary_clicked {
+            self.toggle_removed(ctx, tile);
+        }
+    }
+
+    fn toggle_removed(&mut self, ctx: &Context, tile: usize) {
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
+        };
+
+        match tile_state(&loaded.tileset, &self.project, tile) {
+            TileState::Locked => {}
+            TileState::Removed => {
+                self.project.restore(tile);
+                self.status.info(ctx, format!("Tile {tile} restored"));
             }
-        });
+            _ => {
+                self.project.remove(tile);
+                self.status.info(ctx, format!("Tile {tile} removed"));
+            }
+        }
+    }
+
+    fn show_dialog(&mut self, ctx: &Context) {
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
+        };
+        let Some(dialog) = &mut self.dialog else {
+            return;
+        };
+
+        match dialog.show(ctx, &loaded.tileset, &loaded.texture) {
+            DialogAction::Pending => {}
+            DialogAction::Cancel => self.dialog = None,
+            DialogAction::Commit { tile, rule } => {
+                self.project.set_rule(tile, rule);
+                self.dialog = None;
+                self.status.info(ctx, format!("Tile {tile} configured"));
+            }
+        }
     }
 }
 
-/// Reads the alpha scan's guess back out, so it can be checked against the art.
-fn describe_tile(tileset: &Tileset, index: usize) -> String {
-    match tileset.tiles[index].kind {
-        TileKind::Locked => format!("Tile {index} · locked"),
-        TileKind::Guess(neighborhood) => {
-            let glyphs: String = neighborhood
-                .states()
-                .iter()
-                .copied()
-                .map(state_glyph)
-                .collect();
-
-            let (top, rest) = glyphs.split_at(3);
-            let (sides, bottom) = rest.split_at(2);
-            format!("Tile {index} · guess {top}/{sides}/{bottom}")
+fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
+    match tile_state(tileset, project, tile) {
+        TileState::Locked => format!("Tile {tile} · locked"),
+        TileState::Removed => format!("Tile {tile} · removed"),
+        TileState::Guessed(guess) => {
+            format!("Tile {tile} · guess {}", format_neighborhood(guess))
+        }
+        TileState::Configured(rule) => {
+            let neighborhood = format_neighborhood(rule.neighborhood);
+            match rule.chance.is_full() {
+                true => format!("Tile {tile} · {neighborhood}"),
+                false => format!("Tile {tile} · {neighborhood} · {}%", rule.chance.percent()),
+            }
         }
     }
+}
+
+fn format_neighborhood(neighborhood: Neighborhood) -> String {
+    let glyphs: String = neighborhood
+        .states()
+        .iter()
+        .copied()
+        .map(state_glyph)
+        .collect();
+
+    let (top, rest) = glyphs.split_at(3);
+    let (sides, bottom) = rest.split_at(2);
+    format!("{top}/{sides}/{bottom}")
 }
 
 fn state_glyph(state: NeighborState) -> char {
@@ -231,6 +313,5 @@ fn upload_atlas(ctx: &Context, tileset: &Tileset) -> TextureHandle {
         tileset.rgba.as_raw(),
     );
 
-    // Tilesets are pixel art and the grid scales them up.
     ctx.load_texture("tileset_atlas", image, TextureOptions::NEAREST)
 }

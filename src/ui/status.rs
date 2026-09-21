@@ -1,6 +1,3 @@
-//! The single status line at the bottom of the window. Failures the user can
-//! trigger are reported here instead of crashing.
-
 use std::time::Duration;
 
 const AUTO_CLEAR_SECONDS: f64 = 8.0;
@@ -14,8 +11,7 @@ enum StatusLevel {
 struct Entry {
     message: String,
     level: StatusLevel,
-    /// Context time, which is monotonic on both targets unlike
-    /// `std::time::Instant`.
+    /// Context time; `std::time::Instant` panics on wasm.
     shown_at: f64,
 }
 
@@ -49,7 +45,6 @@ impl StatusLine {
         ctx.request_repaint_after(Duration::from_secs_f64(AUTO_CLEAR_SECONDS));
     }
 
-    /// Draws the current message and expires it once it is old enough.
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let now = ui.input(|input| input.time);
         let Some(entry) = &self.entry else {

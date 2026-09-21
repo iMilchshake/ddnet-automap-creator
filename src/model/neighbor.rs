@@ -1,5 +1,4 @@
 //! Neighbor index convention, y pointing down:
-//!
 //! ```text
 //! 0 TL   1 T    2 TR
 //! 3 L   [self]  4 R
@@ -8,15 +7,29 @@
 
 pub const NEIGHBOR_COUNT: usize = 8;
 
-/// What a rule demands of one neighboring cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NeighborState {
     Empty,
     Full,
-    /// Matches either; only rpp can express this.
-    // TODO: no producer until the tile config dialog exists.
-    #[allow(dead_code)]
     Any,
+}
+
+impl NeighborState {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Empty => Self::Full,
+            Self::Full => Self::Any,
+            Self::Any => Self::Empty,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        match self {
+            Self::Empty => Self::Any,
+            Self::Full => Self::Empty,
+            Self::Any => Self::Full,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,9 +37,7 @@ pub struct Neighbor {
     pub dx: i32,
     /// Positive downwards.
     pub dy: i32,
-    /// Identifier rpp uses in `IsFullAt` / `IsEmptyAt`.
     pub rpp_name: &'static str,
-    /// Position in the packed 8-bit form, most significant first.
     pub bit: u32,
 }
 
@@ -50,7 +61,6 @@ pub const NEIGHBORS: [Neighbor; NEIGHBOR_COUNT] = [
     neighbor(1, 1, "bottomRight", 0),
 ];
 
-/// The 8 neighbor states of one tile, in index order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Neighborhood {
     states: [NeighborState; NEIGHBOR_COUNT],
@@ -61,6 +71,10 @@ impl Neighborhood {
         Self {
             states: [state; NEIGHBOR_COUNT],
         }
+    }
+
+    pub fn state(&self, index: usize) -> NeighborState {
+        self.states[index]
     }
 
     pub fn set_state(&mut self, index: usize, state: NeighborState) {
@@ -113,6 +127,18 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), NEIGHBOR_COUNT);
+    }
+
+    #[test]
+    fn cycling_a_state_three_times_returns_to_the_start() {
+        for state in [
+            NeighborState::Empty,
+            NeighborState::Full,
+            NeighborState::Any,
+        ] {
+            assert_eq!(state.next().next().next(), state);
+            assert_eq!(state.next().previous(), state);
+        }
     }
 
     #[test]

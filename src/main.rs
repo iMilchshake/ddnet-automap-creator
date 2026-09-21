@@ -24,7 +24,6 @@ fn main() -> eframe::Result {
     )
 }
 
-/// Called once the wasm module is instantiated.
 #[cfg(target_arch = "wasm32")]
 fn main() {
     use eframe::wasm_bindgen::JsCast as _;

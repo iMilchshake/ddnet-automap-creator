@@ -1,13 +1,8 @@
-//! Decoding a tileset image into the 16×16 grid the editor works on.
-//!
-//! Free of UI types, so it stays testable without a render context.
-
 use image::{GenericImageView, RgbaImage};
 use thiserror::Error;
 
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
 
-/// A tileset is always 16×16 tiles, whatever the image resolution is.
 pub const TILESET_SIDE: u32 = 16;
 pub const TILE_COUNT: usize = (TILESET_SIDE * TILESET_SIDE) as usize;
 
@@ -24,10 +19,7 @@ pub enum TilesetError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileKind {
-    /// Fully transparent, so there is no art to place.
     Locked,
-    /// Seed for the config dialog, derived from the alpha channel. A
-    /// suggestion the user confirms, never part of the output.
     Guess(Neighborhood),
 }
 
@@ -40,16 +32,13 @@ pub struct TileSlice {
 
 #[derive(Debug, Clone)]
 pub struct Tileset {
-    /// File name without its extension; names the generated files.
     pub stem: String,
     pub image_size: [u32; 2],
-    /// Tile size in pixels, floor-divided.
     pub tile_size: [u32; 2],
     pub tiles: Vec<TileSlice>,
     pub rgba: RgbaImage,
 }
 
-/// Decodes an image and slices it into the 256 tiles of a DDNet tileset.
 pub fn decode_tileset(bytes: &[u8], stem: &str) -> Result<Tileset, TilesetError> {
     let rgba = image::load_from_memory(bytes)?.to_rgba8();
     let (width, height) = rgba.dimensions();
@@ -77,8 +66,6 @@ pub fn decode_tileset(bytes: &[u8], stem: &str) -> Result<Tileset, TilesetError>
     })
 }
 
-/// Strips the last extension. Browser file inputs allow arbitrary names, so
-/// the result can be empty.
 pub fn file_stem(file_name: &str) -> String {
     match file_name.rsplit_once('.') {
         Some((stem, _extension)) => stem.to_owned(),
@@ -86,8 +73,8 @@ pub fn file_stem(file_name: &str) -> String {
     }
 }
 
-/// Origins follow the fractional stride, so slicing an image whose size is not
-/// a multiple of 16 does not drift off the art by the end of a row.
+/// Origins follow the fractional stride, so images whose size is not a
+/// multiple of 16 do not drift off the art by the end of a row.
 fn slice_tile(rgba: &RgbaImage, index: usize, tile_size: [u32; 2], stride: [f32; 2]) -> TileSlice {
     let column = index as u32 % TILESET_SIDE;
     let row = index as u32 / TILESET_SIDE;
@@ -127,8 +114,6 @@ fn is_fully_transparent(rgba: &RgbaImage, origin: [u32; 2], tile_size: [u32; 2])
         .all(|(_x, _y, pixel)| pixel.0[3] == 0)
 }
 
-/// Each neighbor index samples the matching edge or corner of the tile,
-/// opaque meaning solid.
 fn guess_neighborhood(rgba: &RgbaImage, origin: [u32; 2], tile_size: [u32; 2]) -> Neighborhood {
     let sample_x = [0, tile_size[0] / 2, tile_size[0] - 1];
     let sample_y = [0, tile_size[1] / 2, tile_size[1] - 1];

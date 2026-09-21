@@ -1,8 +1,3 @@
-//! Opening a file behind one non-blocking API.
-//!
-//! Natively the dialog blocks and runs on its own thread, on the web it is a
-//! future. Both send into the same channel, so the UI only polls.
-
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use thiserror::Error;
@@ -11,7 +6,6 @@ const IMAGE_EXTENSIONS: [&str; 4] = ["png", "jpg", "jpeg", "bmp"];
 
 #[derive(Debug, Clone)]
 pub struct PickedFile {
-    /// File name including the extension.
     pub name: String,
     pub bytes: Vec<u8>,
 }
@@ -38,13 +32,10 @@ impl FilePicker {
         Self { sender, receiver }
     }
 
-    /// Opens a dialog filtered to tileset images; the result arrives at a later
-    /// [`FilePicker::poll`].
     pub fn open_image(&self) {
         spawn_dialog(self.sender.clone());
     }
 
-    /// Returns a finished pick, if one is waiting. Call once per frame.
     pub fn poll(&self) -> Option<PickResult> {
         self.receiver.try_recv().ok()
     }
