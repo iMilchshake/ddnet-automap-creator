@@ -16,6 +16,18 @@ use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 
 const SIDE_PANEL_WIDTH: f32 = 260.0;
 const SWATCH_SIZE: f32 = 12.0;
+const SELECTION_PICKER_WIDTH: f32 = 70.0;
+
+// Only egui's proportional chain is available here: Ubuntu-Light, NotoEmoji and
+// emoji-icon-font. Arrows like ▲ ▼ live in Hack-Regular, the monospace family,
+// so they render as blank boxes on a button.
+const RAISE_ICON: &str = "⏶";
+const LOWER_ICON: &str = "⏷";
+const REMOVE_ICON: &str = "✖";
+
+const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With groups selected, drag \
+                                 across the tileset to add one, click one to edit it, right-click \
+                                 to remove it.";
 
 enum GroupCommand {
     Configure(usize),
@@ -189,8 +201,38 @@ impl AutomapperApp {
                         "\nGenerates rpp sources for DDNet automappers."
                     ));
                 });
+
+                ui.separator();
+                self.show_selection_picker(ui);
             });
         });
+    }
+
+    fn show_selection_picker(&mut self, ui: &mut Ui) {
+        let has_image = matches!(self.workspace, Workspace::Ready(_));
+        let was_defining = self.define_groups;
+
+        ui.add_enabled_ui(has_image, |ui| {
+            ui.label("Selecting:");
+            egui::ComboBox::from_id_salt("selection_mode")
+                .selected_text(selection_label(self.define_groups))
+                .width(SELECTION_PICKER_WIDTH)
+                .show_ui(ui, |ui| {
+                    for defining in [false, true] {
+                        ui.selectable_value(
+                            &mut self.define_groups,
+                            defining,
+                            selection_label(defining),
+                        );
+                    }
+                })
+                .response
+                .on_hover_text(SELECTION_TOOLTIP);
+        });
+
+        if self.define_groups != was_defining {
+            self.drag_anchor = None;
+        }
     }
 
     fn show_status_bar(&mut self, ui: &mut Ui) {
@@ -243,11 +285,6 @@ impl AutomapperApp {
                     ui.separator();
 
                     ui.heading("Group editor");
-                    ui.checkbox(&mut self.define_groups, "Define groups")
-                        .on_hover_text(
-                            "Drag across the tileset to add a group, click one to edit it, \
-                             right-click to remove it.",
-                        );
                     ui.weak(
                         "Groups are placed top to bottom, and whoever comes first gets first pick.",
                     );
@@ -283,13 +320,25 @@ impl AutomapperApp {
                 ui.painter()
                     .rect_filled(rect, 2.0, grid::group_color(index));
 
-                if ui.button("▲").clicked() {
+                if ui
+                    .button(RAISE_ICON)
+                    .on_hover_text("Higher priority")
+                    .clicked()
+                {
                     *pending = Some(GroupCommand::Raise(index));
                 }
-                if ui.button("▼").clicked() {
+                if ui
+                    .button(LOWER_ICON)
+                    .on_hover_text("Lower priority")
+                    .clicked()
+                {
                     *pending = Some(GroupCommand::Lower(index));
                 }
-                if ui.button("✕").clicked() {
+                if ui
+                    .button(REMOVE_ICON)
+                    .on_hover_text("Remove group")
+                    .clicked()
+                {
                     *pending = Some(GroupCommand::Remove(index));
                 }
 
@@ -347,10 +396,7 @@ impl AutomapperApp {
         }
 
         if let Some(tile) = response.clicked
-            && !matches!(
-                tile_state(&loaded.tileset, &self.project, tile),
-                TileState::Locked
-            )
+            && tile_state(&loaded.tileset, &self.project, tile).is_editable()
         {
             let rule = seed_rule(&loaded.tileset, &self.project, tile);
             self.dialog = Some(TileDialog::new(tile, rule));
@@ -404,13 +450,13 @@ impl AutomapperApp {
             chance: Chance::FULL,
         };
 
-        if group
+        if !group
             .footprint()
             .iter()
-            .any(|tile| self.project.group_at(*tile).is_some())
+            .all(|tile| self.project.is_free(*tile))
         {
             self.status
-                .warning(ctx, "That rectangle overlaps an existing group");
+                .warning(ctx, "Those tiles already belong to a group or a rule");
             return;
         }
         if let Err(error) = group.validate() {
@@ -434,8 +480,12 @@ impl AutomapperApp {
             return;
         };
 
-        match tile_state(&loaded.tileset, &self.project, tile) {
-            TileState::Locked => {}
+        let state = tile_state(&loaded.tileset, &self.project, tile);
+        if !state.is_editable() {
+            return;
+        }
+
+        match state {
             TileState::Removed => {
                 self.project.restore(tile);
                 self.status.info(ctx, format!("Tile {tile} restored"));
@@ -485,6 +535,7 @@ impl AutomapperApp {
 fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
     match tile_state(tileset, project, tile) {
         TileState::Locked => format!("Tile {tile} · locked"),
+        TileState::Grouped => format!("Tile {tile} · in a group"),
         TileState::Removed => format!("Tile {tile} · removed"),
         TileState::Guessed(guess) => {
             format!("Tile {tile} · guess {}", format_neighborhood(guess))
@@ -547,4 +598,11 @@ fn describe_group(group: &TileGroup) -> String {
     }
 
     text
+}
+
+fn selection_label(defining_groups: bool) -> &'static str {
+    match defining_groups {
+        true => "Groups",
+        false => "Tiles",
+    }
 }

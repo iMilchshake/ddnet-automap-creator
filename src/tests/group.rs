@@ -64,12 +64,12 @@ fn the_decorate_ring_surrounds_the_footprint() {
 
 #[test]
 fn names_must_be_letters_and_digits_starting_with_a_letter() {
-    assert!(group("bones", 1, 1, 1).validate().is_ok());
-    assert!(group("group0", 1, 1, 1).validate().is_ok());
+    assert!(group("bones", 1, 2, 1).validate().is_ok());
+    assert!(group("group0", 1, 2, 1).validate().is_ok());
 
     for bad in ["", "0bones", "big_bones", "bones!", "bönes", " bones"] {
         assert_eq!(
-            group(bad, 1, 1, 1).validate(),
+            group(bad, 1, 2, 1).validate(),
             Err(GroupError::Name(bad.to_owned())),
             "{bad}"
         );
@@ -77,21 +77,29 @@ fn names_must_be_letters_and_digits_starting_with_a_letter() {
 }
 
 #[test]
-fn a_group_cannot_be_empty_start_at_zero_or_leave_the_tileset() {
-    assert_eq!(group("a", 1, 0, 1).validate(), Err(GroupError::Degenerate));
+fn a_group_must_cover_at_least_two_tiles() {
+    assert_eq!(group("a", 1, 0, 1).validate(), Err(GroupError::TooSmall));
+    assert_eq!(group("a", 1, 1, 1).validate(), Err(GroupError::TooSmall));
+
+    assert!(group("a", 1, 2, 1).validate().is_ok());
+    assert!(group("a", 1, 1, 2).validate().is_ok());
+}
+
+#[test]
+fn a_group_cannot_start_at_zero_or_leave_the_tileset() {
     assert_eq!(
-        group("a", 0, 1, 1).validate(),
+        group("a", 0, 1, 2).validate(),
         Err(GroupError::StartsAtZero)
     );
 
     assert!(group("a", 15, 2, 1).validate().is_err());
     assert!(group("a", 240, 1, 2).validate().is_err());
-    assert!(group("a", 239, 1, 1).validate().is_ok());
+    assert!(group("a", 239, 1, 2).validate().is_ok());
 }
 
 #[test]
 fn a_list_refuses_duplicate_names_and_shared_tiles() {
-    let listed = [group("bones", 64, 2, 2), group("bones", 100, 1, 1)];
+    let listed = [group("bones", 64, 2, 2), group("bones", 100, 2, 1)];
     assert_eq!(
         validate_all(&listed),
         Err(GroupError::DuplicateName("bones".to_owned()))

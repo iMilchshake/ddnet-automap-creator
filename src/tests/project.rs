@@ -1,6 +1,7 @@
+use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::project::Project;
-use crate::model::tile::TileRule;
+use crate::model::tile::{Chance, TileRule};
 
 fn some_rule() -> TileRule {
     TileRule::new(Neighborhood::uniform(NeighborState::Full))
@@ -34,4 +35,28 @@ fn restoring_leaves_the_tile_unconfigured() {
 
     assert!(!project.is_removed(7));
     assert!(project.rule(7).is_none());
+}
+
+#[test]
+fn a_tile_is_free_only_when_no_rule_and_no_group_claim_it() {
+    let mut project = Project::default();
+    assert!(project.is_free(64));
+
+    project.set_rule(64, some_rule());
+    assert!(!project.is_free(64));
+
+    let mut grouped = Project::default();
+    grouped.add_group(TileGroup {
+        name: "bones".to_owned(),
+        top_left: 64,
+        width: 2,
+        height: 2,
+        mode: GroupMode::Fill,
+        chance: Chance::FULL,
+    });
+
+    for tile in [64, 65, 80, 81] {
+        assert!(!grouped.is_free(tile), "{tile}");
+    }
+    assert!(grouped.is_free(66));
 }

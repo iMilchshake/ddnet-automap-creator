@@ -18,6 +18,7 @@ const CHECKER_DARK: Color32 = Color32::from_gray(48);
 const CONFIGURED_COLOR: Color32 = Color32::from_rgb(120, 200, 120);
 const REMOVED_COLOR: Color32 = Color32::from_rgb(220, 110, 110);
 const REMOVED_TINT: Color32 = Color32::from_gray(85);
+const CONFIGURED_OUTLINE: Color32 = Color32::from_gray(205);
 
 /// Hues a golden angle apart, so neighbouring groups never share a shade.
 const HUE_STEP: f32 = 137.5 / 360.0;
@@ -82,24 +83,33 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         let uv = Rect::from_min_max(tile.uv_min.into(), tile.uv_max.into());
         painter.image(view.texture.id(), cell, uv, tint);
 
+        if matches!(state, TileState::Configured(_)) {
+            painter.rect_stroke(
+                cell,
+                0.0,
+                Stroke::new(2.0, CONFIGURED_OUTLINE),
+                StrokeKind::Inside,
+            );
+        }
+
         paint_badge(&painter, cell, cell_size, state, ui.visuals());
     }
 
-    if view.group_editing {
-        for (index, group) in view.project.groups().iter().enumerate() {
-            paint_group(&painter, rect, cell_size, group, group_color(index));
-        }
+    for (index, group) in view.project.groups().iter().enumerate() {
+        paint_group(&painter, rect, cell_size, group, group_color(index));
+    }
 
-        if let (Some(anchor), Some(corner)) = (view.drag_anchor, pointed.or(hovered)) {
-            paint_selection(
-                &painter,
-                rect,
-                cell_size,
-                anchor,
-                corner,
-                ui.visuals().selection.stroke.color,
-            );
-        }
+    if view.group_editing
+        && let (Some(anchor), Some(corner)) = (view.drag_anchor, pointed.or(hovered))
+    {
+        paint_selection(
+            &painter,
+            rect,
+            cell_size,
+            anchor,
+            corner,
+            ui.visuals().selection.stroke.color,
+        );
     }
 
     if let Some(index) = hovered {
@@ -112,8 +122,8 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
     }
 
     let response = match hovered.and_then(|index| describe_group(view.project, index)) {
-        Some(text) if view.group_editing => response.on_hover_text(text),
-        _ => response,
+        Some(text) => response.on_hover_text(text),
+        None => response,
     };
 
     GridResponse {
@@ -253,7 +263,7 @@ fn paint_badge(
     );
 
     match state {
-        TileState::Locked => {}
+        TileState::Locked | TileState::Grouped => {}
         TileState::Guessed(_) => {
             painter.text(
                 mark.right_top(),

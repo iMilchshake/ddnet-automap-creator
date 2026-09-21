@@ -6,15 +6,26 @@ use crate::tileset::{TileKind, Tileset};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TileState {
     Locked,
+    Grouped,
     Guessed(Neighborhood),
     Configured(TileRule),
     Removed,
+}
+
+impl TileState {
+    pub fn is_editable(self) -> bool {
+        !matches!(self, Self::Locked | Self::Grouped)
+    }
 }
 
 pub fn tile_state(tileset: &Tileset, project: &Project, tile: usize) -> TileState {
     let TileKind::Guess(guess) = tileset.tiles[tile].kind else {
         return TileState::Locked;
     };
+
+    if project.group_at(tile).is_some() {
+        return TileState::Grouped;
+    }
 
     match project.rule(tile) {
         Some(rule) => TileState::Configured(*rule),

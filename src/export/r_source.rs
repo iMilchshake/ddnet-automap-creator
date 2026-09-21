@@ -15,8 +15,8 @@ pub enum ExportError {
     #[error("no tile and no group is configured, there is nothing to export")]
     NothingConfigured,
 
-    #[error("group `{group}` is anchored on tile {tile}, which is also configured on its own")]
-    AnchorIsConfigured { group: String, tile: usize },
+    #[error("group `{group}` covers tile {tile}, which is also configured on its own")]
+    TileIsConfigured { group: String, tile: usize },
 
     #[error(transparent)]
     Group(#[from] GroupError),
@@ -34,7 +34,7 @@ pub fn render(rule_set: &RuleSet) -> Result<String, ExportError> {
         return Err(ExportError::NothingConfigured);
     }
     group::validate_all(rule_set.groups)?;
-    reject_claimed_anchors(rule_set)?;
+    reject_claimed_tiles(rule_set)?;
 
     let mut lines = vec![
         "// created with ddnet-automap-creator (https://github.com/iMilchshake/ddnet-automap-creator)"
@@ -79,17 +79,15 @@ pub fn render(rule_set: &RuleSet) -> Result<String, ExportError> {
     Ok(lines.join("\n"))
 }
 
-fn reject_claimed_anchors(rule_set: &RuleSet) -> Result<(), ExportError> {
+fn reject_claimed_tiles(rule_set: &RuleSet) -> Result<(), ExportError> {
     for group in rule_set.groups {
-        if rule_set
-            .tiles
-            .iter()
-            .any(|(tile, _)| *tile == group.top_left)
-        {
-            return Err(ExportError::AnchorIsConfigured {
-                group: group.name.clone(),
-                tile: group.top_left,
-            });
+        for (tile, _) in rule_set.tiles {
+            if group.covers(*tile) {
+                return Err(ExportError::TileIsConfigured {
+                    group: group.name.clone(),
+                    tile: *tile,
+                });
+            }
         }
     }
 

@@ -253,23 +253,17 @@ fn a_rule_set_without_groups_never_mentions_objects() {
 }
 
 #[test]
-fn an_anchor_that_is_also_a_configured_tile_is_refused() {
-    let tiles = [(64, rule(Neighborhood::default(), 100.0, false))];
+fn a_tile_cannot_be_configured_and_grouped_at_once() {
     let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
 
-    let error = emit_with_groups(&tiles, &groups).unwrap_err();
-    assert!(matches!(
-        error,
-        ExportError::AnchorIsConfigured { tile: 64, .. }
-    ));
-}
-
-#[test]
-fn a_non_anchor_footprint_tile_may_stay_configured() {
-    let tiles = [(65, rule(Neighborhood::default(), 100.0, false))];
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
-
-    assert!(emit_with_groups(&tiles, &groups).is_ok());
+    for tile in [64, 65, 80, 81] {
+        let tiles = [(tile, rule(Neighborhood::default(), 100.0, false))];
+        let error = emit_with_groups(&tiles, &groups).unwrap_err();
+        assert!(
+            matches!(error, ExportError::TileIsConfigured { .. }),
+            "tile {tile}"
+        );
+    }
 }
 
 #[test]

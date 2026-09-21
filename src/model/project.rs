@@ -77,6 +77,10 @@ impl Project {
         }
     }
 
+    pub fn is_free(&self, tile: usize) -> bool {
+        self.rule(tile).is_none() && self.group_at(tile).is_none()
+    }
+
     pub fn group_at(&self, tile: usize) -> Option<usize> {
         self.groups.iter().position(|group| group.covers(tile))
     }

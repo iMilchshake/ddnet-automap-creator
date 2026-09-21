@@ -23,8 +23,8 @@ pub enum GroupError {
     #[error("`{0}` must start with a letter and hold only letters and digits")]
     Name(String),
 
-    #[error("a group must be at least one tile wide and one tile tall")]
-    Degenerate,
+    #[error("a group must cover at least two tiles")]
+    TooSmall,
 
     #[error("a group cannot start at tile 0, which is always empty")]
     StartsAtZero,
@@ -88,8 +88,8 @@ impl TileGroup {
         if !is_identifier(&self.name) {
             return Err(GroupError::Name(self.name.clone()));
         }
-        if self.width == 0 || self.height == 0 {
-            return Err(GroupError::Degenerate);
+        if self.width * self.height < 2 {
+            return Err(GroupError::TooSmall);
         }
         if self.top_left == 0 {
             return Err(GroupError::StartsAtZero);
