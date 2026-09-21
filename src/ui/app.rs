@@ -1,6 +1,8 @@
 use egui::{Context, TextureHandle, TextureOptions, Ui};
 
+use crate::export::r_source::{self, RuleSet};
 use crate::file_picker::{FilePicker, PickedFile};
+use crate::file_saver::FileSaver;
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::project::Project;
 use crate::tileset::{self, Tileset};
@@ -24,7 +26,9 @@ struct LoadedTileset {
 pub struct AutomapperApp {
     workspace: Workspace,
     project: Project,
+    rule_set_name: String,
     picker: FilePicker,
+    saver: FileSaver,
     status: StatusLine,
     dialog: Option<TileDialog>,
     hovered_tile: Option<usize>,
@@ -35,7 +39,9 @@ impl Default for AutomapperApp {
         Self {
             workspace: Workspace::NoImage,
             project: Project::default(),
+            rule_set_name: String::new(),
             picker: FilePicker::new(),
+            saver: FileSaver::new(),
             status: StatusLine::default(),
             dialog: None,
             hovered_tile: None,
@@ -48,11 +54,12 @@ impl eframe::App for AutomapperApp {
         let ctx = ui.ctx().clone();
 
         self.receive_picked_file(&ctx);
+        self.receive_saved_file(&ctx);
         self.handle_shortcuts(&ctx);
 
         self.show_menu_bar(ui);
         self.show_status_bar(ui);
-        self.show_side_panel(ui);
+        self.show_side_panel(ui, &ctx);
         self.show_tileset(ui, &ctx);
         self.show_dialog(&ctx);
     }
@@ -66,6 +73,37 @@ impl AutomapperApp {
 
         match result {
             Ok(picked) => self.load_tileset(ctx, picked),
+            Err(error) => self.status.warning(ctx, error.to_string()),
+        }
+    }
+
+    fn receive_saved_file(&mut self, ctx: &Context) {
+        let Some(result) = self.saver.poll() else {
+            return;
+        };
+
+        match result {
+            Ok(name) => self.status.info(ctx, format!("Saved {name}")),
+            Err(error) => self.status.warning(ctx, error.to_string()),
+        }
+    }
+
+    fn export_rules(&mut self, ctx: &Context) {
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
+        };
+
+        let rules = self.project.rules();
+        let rule_set = RuleSet {
+            image_stem: &loaded.tileset.stem,
+            name: &self.rule_set_name,
+            tiles: &rules,
+        };
+
+        match r_source::render(&rule_set) {
+            Ok(source) => self
+                .saver
+                .save_text(&format!("{}.r", loaded.tileset.stem), source),
             Err(error) => self.status.warning(ctx, error.to_string()),
         }
     }
@@ -93,6 +131,7 @@ impl AutomapperApp {
         );
 
         self.project = Project::default();
+        self.rule_set_name = stem.clone();
         self.dialog = None;
         self.hovered_tile = None;
         self.workspace = Workspace::Ready(LoadedTileset { tileset, texture });
@@ -149,8 +188,9 @@ impl AutomapperApp {
         });
     }
 
-    fn show_side_panel(&mut self, ui: &mut Ui) {
+    fn show_side_panel(&mut self, ui: &mut Ui, ctx: &Context) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
+        let mut export = false;
 
         egui::Panel::right("tools")
             .resizable(false)
@@ -158,11 +198,20 @@ impl AutomapperApp {
             .show(ui, |ui| {
                 ui.add_enabled_ui(has_image, |ui| {
                     ui.heading("Generator");
-                    // TODO: editable rule-set name, generate, export.
-                    if let Workspace::Ready(loaded) = &self.workspace {
-                        ui.label(format!("Rule set: {}", loaded.tileset.stem));
-                    }
+                    ui.horizontal(|ui| {
+                        ui.label("Rule set");
+                        ui.text_edit_singleline(&mut self.rule_set_name);
+                    });
                     ui.label(format!("{} tiles configured", self.project.rule_count()));
+
+                    ui.add_space(4.0);
+                    let exportable = self.project.rule_count() > 0;
+                    if ui
+                        .add_enabled(exportable, egui::Button::new("Export .r…"))
+                        .clicked()
+                    {
+                        export = true;
+                    }
 
                     ui.separator();
 
@@ -171,6 +220,10 @@ impl AutomapperApp {
                     ui.label("Not implemented yet.");
                 });
             });
+
+        if export {
+            self.export_rules(ctx);
+        }
     }
 
     fn show_tileset(&mut self, ui: &mut Ui, ctx: &Context) {

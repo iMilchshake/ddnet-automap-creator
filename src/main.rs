@@ -1,7 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod export;
 mod file_picker;
+mod file_saver;
 mod model;
+#[cfg(test)]
+mod tests;
 mod tileset;
 mod ui;
 

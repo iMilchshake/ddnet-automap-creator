@@ -1,8 +1,6 @@
-use std::cmp::Ordering;
-
 use egui::{Color32, Context, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui, Vec2};
 
-use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::neighbor::{NeighborState, Neighborhood, neighbor_index_at};
 use crate::model::tile::{Chance, TileMods, TileRule};
 use crate::tileset::Tileset;
 
@@ -112,12 +110,12 @@ impl TileDialog {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::splat(CELL_GAP);
 
-            for row in 0..3 {
+            for dy in -1..=1 {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::splat(CELL_GAP);
 
-                    for column in 0..3 {
-                        match neighbor_index(row, column) {
+                    for dx in -1..=1 {
+                        match neighbor_index_at(dx, dy) {
                             Some(index) => self.show_state_cell(ui, index),
                             None => show_tile_preview(ui, tileset, texture, self.tile),
                         }
@@ -175,17 +173,6 @@ impl TileDialog {
         })
         .response
         .on_hover_text(CHANCE_TOOLTIP);
-    }
-}
-
-fn neighbor_index(row: usize, column: usize) -> Option<usize> {
-    const CENTER: usize = 4;
-
-    let position = row * 3 + column;
-    match position.cmp(&CENTER) {
-        Ordering::Less => Some(position),
-        Ordering::Equal => None,
-        Ordering::Greater => Some(position - 1),
     }
 }
 
@@ -254,29 +241,4 @@ fn paint_checker(painter: &egui::Painter, rect: Rect, light: Color32, dark: Colo
     let half = rect.size() / 2.0;
     painter.rect_filled(Rect::from_min_size(rect.min, half), 0.0, light);
     painter.rect_filled(Rect::from_min_size(rect.center(), half), 0.0, light);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::neighbor_index;
-
-    #[test]
-    fn neighbor_indices_skip_the_center_in_reading_order() {
-        let indices: Vec<Option<usize>> = (0..3)
-            .flat_map(|row| (0..3).map(move |column| neighbor_index(row, column)))
-            .collect();
-
-        let expected = [
-            Some(0),
-            Some(1),
-            Some(2),
-            Some(3),
-            None,
-            Some(4),
-            Some(5),
-            Some(6),
-            Some(7),
-        ];
-        assert_eq!(indices, expected);
-    }
 }

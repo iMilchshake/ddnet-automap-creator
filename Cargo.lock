@@ -796,6 +796,7 @@ dependencies = [
  "egui",
  "env_logger",
  "image",
+ "js-sys",
  "log",
  "rfd",
  "thiserror 2.0.20",
