@@ -462,7 +462,10 @@ impl AutomapperApp {
                     *pending = Some(GroupCommand::Remove(index));
                 }
 
-                let label = ui.selectable_label(false, describe_group(group));
+                let description = describe_group(group);
+                let label = ui
+                    .add(egui::Button::selectable(false, description.as_str()).truncate())
+                    .on_hover_text(description);
                 if label.clicked() {
                     *pending = Some(GroupCommand::Configure(index));
                 }
