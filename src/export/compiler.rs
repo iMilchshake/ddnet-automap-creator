@@ -68,7 +68,7 @@ mod native {
     use std::sync::mpsc::Sender;
 
     const BASE_SOURCE: &str = include_str!("../../vendor/rpp/rules++/base.r");
-    const RPP_BINARY: &str = "rpp";
+    const RPP_BINARY: &str = env!("RPP_BINARY");
 
     pub fn spawn(sender: Sender<CompileResult>, source: String, output_file: String) {
         std::thread::spawn(move || {
@@ -108,11 +108,8 @@ mod native {
             .args(["-p", "input.r"])
             .current_dir(directory)
             .output()
-            .map_err(|_| {
-                CompileError::Unavailable(format!(
-                    "`{RPP_BINARY}` is not on PATH, build it from vendor/rpp to compile rules \
-                     on desktop"
-                ))
+            .map_err(|error| {
+                CompileError::Unavailable(format!("could not run {RPP_BINARY}: {error}"))
             })?;
 
         collect(finished, directory, output_file)
