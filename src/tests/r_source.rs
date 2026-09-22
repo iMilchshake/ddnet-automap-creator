@@ -22,7 +22,7 @@ fn emit_with_groups(
 ) -> Result<String, ExportError> {
     render(&RuleSet {
         image_stem: "grass_main",
-        name: "Grass Main",
+        name: "Grass_Main",
         tiles,
         groups,
     })
@@ -71,7 +71,7 @@ fn the_header_names_the_image_and_the_rule_set() {
     ));
     assert!(source.contains("#include \"base.r\""));
     assert!(source.contains("#output \"grass_main.rules\""));
-    assert!(source.contains("AutoMapper(\"Grass Main\");"));
+    assert!(source.contains("AutoMapper(\"Grass_Main\");"));
     assert!(source.contains("NewRun();"));
     assert!(source.ends_with('\n'));
 }
@@ -140,6 +140,23 @@ fn a_symmetric_neighborhood_keeps_only_the_first_of_its_duplicates() {
 
     assert_eq!(body(&source).len(), 1);
     assert!(body(&source)[0].starts_with("Insert(7)."));
+}
+
+#[test]
+fn a_rule_set_name_outside_the_allowed_characters_is_refused() {
+    let tiles = [(7, rule(outer_corner(), 100.0, false))];
+
+    for name in ["", "grass main", "grass\"main", &"g".repeat(129)] {
+        let error = render(&RuleSet {
+            image_stem: "grass_main",
+            name,
+            tiles: &tiles,
+            groups: &[],
+        })
+        .unwrap_err();
+
+        assert!(matches!(error, ExportError::Name(_)), "accepted `{name}`");
+    }
 }
 
 #[test]

@@ -15,6 +15,9 @@ pub enum ExportError {
     #[error("no tile and no group is configured, there is nothing to export")]
     NothingConfigured,
 
+    #[error("rule set name `{0}` must be 1 to 128 letters, digits, `_` or `-`")]
+    Name(String),
+
     #[error("group `{group}` covers tile {tile}, which is also configured on its own")]
     TileIsConfigured { group: String, tile: usize },
 
@@ -36,6 +39,9 @@ pub fn output_file(image_stem: &str) -> String {
 pub fn render(rule_set: &RuleSet) -> Result<String, ExportError> {
     if rule_set.tiles.is_empty() && rule_set.groups.is_empty() {
         return Err(ExportError::NothingConfigured);
+    }
+    if !is_valid_name(rule_set.name) {
+        return Err(ExportError::Name(rule_set.name.to_owned()));
     }
     group::validate_all(rule_set.groups)?;
     reject_claimed_tiles(rule_set)?;
@@ -81,6 +87,13 @@ pub fn render(rule_set: &RuleSet) -> Result<String, ExportError> {
     lines.push(String::new());
 
     Ok(lines.join("\n"))
+}
+
+fn is_valid_name(name: &str) -> bool {
+    (1..=128).contains(&name.len())
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
 }
 
 fn reject_claimed_tiles(rule_set: &RuleSet) -> Result<(), ExportError> {
