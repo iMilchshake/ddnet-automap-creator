@@ -1,8 +1,9 @@
 use egui::{Context, TextureHandle, TextureOptions, Ui, Vec2};
 
 use crate::blueprint;
-use crate::export::r_source::{self, RuleSet};
-use crate::file_filter::{BLUEPRINT, RPP_SOURCE, TILESET_IMAGE};
+use crate::export::compiler::{Compiled, RulesCompiler};
+use crate::export::r_source::{self, ExportError, RuleSet};
+use crate::file_filter::{BLUEPRINT, RPP_SOURCE, RULES, TILESET_IMAGE};
 use crate::file_picker::{FilePicker, PickedFile};
 use crate::file_saver::FileSaver;
 use crate::model::group::{GroupMode, TileGroup};
@@ -55,6 +56,7 @@ pub struct AutomapperApp {
     picker: FilePicker,
     blueprint_picker: FilePicker,
     saver: FileSaver,
+    compiler: RulesCompiler,
     status: StatusLine,
     dialog: Option<TileDialog>,
     group_dialog: Option<GroupDialog>,
@@ -72,6 +74,7 @@ impl Default for AutomapperApp {
             picker: FilePicker::new(TILESET_IMAGE),
             blueprint_picker: FilePicker::new(BLUEPRINT),
             saver: FileSaver::new(),
+            compiler: RulesCompiler::new(),
             status: StatusLine::default(),
             dialog: None,
             group_dialog: None,
@@ -89,6 +92,7 @@ impl eframe::App for AutomapperApp {
         self.receive_picked_file(&ctx);
         self.receive_blueprint_file(&ctx);
         self.receive_saved_file(&ctx);
+        self.receive_compiled_rules(&ctx);
         self.handle_shortcuts(&ctx);
 
         self.show_menu_bar(ui, &ctx);
@@ -97,6 +101,10 @@ impl eframe::App for AutomapperApp {
         self.show_tileset(ui, &ctx);
         self.show_dialog(&ctx);
         self.show_group_dialog(&ctx);
+
+        if self.compiler.is_running() {
+            ctx.request_repaint();
+        }
     }
 }
 
@@ -177,24 +185,42 @@ impl AutomapperApp {
         }
     }
 
-    fn export_rules(&mut self, ctx: &Context) {
+    fn export_source(&mut self, ctx: &Context) {
         let Workspace::Ready(loaded) = &self.workspace else {
             return;
         };
 
-        let rules = self.project.rules();
-        let rule_set = RuleSet {
-            image_stem: &loaded.tileset.stem,
-            name: &self.rule_set_name,
-            tiles: &rules,
-            groups: self.project.groups(),
+        let stem = loaded.tileset.stem.clone();
+        match render_source(&self.project, &stem, &self.rule_set_name) {
+            Ok(source) => self
+                .saver
+                .save_text(RPP_SOURCE, &format!("{stem}.r"), source),
+            Err(error) => self.status.warning(ctx, error.to_string()),
+        }
+    }
+
+    fn compile_rules(&mut self, ctx: &Context) {
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
         };
 
-        match r_source::render(&rule_set) {
+        let stem = loaded.tileset.stem.clone();
+        match render_source(&self.project, &stem, &self.rule_set_name) {
             Ok(source) => {
-                self.saver
-                    .save_text(RPP_SOURCE, &format!("{}.r", loaded.tileset.stem), source)
+                self.compiler.start(source, r_source::output_file(&stem));
+                self.status.info(ctx, "Compiling with rpp…");
             }
+            Err(error) => self.status.warning(ctx, error.to_string()),
+        }
+    }
+
+    fn receive_compiled_rules(&mut self, ctx: &Context) {
+        let Some(result) = self.compiler.poll() else {
+            return;
+        };
+
+        match result {
+            Ok(Compiled { file_name, rules }) => self.saver.save_text(RULES, &file_name, rules),
             Err(error) => self.status.warning(ctx, error.to_string()),
         }
     }
@@ -333,6 +359,7 @@ impl AutomapperApp {
     fn show_side_panel(&mut self, ui: &mut Ui, ctx: &Context) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
         let mut export = false;
+        let mut compile = false;
         let mut pending = None;
 
         egui::Panel::right("tools")
@@ -354,12 +381,23 @@ impl AutomapperApp {
                     ui.add_space(4.0);
                     let exportable =
                         self.project.rule_count() > 0 || !self.project.groups().is_empty();
-                    if ui
-                        .add_enabled(exportable, egui::Button::new("Export .r…"))
-                        .clicked()
-                    {
-                        export = true;
-                    }
+                    let can_compile = exportable && !self.compiler.is_running();
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(can_compile, egui::Button::new("Export .rules…"))
+                            .on_hover_text("Compiles the rule set with rpp.")
+                            .clicked()
+                        {
+                            compile = true;
+                        }
+                        if ui
+                            .add_enabled(exportable, egui::Button::new("Export .r…"))
+                            .on_hover_text("Saves the rpp source instead of compiling it.")
+                            .clicked()
+                        {
+                            export = true;
+                        }
+                    });
 
                     ui.separator();
 
@@ -382,7 +420,10 @@ impl AutomapperApp {
         }
 
         if export {
-            self.export_rules(ctx);
+            self.export_source(ctx);
+        }
+        if compile {
+            self.compile_rules(ctx);
         }
     }
 
@@ -684,4 +725,20 @@ fn selection_label(defining_groups: bool) -> &'static str {
         true => "Groups",
         false => "Tiles",
     }
+}
+
+fn render_source(
+    project: &Project,
+    image_stem: &str,
+    rule_set_name: &str,
+) -> Result<String, ExportError> {
+    let tiles = project.rules();
+    let rule_set = RuleSet {
+        image_stem,
+        name: rule_set_name,
+        tiles: &tiles,
+        groups: project.groups(),
+    };
+
+    r_source::render(&rule_set)
 }

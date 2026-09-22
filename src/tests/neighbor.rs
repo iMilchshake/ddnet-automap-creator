@@ -3,13 +3,6 @@ use crate::model::neighbor::{
 };
 
 #[test]
-fn bit_is_seven_minus_index() {
-    for (index, neighbor) in NEIGHBORS.iter().enumerate() {
-        assert_eq!(neighbor.bit as usize, 7 - index, "index {index}");
-    }
-}
-
-#[test]
 fn offsets_cover_the_ring_without_the_center() {
     let mut offsets: Vec<(i32, i32)> = NEIGHBORS
         .iter()

@@ -18,3 +18,8 @@ pub const BLUEPRINT: FileFilter = FileFilter {
     name: "Blueprint",
     extensions: &["json"],
 };
+
+pub const RULES: FileFilter = FileFilter {
+    name: "DDNet automapper rules",
+    extensions: &["rules"],
+};

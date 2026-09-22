@@ -38,27 +38,21 @@ pub struct Neighbor {
     /// Positive downwards.
     pub dy: i32,
     pub rpp_name: &'static str,
-    pub bit: u32,
 }
 
-const fn neighbor(dx: i32, dy: i32, rpp_name: &'static str, bit: u32) -> Neighbor {
-    Neighbor {
-        dx,
-        dy,
-        rpp_name,
-        bit,
-    }
+const fn neighbor(dx: i32, dy: i32, rpp_name: &'static str) -> Neighbor {
+    Neighbor { dx, dy, rpp_name }
 }
 
 pub const NEIGHBORS: [Neighbor; NEIGHBOR_COUNT] = [
-    neighbor(-1, -1, "topLeft", 7),
-    neighbor(0, -1, "top", 6),
-    neighbor(1, -1, "topRight", 5),
-    neighbor(-1, 0, "left", 4),
-    neighbor(1, 0, "right", 3),
-    neighbor(-1, 1, "bottomLeft", 2),
-    neighbor(0, 1, "bottom", 1),
-    neighbor(1, 1, "bottomRight", 0),
+    neighbor(-1, -1, "topLeft"),
+    neighbor(0, -1, "top"),
+    neighbor(1, -1, "topRight"),
+    neighbor(-1, 0, "left"),
+    neighbor(1, 0, "right"),
+    neighbor(-1, 1, "bottomLeft"),
+    neighbor(0, 1, "bottom"),
+    neighbor(1, 1, "bottomRight"),
 ];
 
 pub fn neighbor_index_at(dx: i32, dy: i32) -> Option<usize> {

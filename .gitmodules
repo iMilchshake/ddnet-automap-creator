@@ -1,0 +1,4 @@
+[submodule "vendor/rpp"]
+	path = vendor/rpp
+	url = https://github.com/Aerll/rpp
+	ignore = dirty

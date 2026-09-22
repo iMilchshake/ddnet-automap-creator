@@ -29,6 +29,10 @@ pub struct RuleSet<'a> {
     pub groups: &'a [TileGroup],
 }
 
+pub fn output_file(image_stem: &str) -> String {
+    format!("{image_stem}.rules")
+}
+
 pub fn render(rule_set: &RuleSet) -> Result<String, ExportError> {
     if rule_set.tiles.is_empty() && rule_set.groups.is_empty() {
         return Err(ExportError::NothingConfigured);
@@ -42,7 +46,7 @@ pub fn render(rule_set: &RuleSet) -> Result<String, ExportError> {
         "// compile with rpp (https://github.com/Aerll/rpp), base.r has to sit next to this file"
             .to_owned(),
         "#include \"base.r\"".to_owned(),
-        format!("#output \"{}.rules\"", rule_set.image_stem),
+        format!("#output \"{}\"", output_file(rule_set.image_stem)),
         String::new(),
     ];
 

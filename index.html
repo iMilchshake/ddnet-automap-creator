@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
     <title>ddnet-automap-creator</title>
 
-    <link data-trunk rel="rust" data-wasm-opt="2" />
+    <!-- --all-features lets wasm-opt accept what rustc emits, such as bulk memory. -->
+    <link data-trunk rel="rust" data-wasm-opt="z" data-wasm-opt-params="--all-features" />
+    <link data-trunk rel="copy-dir" href="target/rpp" />
 
     <style>
       html,
