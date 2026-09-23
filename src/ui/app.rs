@@ -1,9 +1,10 @@
 use egui::{Context, TextureHandle, TextureOptions, Ui, Vec2};
 
 use crate::blueprint;
+use crate::export::bundle::{self, Bundle};
 use crate::export::compiler::{Compiled, RulesCompiler};
 use crate::export::r_source::{self, ExportError, RuleSet};
-use crate::file_filter::{BLUEPRINT, RPP_SOURCE, RULES, TILESET_IMAGE};
+use crate::file_filter::{BLUEPRINT, BUNDLE, RPP_SOURCE, RULES, TILESET_IMAGE};
 use crate::file_picker::{FilePicker, PickedFile};
 use crate::file_saver::FileSaver;
 use crate::model::group::{GroupMode, TileGroup};
@@ -21,6 +22,7 @@ const SIDE_PANEL_WIDTH: f32 = 260.0;
 const MIN_SIDE_PANEL_WIDTH: f32 = 220.0;
 const MAX_SIDE_PANEL_WIDTH: f32 = 520.0;
 const HELP_WIDTH: f32 = 360.0;
+const EXPORT_WIDTH: f32 = 320.0;
 const GROUP_SWATCH: Vec2 = Vec2::new(12.0, 18.0);
 const GROUP_SWATCH_CORNER_RADIUS: f32 = 2.0;
 const DROP_LINE_WIDTH: f32 = 2.0;
@@ -68,6 +70,12 @@ enum Workspace {
     Ready(LoadedTileset),
 }
 
+struct PendingBundle {
+    image_stem: String,
+    source: String,
+    blueprint: String,
+}
+
 struct LoadedTileset {
     tileset: Tileset,
     texture: TextureHandle,
@@ -82,10 +90,12 @@ pub struct AutomapperApp {
     saver: FileSaver,
     compiler: RulesCompiler,
     status: StatusLine,
+    pending_bundle: Option<PendingBundle>,
     inspector: Inspector,
     define_groups: bool,
     drag_anchor: Option<usize>,
     hovered_tile: Option<usize>,
+    export_open: bool,
     help_open: bool,
 }
 
@@ -100,10 +110,12 @@ impl Default for AutomapperApp {
             saver: FileSaver::new(),
             compiler: RulesCompiler::new(),
             status: StatusLine::default(),
+            pending_bundle: None,
             inspector: Inspector::Empty,
             define_groups: false,
             drag_anchor: None,
             hovered_tile: None,
+            export_open: false,
             help_open: false,
         }
     }
@@ -121,8 +133,9 @@ impl eframe::App for AutomapperApp {
 
         self.show_menu_bar(ui, &ctx);
         self.show_status_bar(ui);
-        self.show_side_panel(ui, &ctx);
+        self.show_side_panel(ui);
         self.show_tileset(ui, &ctx);
+        self.show_export(&ctx);
         self.show_help(&ctx);
 
         if self.compiler.is_running() {
@@ -229,6 +242,7 @@ impl AutomapperApp {
         let stem = loaded.tileset.stem.clone();
         match render_source(&self.project, &stem, &self.rule_set_name) {
             Ok(source) => {
+                self.pending_bundle = None;
                 self.compiler.start(source, r_source::output_file(&stem));
                 self.status.info(ctx, "Compiling with rpp…");
             }
@@ -236,13 +250,65 @@ impl AutomapperApp {
         }
     }
 
+    fn compile_bundle(&mut self, ctx: &Context) {
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
+        };
+
+        let stem = loaded.tileset.stem.clone();
+        let source = match render_source(&self.project, &stem, &self.rule_set_name) {
+            Ok(source) => source,
+            Err(error) => {
+                self.status.warning(ctx, error.to_string());
+                return;
+            }
+        };
+        let blueprint = match blueprint::to_json(&self.project, &stem, &self.rule_set_name) {
+            Ok(blueprint) => blueprint,
+            Err(error) => {
+                self.status.warning(ctx, error.to_string());
+                return;
+            }
+        };
+
+        self.compiler
+            .start(source.clone(), r_source::output_file(&stem));
+        self.pending_bundle = Some(PendingBundle {
+            image_stem: stem,
+            source,
+            blueprint,
+        });
+        self.status.info(ctx, "Compiling with rpp…");
+    }
+
     fn receive_compiled_rules(&mut self, ctx: &Context) {
         let Some(result) = self.compiler.poll() else {
             return;
         };
+        let pending = self.pending_bundle.take();
 
         match result {
-            Ok(Compiled { file_name, rules }) => self.saver.save_text(RULES, &file_name, rules),
+            Ok(Compiled { file_name, rules }) => match pending {
+                Some(pending) => self.save_bundle(ctx, pending, &rules),
+                None => self.saver.save_text(RULES, &file_name, rules),
+            },
+            Err(error) => self.status.warning(ctx, error.to_string()),
+        }
+    }
+
+    fn save_bundle(&mut self, ctx: &Context, pending: PendingBundle, rules: &str) {
+        let bundle = Bundle {
+            image_stem: &pending.image_stem,
+            rules,
+            source: &pending.source,
+            blueprint: &pending.blueprint,
+        };
+
+        match bundle::archive(&bundle) {
+            Ok(archive) => {
+                let name = bundle::file_name(&pending.image_stem);
+                self.saver.save_bytes(BUNDLE, &name, archive);
+            }
             Err(error) => self.status.warning(ctx, error.to_string()),
         }
     }
@@ -284,6 +350,7 @@ impl AutomapperApp {
     }
 
     fn show_menu_bar(&mut self, ui: &mut Ui, ctx: &Context) {
+        let has_image = matches!(self.workspace, Workspace::Ready(_));
         let mut save_blueprint = false;
 
         egui::Panel::top("menu_bar").show(ui, |ui| {
@@ -298,7 +365,6 @@ impl AutomapperApp {
 
                     ui.separator();
 
-                    let has_image = matches!(self.workspace, Workspace::Ready(_));
                     if ui
                         .add_enabled(has_image, egui::Button::new("Load blueprint…"))
                         .clicked()
@@ -314,6 +380,13 @@ impl AutomapperApp {
                         ui.close();
                     }
                 });
+
+                if ui
+                    .add_enabled(has_image, egui::Button::new("Export"))
+                    .clicked()
+                {
+                    self.export_open = true;
+                }
 
                 if ui.button("Help").clicked() {
                     self.help_open = true;
@@ -368,11 +441,9 @@ impl AutomapperApp {
         });
     }
 
-    fn show_side_panel(&mut self, ui: &mut Ui, ctx: &Context) {
+    fn show_side_panel(&mut self, ui: &mut Ui) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
         let selected_group = self.inspector.group();
-        let mut export = false;
-        let mut compile = false;
         let mut pending = None;
         let mut tile_edit = None;
         let mut group_edit = None;
@@ -384,7 +455,6 @@ impl AutomapperApp {
             .max_size(MAX_SIDE_PANEL_WIDTH)
             .show(ui, |ui| {
                 ui.add_enabled_ui(has_image, |ui| {
-                    ui.heading("Rules");
                     ui.horizontal(|ui| {
                         ui.label("Rule name");
                         ui.text_edit_singleline(&mut self.rule_set_name);
@@ -394,27 +464,6 @@ impl AutomapperApp {
                         self.project.rule_count(),
                         self.project.groups().len()
                     ));
-
-                    ui.add_space(4.0);
-                    let exportable =
-                        self.project.rule_count() > 0 || !self.project.groups().is_empty();
-                    let can_compile = exportable && !self.compiler.is_running();
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(can_compile, egui::Button::new("Export .rules"))
-                            .on_hover_text("Compiles the rule set with rpp.")
-                            .clicked()
-                        {
-                            compile = true;
-                        }
-                        if ui
-                            .add_enabled(exportable, egui::Button::new("Export .r"))
-                            .on_hover_text("Saves the rpp source instead of compiling it.")
-                            .clicked()
-                        {
-                            export = true;
-                        }
-                    });
 
                     ui.separator();
 
@@ -465,12 +514,76 @@ impl AutomapperApp {
             }
             None => {}
         }
+    }
+
+    fn show_export(&mut self, ctx: &Context) {
+        if !self.export_open {
+            return;
+        }
+
+        let exportable = self.project.rule_count() > 0 || !self.project.groups().is_empty();
+        let can_compile = exportable && !self.compiler.is_running();
+        let mut export = false;
+        let mut compile = false;
+        let mut pack = false;
+
+        let modal = egui::Modal::new(egui::Id::new("export")).show(ctx, |ui| {
+            ui.set_max_width(EXPORT_WIDTH);
+            ui.heading("Export");
+            ui.label(format!(
+                "{} tiles, {} groups configured",
+                self.project.rule_count(),
+                self.project.groups().len()
+            ));
+            ui.separator();
+
+            if ui
+                .add_enabled(can_compile, egui::Button::new("Export .rules"))
+                .clicked()
+            {
+                compile = true;
+            }
+            ui.weak("Compiles the rule set with rpp, ready for DDNet.");
+
+            ui.add_space(8.0);
+            if ui
+                .add_enabled(exportable, egui::Button::new("Export .r"))
+                .clicked()
+            {
+                export = true;
+            }
+            ui.weak("Saves the rpp source instead of compiling it.");
+
+            ui.add_space(8.0);
+            if ui
+                .add_enabled(can_compile, egui::Button::new("Export bundle"))
+                .clicked()
+            {
+                pack = true;
+            }
+            ui.weak("A zip with the .rules, the .r and the blueprint.");
+
+            ui.separator();
+            if ui.button("Close").clicked() {
+                self.export_open = false;
+            }
+        });
+
+        if modal.should_close() {
+            self.export_open = false;
+        }
 
         if export {
             self.export_source(ctx);
+            self.export_open = false;
         }
         if compile {
             self.compile_rules(ctx);
+            self.export_open = false;
+        }
+        if pack {
+            self.compile_bundle(ctx);
+            self.export_open = false;
         }
     }
 

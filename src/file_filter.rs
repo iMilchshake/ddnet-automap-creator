@@ -23,3 +23,8 @@ pub const RULES: FileFilter = FileFilter {
     name: "DDNet automapper rules",
     extensions: &["rules"],
 };
+
+pub const BUNDLE: FileFilter = FileFilter {
+    name: "Bundle",
+    extensions: &["zip"],
+};

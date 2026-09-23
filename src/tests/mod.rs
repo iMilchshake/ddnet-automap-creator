@@ -1,4 +1,5 @@
 mod blueprint;
+mod bundle;
 mod group;
 mod neighbor;
 mod project;

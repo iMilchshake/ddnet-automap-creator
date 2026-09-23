@@ -26,6 +26,10 @@ impl FileSaver {
     }
 
     pub fn save_text(&self, filter: FileFilter, file_name: &str, contents: String) {
+        self.save_bytes(filter, file_name, contents.into_bytes());
+    }
+
+    pub fn save_bytes(&self, filter: FileFilter, file_name: &str, contents: Vec<u8>) {
         spawn_dialog(self.sender.clone(), filter, file_name.to_owned(), contents);
     }
 
@@ -45,7 +49,7 @@ fn spawn_dialog(
     sender: Sender<SaveResult>,
     filter: FileFilter,
     file_name: String,
-    contents: String,
+    contents: Vec<u8>,
 ) {
     std::thread::spawn(move || {
         let dialog = rfd::FileDialog::new()
@@ -77,7 +81,7 @@ fn spawn_dialog(
     sender: Sender<SaveResult>,
     _filter: FileFilter,
     file_name: String,
-    contents: String,
+    contents: Vec<u8>,
 ) {
     let result = match download(&file_name, &contents) {
         Ok(()) => Ok(file_name),
@@ -94,15 +98,14 @@ fn spawn_dialog(
 /// The browser has no save dialog rfd can drive, so the file leaves as a
 /// download instead.
 #[cfg(target_arch = "wasm32")]
-fn download(file_name: &str, contents: &str) -> Result<(), String> {
+fn download(file_name: &str, contents: &[u8]) -> Result<(), String> {
     use eframe::wasm_bindgen::{JsCast as _, JsValue};
 
     let describe = |value: JsValue| format!("{value:?}");
 
-    let parts = js_sys::Array::new();
-    parts.push(&JsValue::from_str(contents));
+    let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(contents));
 
-    let blob = web_sys::Blob::new_with_str_sequence(&parts).map_err(describe)?;
+    let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).map_err(describe)?;
     let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(describe)?;
 
     let document = web_sys::window()
