@@ -26,6 +26,7 @@ const GROUP_SWATCH_CORNER_RADIUS: f32 = 2.0;
 const DROP_LINE_WIDTH: f32 = 2.0;
 
 const REMOVE_ICON: &str = "✖";
+const CREDIT: &str = env!("CARGO_PKG_NAME");
 
 const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With groups selected, drag \
                                  across the tileset to add one, click one to edit it, right-click \
@@ -320,6 +321,11 @@ impl AutomapperApp {
 
                 ui.separator();
                 self.show_selection_picker(ui);
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let credit = egui::RichText::new(CREDIT).weak();
+                    ui.add(egui::Label::new(credit).truncate());
+                });
             });
         });
 
