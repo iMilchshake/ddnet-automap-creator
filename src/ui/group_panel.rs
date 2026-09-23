@@ -1,10 +1,11 @@
-use egui::{Context, Ui};
+use egui::Ui;
 
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::tile::Chance;
 
 const MIN_CHANCE_PERCENT: f32 = 0.1;
 const MAX_CHANCE_PERCENT: f32 = 100.0;
+const CHANCE_DRAG_SPEED: f64 = 0.5;
 
 const FILL_HINT: &str = "Places the group wherever its own tiles are solid.";
 const DECORATE_HINT: &str = "Also needs the ring of tiles around the group to be solid.";
@@ -16,13 +17,7 @@ pub fn mode_label(mode: GroupMode) -> &'static str {
     }
 }
 
-pub enum GroupAction {
-    Pending,
-    Commit { index: usize, group: TileGroup },
-    Cancel,
-}
-
-pub struct GroupDialog {
+pub struct GroupPanel {
     index: usize,
     name: String,
     mode: GroupMode,
@@ -34,7 +29,7 @@ pub struct GroupDialog {
     error: Option<String>,
 }
 
-impl GroupDialog {
+impl GroupPanel {
     pub fn new(index: usize, group: &TileGroup) -> Self {
         Self {
             index,
@@ -48,51 +43,46 @@ impl GroupDialog {
         }
     }
 
-    pub fn show(&mut self, ctx: &Context, groups: &[TileGroup]) -> GroupAction {
-        let mut action = GroupAction::Pending;
-
-        let modal = egui::Modal::new(egui::Id::new("group_dialog")).show(ctx, |ui| {
-            ui.heading("Group");
-            ui.weak(format!(
-                "Tile {}, {}×{}",
-                self.top_left, self.width, self.height
-            ));
-            ui.separator();
-
-            self.show_options(ui);
-
-            if let Some(error) = &self.error {
-                ui.colored_label(ui.visuals().error_fg_color, error);
-            }
-
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
-                    action = GroupAction::Cancel;
-                }
-                if ui.button("OK").clicked() {
-                    action = self.commit(groups);
-                }
-            });
-        });
-
-        if modal.should_close() {
-            return GroupAction::Cancel;
-        }
-
-        action
+    pub fn index(&self) -> usize {
+        self.index
     }
 
-    fn show_options(&mut self, ui: &mut Ui) {
+    pub fn show(&mut self, ui: &mut Ui, groups: &[TileGroup]) -> Option<TileGroup> {
+        ui.heading("Group");
+        ui.weak(format!(
+            "Tile {}, {}×{}",
+            self.top_left, self.width, self.height
+        ));
+        ui.add_space(4.0);
+
+        let edit = match self.show_options(ui) {
+            true => self.validated(groups),
+            false => None,
+        };
+
+        if let Some(error) = &self.error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
+
+        edit
+    }
+
+    fn show_options(&mut self, ui: &mut Ui) -> bool {
+        let mut changed = false;
+
         ui.horizontal(|ui| {
             ui.label("Name");
-            ui.text_edit_singleline(&mut self.name);
+            changed |= ui.text_edit_singleline(&mut self.name).changed();
         });
 
         ui.horizontal(|ui| {
             ui.label("Mode");
-            ui.selectable_value(&mut self.mode, GroupMode::Fill, "Fill");
-            ui.selectable_value(&mut self.mode, GroupMode::Decorate, "Decorate");
+            changed |= ui
+                .selectable_value(&mut self.mode, GroupMode::Fill, "Fill")
+                .changed();
+            changed |= ui
+                .selectable_value(&mut self.mode, GroupMode::Decorate, "Decorate")
+                .changed();
         });
         ui.weak(match self.mode {
             GroupMode::Fill => FILL_HINT,
@@ -102,21 +92,25 @@ impl GroupDialog {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label("Chance");
-            ui.add(
-                egui::DragValue::new(&mut self.chance_percent)
-                    .range(MIN_CHANCE_PERCENT..=MAX_CHANCE_PERCENT)
-                    .speed(0.5)
-                    .suffix(" %"),
-            );
+            changed |= ui
+                .add(
+                    egui::DragValue::new(&mut self.chance_percent)
+                        .range(MIN_CHANCE_PERCENT..=MAX_CHANCE_PERCENT)
+                        .speed(CHANCE_DRAG_SPEED)
+                        .suffix(" %"),
+                )
+                .changed();
         });
+
+        changed
     }
 
-    fn commit(&mut self, groups: &[TileGroup]) -> GroupAction {
+    fn validated(&mut self, groups: &[TileGroup]) -> Option<TileGroup> {
         let chance = match Chance::new(self.chance_percent) {
             Ok(chance) => chance,
             Err(error) => {
                 self.error = Some(error.to_string());
-                return GroupAction::Pending;
+                return None;
             }
         };
 
@@ -131,7 +125,7 @@ impl GroupDialog {
 
         if let Err(error) = group.validate() {
             self.error = Some(error.to_string());
-            return GroupAction::Pending;
+            return None;
         }
 
         let taken = groups
@@ -140,12 +134,10 @@ impl GroupDialog {
             .any(|(index, other)| index != self.index && other.name == group.name);
         if taken {
             self.error = Some(format!("`{}` already names another group", group.name));
-            return GroupAction::Pending;
+            return None;
         }
 
-        GroupAction::Commit {
-            index: self.index,
-            group,
-        }
+        self.error = None;
+        Some(group)
     }
 }

@@ -1,8 +1,8 @@
 mod app;
 mod grid;
-mod group_dialog;
+mod group_panel;
 mod status;
-mod tile_dialog;
+mod tile_panel;
 mod tile_state;
 
 pub use app::AutomapperApp;

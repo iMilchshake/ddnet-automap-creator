@@ -1,11 +1,12 @@
 use egui::ecolor::Hsva;
+use egui::emath::GuiRounding as _;
 use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, Vec2, pos2};
 
 use crate::model::group::TileGroup;
 use crate::model::project::Project;
 use crate::model::tile::TILESET_SIDE;
-use crate::tileset::Tileset;
-use crate::ui::group_dialog::mode_label;
+use crate::tileset::{TileSlice, Tileset};
+use crate::ui::group_panel::mode_label;
 use crate::ui::tile_state::{TileState, tile_state};
 
 const MIN_CELL_SIZE: f32 = 8.0;
@@ -17,13 +18,26 @@ const CHECKER_DARK: Color32 = Color32::from_gray(48);
 
 const REMOVED_COLOR: Color32 = Color32::from_rgb(220, 110, 110);
 const CONFIGURED_OUTLINE: Color32 = Color32::from_gray(205);
+const SELECTED_OUTLINE: Color32 = Color32::from_rgb(255, 214, 102);
 
 const UNUSED_SCRIM: u8 = 150;
 const REMOVED_SCRIM: u8 = 215;
 
+const OUTLINE_WIDTH: f32 = 2.0;
+const SELECTED_OUTLINE_WIDTH: f32 = 3.0;
+
 /// Hues a golden angle apart, so neighbouring groups never share a shade.
 const HUE_STEP: f32 = 137.5 / 360.0;
 const GROUP_FILL_ALPHA: f32 = 0.35;
+const DRAG_FILL_ALPHA: f32 = 0.25;
+
+const GROUP_NAME_INSET: f32 = 0.1;
+const GROUP_NAME_FONT: f32 = 0.28;
+const BADGE_INSET: f32 = 0.12;
+const BADGE_MARK: f32 = 0.3;
+const CHANCE_FONT: f32 = 0.26;
+const CROSS_WIDTH: f32 = 0.18;
+const MIN_CROSS_WIDTH: f32 = 1.5;
 
 pub struct GridView<'a> {
     pub tileset: &'a Tileset,
@@ -31,6 +45,7 @@ pub struct GridView<'a> {
     pub texture: &'a TextureHandle,
     pub group_editing: bool,
     pub drag_anchor: Option<usize>,
+    pub selected: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -47,17 +62,19 @@ pub fn group_color(index: usize) -> Color32 {
 }
 
 pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
-    let available = ui.available_size();
-    let cell_size = (available.min_elem() / TILESET_SIDE as f32)
-        .floor()
-        .max(MIN_CELL_SIZE);
+    let pixels_per_point = ui.ctx().pixels_per_point();
+    let cell_size = whole_pixel_cell_size(ui.available_size(), pixels_per_point);
     let grid_size = cell_size * TILESET_SIDE as f32;
 
     let sense = match view.group_editing {
         true => Sense::click_and_drag(),
         false => Sense::click(),
     };
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(grid_size), sense);
+    let (allocated, response) = ui.allocate_exact_size(Vec2::splat(grid_size), sense);
+    let rect = Rect::from_min_size(
+        allocated.min.round_to_pixels(pixels_per_point),
+        allocated.size(),
+    );
     let painter = ui.painter_at(rect);
 
     let hovered = response
@@ -74,8 +91,7 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         paint_checkerboard(&painter, cell, index);
 
         if !matches!(state, TileState::Locked) {
-            let uv = Rect::from_min_max(tile.uv_min.into(), tile.uv_max.into());
-            painter.image(view.texture.id(), cell, uv, Color32::WHITE);
+            paint_tile(&painter, cell, view.texture, tile);
         }
 
         if let Some(scrim) = tile_scrim(state) {
@@ -86,7 +102,7 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
             painter.rect_stroke(
                 cell,
                 0.0,
-                Stroke::new(2.0, CONFIGURED_OUTLINE),
+                Stroke::new(OUTLINE_WIDTH, CONFIGURED_OUTLINE),
                 StrokeKind::Inside,
             );
         }
@@ -111,11 +127,20 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         );
     }
 
+    if let Some(index) = view.selected {
+        painter.rect_stroke(
+            cell_rect(rect, cell_size, index),
+            0.0,
+            Stroke::new(SELECTED_OUTLINE_WIDTH, SELECTED_OUTLINE),
+            StrokeKind::Inside,
+        );
+    }
+
     if let Some(index) = hovered {
         painter.rect_stroke(
             cell_rect(rect, cell_size, index),
             0.0,
-            Stroke::new(2.0, ui.visuals().selection.stroke.color),
+            Stroke::new(OUTLINE_WIDTH, ui.visuals().selection.stroke.color),
             StrokeKind::Inside,
         );
     }
@@ -159,14 +184,19 @@ fn paint_group(
 ) {
     let area = tile_span(grid, cell_size, group.top_left, group.bottom_right());
     painter.rect_filled(area, 0.0, color.gamma_multiply(GROUP_FILL_ALPHA));
-    painter.rect_stroke(area, 0.0, Stroke::new(2.0, color), StrokeKind::Inside);
+    painter.rect_stroke(
+        area,
+        0.0,
+        Stroke::new(OUTLINE_WIDTH, color),
+        StrokeKind::Inside,
+    );
 
     let anchor = cell_rect(grid, cell_size, group.top_left);
     painter.text(
-        anchor.left_top() + Vec2::splat(cell_size * 0.1),
+        anchor.left_top() + Vec2::splat(cell_size * GROUP_NAME_INSET),
         egui::Align2::LEFT_TOP,
         &group.name,
-        egui::FontId::proportional(cell_size * 0.28),
+        egui::FontId::proportional(cell_size * GROUP_NAME_FONT),
         Color32::WHITE,
     );
 }
@@ -182,8 +212,13 @@ fn paint_selection(
     let (top_left, bottom_right) = corners(anchor, corner);
     let area = tile_span(grid, cell_size, top_left, bottom_right);
 
-    painter.rect_filled(area, 0.0, color.gamma_multiply(0.25));
-    painter.rect_stroke(area, 0.0, Stroke::new(2.0, color), StrokeKind::Inside);
+    painter.rect_filled(area, 0.0, color.gamma_multiply(DRAG_FILL_ALPHA));
+    painter.rect_stroke(
+        area,
+        0.0,
+        Stroke::new(OUTLINE_WIDTH, color),
+        StrokeKind::Inside,
+    );
 }
 
 /// The smallest rectangle holding both tiles, as top-left and bottom-right ids.
@@ -231,6 +266,20 @@ fn tile_index_clamped(grid: Rect, cell_size: f32, pos: Pos2) -> usize {
     row * TILESET_SIDE + column
 }
 
+fn whole_pixel_cell_size(available: Vec2, pixels_per_point: f32) -> f32 {
+    let points = (available.min_elem() / TILESET_SIDE as f32).max(MIN_CELL_SIZE);
+
+    (points * pixels_per_point).floor() / pixels_per_point
+}
+
+pub fn paint_tile(painter: &egui::Painter, rect: Rect, texture: &TextureHandle, slice: &TileSlice) {
+    let uv = Rect::from_min_max(slice.uv_min.into(), slice.uv_max.into());
+    let mut mesh = egui::Mesh::with_texture(texture.id());
+    mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
+
+    painter.add(egui::Shape::mesh(mesh));
+}
+
 fn paint_checkerboard(painter: &egui::Painter, cell: Rect, index: usize) {
     let column = index % TILESET_SIDE;
     let row = index / TILESET_SIDE;
@@ -263,10 +312,11 @@ fn paint_badge(
         return;
     }
 
-    let inset = cell_size * 0.12;
+    let inset = cell_size * BADGE_INSET;
+    let mark_size = cell_size * BADGE_MARK;
     let mark = Rect::from_min_size(
-        pos2(cell.right() - inset - cell_size * 0.3, cell.top() + inset),
-        Vec2::splat(cell_size * 0.3),
+        pos2(cell.right() - inset - mark_size, cell.top() + inset),
+        Vec2::splat(mark_size),
     );
 
     match state {
@@ -278,7 +328,7 @@ fn paint_badge(
                     pos2(cell.left() + inset, cell.bottom() - inset),
                     egui::Align2::LEFT_BOTTOM,
                     format!("{}%", rule.chance.percent()),
-                    egui::FontId::proportional(cell_size * 0.26),
+                    egui::FontId::proportional(cell_size * CHANCE_FONT),
                     visuals.strong_text_color(),
                 );
             }
@@ -287,7 +337,8 @@ fn paint_badge(
 }
 
 fn paint_cross(painter: &egui::Painter, mark: Rect) {
-    let stroke = Stroke::new((mark.width() * 0.18).max(1.5), REMOVED_COLOR);
+    let width = (mark.width() * CROSS_WIDTH).max(MIN_CROSS_WIDTH);
+    let stroke = Stroke::new(width, REMOVED_COLOR);
 
     painter.line_segment([mark.left_top(), mark.right_bottom()], stroke);
     painter.line_segment([mark.right_top(), mark.left_bottom()], stroke);

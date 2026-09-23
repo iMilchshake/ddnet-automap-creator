@@ -12,25 +12,54 @@ use crate::model::project::Project;
 use crate::model::tile::{Chance, TILESET_SIDE};
 use crate::tileset::{self, Tileset};
 use crate::ui::grid::{self, GridResponse, GridView};
-use crate::ui::group_dialog::{GroupAction, GroupDialog, mode_label};
+use crate::ui::group_panel::{GroupPanel, mode_label};
 use crate::ui::status::StatusLine;
-use crate::ui::tile_dialog::{DialogAction, TileDialog};
+use crate::ui::tile_panel::{TileEdit, TilePanel};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 
 const SIDE_PANEL_WIDTH: f32 = 260.0;
+const MIN_SIDE_PANEL_WIDTH: f32 = 220.0;
+const MAX_SIDE_PANEL_WIDTH: f32 = 520.0;
 const HELP_WIDTH: f32 = 360.0;
 const GROUP_SWATCH: Vec2 = Vec2::new(12.0, 18.0);
+const GROUP_SWATCH_CORNER_RADIUS: f32 = 2.0;
+const DROP_LINE_WIDTH: f32 = 2.0;
 
 const REMOVE_ICON: &str = "✖";
 
 const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With groups selected, drag \
                                  across the tileset to add one, click one to edit it, right-click \
                                  to remove it.";
+const EMPTY_INSPECTOR: &str = "Pick a tile or a group to edit it here.";
 
 enum GroupCommand {
-    Configure(usize),
+    Select(usize),
     Move { from: usize, before: usize },
     Remove(usize),
+}
+
+#[derive(Default)]
+enum Inspector {
+    #[default]
+    Empty,
+    Tile(TilePanel),
+    Group(GroupPanel),
+}
+
+impl Inspector {
+    fn tile(&self) -> Option<usize> {
+        match self {
+            Self::Tile(panel) => Some(panel.tile()),
+            _ => None,
+        }
+    }
+
+    fn group(&self) -> Option<usize> {
+        match self {
+            Self::Group(panel) => Some(panel.index()),
+            _ => None,
+        }
+    }
 }
 
 enum Workspace {
@@ -52,8 +81,7 @@ pub struct AutomapperApp {
     saver: FileSaver,
     compiler: RulesCompiler,
     status: StatusLine,
-    dialog: Option<TileDialog>,
-    group_dialog: Option<GroupDialog>,
+    inspector: Inspector,
     define_groups: bool,
     drag_anchor: Option<usize>,
     hovered_tile: Option<usize>,
@@ -71,8 +99,7 @@ impl Default for AutomapperApp {
             saver: FileSaver::new(),
             compiler: RulesCompiler::new(),
             status: StatusLine::default(),
-            dialog: None,
-            group_dialog: None,
+            inspector: Inspector::Empty,
             define_groups: false,
             drag_anchor: None,
             hovered_tile: None,
@@ -95,8 +122,6 @@ impl eframe::App for AutomapperApp {
         self.show_status_bar(ui);
         self.show_side_panel(ui, &ctx);
         self.show_tileset(ui, &ctx);
-        self.show_dialog(&ctx);
-        self.show_group_dialog(&ctx);
         self.show_help(&ctx);
 
         if self.compiler.is_running() {
@@ -146,8 +171,7 @@ impl AutomapperApp {
             Ok(blueprint) => {
                 self.project = blueprint.project;
                 self.rule_set_name = blueprint.rule_set;
-                self.dialog = None;
-                self.group_dialog = None;
+                self.inspector = Inspector::Empty;
                 self.drag_anchor = None;
                 self.status.info(ctx, format!("Loaded {}", picked.name));
             }
@@ -246,8 +270,7 @@ impl AutomapperApp {
 
         self.project = Project::default();
         self.rule_set_name = stem.clone();
-        self.dialog = None;
-        self.group_dialog = None;
+        self.inspector = Inspector::Empty;
         self.drag_anchor = None;
         self.hovered_tile = None;
         self.workspace = Workspace::Ready(LoadedTileset { tileset, texture });
@@ -318,6 +341,7 @@ impl AutomapperApp {
         .on_hover_text(SELECTION_TOOLTIP);
 
         if self.define_groups != was_defining {
+            self.inspector = Inspector::Empty;
             self.drag_anchor = None;
         }
     }
@@ -340,13 +364,18 @@ impl AutomapperApp {
 
     fn show_side_panel(&mut self, ui: &mut Ui, ctx: &Context) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
+        let selected_group = self.inspector.group();
         let mut export = false;
         let mut compile = false;
         let mut pending = None;
+        let mut tile_edit = None;
+        let mut group_edit = None;
 
         egui::Panel::right("tools")
-            .resizable(false)
-            .exact_size(SIDE_PANEL_WIDTH)
+            .resizable(true)
+            .default_size(SIDE_PANEL_WIDTH)
+            .min_size(MIN_SIDE_PANEL_WIDTH)
+            .max_size(MAX_SIDE_PANEL_WIDTH)
             .show(ui, |ui| {
                 ui.add_enabled_ui(has_image, |ui| {
                     ui.heading("Rules");
@@ -383,16 +412,51 @@ impl AutomapperApp {
 
                     ui.separator();
 
-                    ui.heading("Groups");
-                    ui.add_space(4.0);
-                    self.show_group_list(ui, &mut pending);
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        match (&self.workspace, &mut self.inspector) {
+                            (Workspace::Ready(loaded), Inspector::Tile(panel)) => {
+                                tile_edit = panel
+                                    .show(ui, &loaded.tileset, &loaded.texture)
+                                    .map(|edit| (panel.tile(), edit));
+                            }
+                            (_, Inspector::Group(panel)) => {
+                                group_edit = panel
+                                    .show(ui, self.project.groups())
+                                    .map(|group| (panel.index(), group));
+                            }
+                            _ => {
+                                ui.weak(EMPTY_INSPECTOR);
+                            }
+                        }
+
+                        ui.separator();
+                        ui.heading("Groups");
+                        ui.add_space(4.0);
+                        show_group_list(ui, self.project.groups(), selected_group, &mut pending);
+                    });
                 });
             });
 
+        if let Some((tile, edit)) = tile_edit {
+            match edit {
+                TileEdit::Apply(rule) => self.project.set_rule(tile, rule),
+                TileEdit::Remove => self.project.clear_rule(tile),
+            }
+        }
+        if let Some((index, group)) = group_edit {
+            self.project.replace_group(index, group);
+        }
+
         match pending {
-            Some(GroupCommand::Configure(index)) => self.open_group_dialog(index),
-            Some(GroupCommand::Move { from, before }) => self.project.move_group(from, before),
-            Some(GroupCommand::Remove(index)) => self.project.remove_group(index),
+            Some(GroupCommand::Select(index)) => self.select_group(index),
+            Some(GroupCommand::Move { from, before }) => {
+                self.project.move_group(from, before);
+                self.forget_group_selection();
+            }
+            Some(GroupCommand::Remove(index)) => {
+                self.project.remove_group(index);
+                self.forget_group_selection();
+            }
             None => {}
         }
 
@@ -404,62 +468,15 @@ impl AutomapperApp {
         }
     }
 
-    fn show_group_list(&self, ui: &mut Ui, pending: &mut Option<GroupCommand>) {
-        if self.project.groups().is_empty() {
-            ui.weak("No groups yet.");
-            return;
+    fn select_group(&mut self, index: usize) {
+        if let Some(group) = self.project.groups().get(index) {
+            self.inspector = Inspector::Group(GroupPanel::new(index, group));
         }
+    }
 
-        for (index, group) in self.project.groups().iter().enumerate() {
-            let id = egui::Id::new(("group_row", index));
-            let row = ui
-                .dnd_drag_source(id, index, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-
-                        let (swatch, _response) =
-                            ui.allocate_exact_size(GROUP_SWATCH, egui::Sense::hover());
-                        ui.painter()
-                            .rect_filled(swatch, 2.0, grid::group_color(index));
-
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.spacing_mut().item_spacing.x = 2.0;
-                            if ui
-                                .small_button(REMOVE_ICON)
-                                .on_hover_text("Remove group")
-                                .clicked()
-                            {
-                                *pending = Some(GroupCommand::Remove(index));
-                            }
-
-                            let name_area = ui.available_size();
-                            let layout = egui::Layout::left_to_right(egui::Align::Center)
-                                .with_main_justify(true);
-                            ui.allocate_ui_with_layout(name_area, layout, |ui| {
-                                let label = ui
-                                    .add(
-                                        egui::Button::selectable(false, group.name.as_str())
-                                            .truncate(),
-                                    )
-                                    .on_hover_text(describe_group(group));
-                                if label.clicked() {
-                                    *pending = Some(GroupCommand::Configure(index));
-                                }
-                            });
-                        });
-                    });
-                })
-                .response
-                .on_hover_cursor(egui::CursorIcon::Grab);
-
-            if let Some(target) = drop_target(ui, &row, index)
-                && let Some(from) = row.dnd_release_payload::<usize>()
-            {
-                *pending = Some(GroupCommand::Move {
-                    from: *from,
-                    before: target,
-                });
-            }
+    fn forget_group_selection(&mut self) {
+        if self.inspector.group().is_some() {
+            self.inspector = Inspector::Empty;
         }
     }
 
@@ -485,6 +502,7 @@ impl AutomapperApp {
                                 texture: &loaded.texture,
                                 group_editing: self.define_groups,
                                 drag_anchor: self.drag_anchor,
+                                selected: self.inspector.tile(),
                             },
                         )
                     })
@@ -512,7 +530,8 @@ impl AutomapperApp {
             && tile_state(&loaded.tileset, &self.project, tile).is_editable()
         {
             let rule = seed_rule(&loaded.tileset, &self.project, tile);
-            self.dialog = Some(TileDialog::new(tile, rule));
+            let has_rule = self.project.rule(tile).is_some();
+            self.inspector = Inspector::Tile(TilePanel::new(tile, rule, has_rule));
         }
 
         if let Some(tile) = response.secondary_clicked {
@@ -525,11 +544,19 @@ impl AutomapperApp {
             self.drag_anchor = Some(tile);
         }
 
+        if let Some(index) = response
+            .clicked
+            .and_then(|tile| self.project.group_at(tile))
+        {
+            self.select_group(index);
+        }
+
         if let Some(tile) = response.secondary_clicked
             && let Some(index) = self.project.group_at(tile)
         {
             let name = self.project.groups()[index].name.clone();
             self.project.remove_group(index);
+            self.forget_group_selection();
             self.status.info(ctx, format!("Removed group {name}"));
             self.drag_anchor = None;
             return;
@@ -544,7 +571,7 @@ impl AutomapperApp {
         };
 
         match self.project.group_at(anchor) {
-            Some(index) if anchor == corner => self.open_group_dialog(index),
+            Some(index) if anchor == corner => self.select_group(index),
             Some(_) => self
                 .status
                 .warning(ctx, "That rectangle starts inside another group"),
@@ -579,13 +606,7 @@ impl AutomapperApp {
 
         self.status.info(ctx, format!("Added group {}", group.name));
         self.project.add_group(group);
-        self.open_group_dialog(0);
-    }
-
-    fn open_group_dialog(&mut self, index: usize) {
-        if let Some(group) = self.project.groups().get(index) {
-            self.group_dialog = Some(GroupDialog::new(index, group));
-        }
+        self.select_group(0);
     }
 
     fn toggle_removed(&mut self, ctx: &Context, tile: usize) {
@@ -605,22 +626,10 @@ impl AutomapperApp {
             }
             _ => {
                 self.project.remove(tile);
+                if self.inspector.tile() == Some(tile) {
+                    self.inspector = Inspector::Empty;
+                }
                 self.status.info(ctx, format!("Tile {tile} removed"));
-            }
-        }
-    }
-
-    fn show_group_dialog(&mut self, ctx: &Context) {
-        let Some(dialog) = &mut self.group_dialog else {
-            return;
-        };
-
-        match dialog.show(ctx, self.project.groups()) {
-            GroupAction::Pending => {}
-            GroupAction::Cancel => self.group_dialog = None,
-            GroupAction::Commit { index, group } => {
-                self.project.replace_group(index, group);
-                self.group_dialog = None;
             }
         }
     }
@@ -652,23 +661,72 @@ impl AutomapperApp {
             self.help_open = false;
         }
     }
+}
 
-    fn show_dialog(&mut self, ctx: &Context) {
-        let Workspace::Ready(loaded) = &self.workspace else {
-            return;
-        };
-        let Some(dialog) = &mut self.dialog else {
-            return;
-        };
+fn show_group_list(
+    ui: &mut Ui,
+    groups: &[TileGroup],
+    selected: Option<usize>,
+    pending: &mut Option<GroupCommand>,
+) {
+    if groups.is_empty() {
+        ui.weak("No groups yet.");
+        return;
+    }
 
-        match dialog.show(ctx, &loaded.tileset, &loaded.texture) {
-            DialogAction::Pending => {}
-            DialogAction::Cancel => self.dialog = None,
-            DialogAction::Commit { tile, rule } => {
-                self.project.set_rule(tile, rule);
-                self.dialog = None;
-                self.status.info(ctx, format!("Tile {tile} configured"));
-            }
+    for (index, group) in groups.iter().enumerate() {
+        let id = egui::Id::new(("group_row", index));
+        let row = ui
+            .dnd_drag_source(id, index, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+
+                    let (swatch, _response) =
+                        ui.allocate_exact_size(GROUP_SWATCH, egui::Sense::hover());
+                    ui.painter().rect_filled(
+                        swatch,
+                        GROUP_SWATCH_CORNER_RADIUS,
+                        grid::group_color(index),
+                    );
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        if ui
+                            .small_button(REMOVE_ICON)
+                            .on_hover_text("Remove group")
+                            .clicked()
+                        {
+                            *pending = Some(GroupCommand::Remove(index));
+                        }
+
+                        let name_area = ui.available_size();
+                        let layout = egui::Layout::left_to_right(egui::Align::Center)
+                            .with_main_justify(true);
+                        ui.allocate_ui_with_layout(name_area, layout, |ui| {
+                            let chosen = selected == Some(index);
+                            let label = ui
+                                .add(
+                                    egui::Button::selectable(chosen, group.name.as_str())
+                                        .truncate(),
+                                )
+                                .on_hover_text(describe_group(group));
+                            if label.clicked() {
+                                *pending = Some(GroupCommand::Select(index));
+                            }
+                        });
+                    });
+                });
+            })
+            .response
+            .on_hover_cursor(egui::CursorIcon::Grab);
+
+        if let Some(target) = drop_target(ui, &row, index)
+            && let Some(from) = row.dnd_release_payload::<usize>()
+        {
+            *pending = Some(GroupCommand::Move {
+                from: *from,
+                before: target,
+            });
         }
     }
 }
@@ -733,7 +791,7 @@ fn drop_target(ui: &Ui, row: &egui::Response, index: usize) -> Option<usize> {
         true => row.rect.top(),
         false => row.rect.bottom(),
     };
-    let stroke = egui::Stroke::new(2.0, ui.visuals().selection.stroke.color);
+    let stroke = egui::Stroke::new(DROP_LINE_WIDTH, ui.visuals().selection.stroke.color);
     ui.painter().hline(row.rect.x_range(), edge, stroke);
 
     Some(index + usize::from(!above))

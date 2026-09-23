@@ -24,6 +24,10 @@ impl Project {
         self.rules.insert(tile, rule);
     }
 
+    pub fn clear_rule(&mut self, tile: usize) {
+        self.rules.remove(&tile);
+    }
+
     pub fn remove(&mut self, tile: usize) {
         self.rules.remove(&tile);
         self.removed.insert(tile);
