@@ -43,6 +43,7 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 - (live) .r source preview -> could be used as an interactive tool to learn r++?
 - drag-n-drop tilesets to load it
 - keyboard navigation / shortcuts?
+- show the chance percentage on groups too
 
 ## Acknowledgements 
 

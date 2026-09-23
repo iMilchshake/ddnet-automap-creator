@@ -78,9 +78,9 @@ impl Project {
         }
     }
 
-    pub fn move_group(&mut self, from: usize, before: usize) {
+    pub fn move_group(&mut self, from: usize, before: usize) -> Option<usize> {
         if from >= self.groups.len() || before > self.groups.len() {
-            return;
+            return None;
         }
 
         let group = self.groups.remove(from);
@@ -89,6 +89,8 @@ impl Project {
             false => before,
         };
         self.groups.insert(target, group);
+
+        Some(target)
     }
 
     pub fn is_free(&self, tile: usize) -> bool {

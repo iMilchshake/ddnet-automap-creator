@@ -13,6 +13,10 @@ const MIN_CHANCE_PERCENT: f32 = 0.1;
 const MAX_CHANCE_PERCENT: f32 = 100.0;
 const CHANCE_DRAG_SPEED: f64 = 0.5;
 
+const HEADING_SPACING: f32 = 4.0;
+const LEGEND_SPACING: f32 = 4.0;
+const LEGEND_GAP: f32 = 4.0;
+const SECTION_SPACING: f32 = 6.0;
 const CORNER_RADIUS: f32 = 2.0;
 const OUTLINE_WIDTH: f32 = 2.0;
 
@@ -69,13 +73,13 @@ impl TilePanel {
             true => format!("Tile {}", self.tile),
             false => format!("Tile {} (no rule yet)", self.tile),
         });
-        ui.add_space(4.0);
+        ui.add_space(HEADING_SPACING);
 
         let changed = self.show_neighborhood(ui, tileset, texture);
-        ui.add_space(6.0);
+        ui.add_space(SECTION_SPACING);
         show_legend(ui);
 
-        ui.add_space(6.0);
+        ui.add_space(SECTION_SPACING);
         let edit = self.show_options(ui, changed);
 
         if let Some(error) = &self.error {
@@ -196,7 +200,7 @@ impl TilePanel {
             changed |= ui.checkbox(&mut self.mods.can_rotate, "Rotate").changed();
         });
 
-        ui.add_space(4.0);
+        ui.add_space(HEADING_SPACING);
 
         let mut edit = None;
         ui.horizontal(|ui| {
@@ -270,7 +274,7 @@ fn show_tile_preview(
 
 fn show_legend(ui: &mut Ui) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.spacing_mut().item_spacing.x = LEGEND_SPACING;
 
         for (state, label) in [
             (NeighborState::Empty, "empty"),
@@ -281,7 +285,7 @@ fn show_legend(ui: &mut Ui) {
                 ui.allocate_exact_size(Vec2::splat(SWATCH_SIZE), Sense::hover());
             paint_state(ui, rect, state);
             ui.label(label);
-            ui.add_space(4.0);
+            ui.add_space(LEGEND_GAP);
         }
     });
 }

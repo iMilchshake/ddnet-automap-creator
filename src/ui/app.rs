@@ -25,6 +25,9 @@ const HELP_WIDTH: f32 = 360.0;
 const EXPORT_WIDTH: f32 = 320.0;
 const GROUP_SWATCH: Vec2 = Vec2::new(12.0, 18.0);
 const GROUP_SWATCH_CORNER_RADIUS: f32 = 2.0;
+const GROUP_ROW_SPACING: f32 = 2.0;
+const GROUP_SWATCH_SPACING: f32 = 4.0;
+const HEADING_SPACING: f32 = 4.0;
 const DROP_LINE_WIDTH: f32 = 2.0;
 
 const REMOVE_ICON: &str = "✖";
@@ -34,6 +37,7 @@ const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With group
                                  across the tileset to add one, click one to edit it, right-click \
                                  to remove it.";
 const EMPTY_INSPECTOR: &str = "Pick a tile or a group to edit it here.";
+const GROUP_ORDER_NOTE: &str = "applied top to bottom";
 
 enum GroupCommand {
     Select(usize),
@@ -485,8 +489,12 @@ impl AutomapperApp {
                         }
 
                         ui.separator();
-                        ui.heading("Groups");
-                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.heading("Groups");
+                            let note = egui::RichText::new(GROUP_ORDER_NOTE).small().weak();
+                            ui.add(egui::Label::new(note).truncate());
+                        });
+                        ui.add_space(HEADING_SPACING);
                         show_group_list(ui, self.project.groups(), selected_group, &mut pending);
                     });
                 });
@@ -505,8 +513,10 @@ impl AutomapperApp {
         match pending {
             Some(GroupCommand::Select(index)) => self.select_group(index),
             Some(GroupCommand::Move { from, before }) => {
-                self.project.move_group(from, before);
                 self.forget_group_selection();
+                if let Some(index) = self.project.move_group(from, before) {
+                    self.select_group(index);
+                }
             }
             Some(GroupCommand::Remove(index)) => {
                 self.project.remove_group(index);
@@ -794,59 +804,77 @@ fn show_group_list(
     }
 
     for (index, group) in groups.iter().enumerate() {
-        let id = egui::Id::new(("group_row", index));
-        let row = ui
-            .dnd_drag_source(id, index, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = GROUP_ROW_SPACING;
 
-                    let (swatch, _response) =
-                        ui.allocate_exact_size(GROUP_SWATCH, egui::Sense::hover());
-                    ui.painter().rect_filled(
-                        swatch,
-                        GROUP_SWATCH_CORNER_RADIUS,
-                        grid::group_color(index),
-                    );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .small_button(REMOVE_ICON)
+                    .on_hover_text("Remove group")
+                    .clicked()
+                {
+                    *pending = Some(GroupCommand::Remove(index));
+                }
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 2.0;
-                        if ui
-                            .small_button(REMOVE_ICON)
-                            .on_hover_text("Remove group")
-                            .clicked()
-                        {
-                            *pending = Some(GroupCommand::Remove(index));
-                        }
-
-                        let name_area = ui.available_size();
-                        let layout = egui::Layout::left_to_right(egui::Align::Center)
-                            .with_main_justify(true);
-                        ui.allocate_ui_with_layout(name_area, layout, |ui| {
-                            let chosen = selected == Some(index);
-                            let label = ui
-                                .add(
-                                    egui::Button::selectable(chosen, group.name.as_str())
-                                        .truncate(),
-                                )
-                                .on_hover_text(describe_group(group));
-                            if label.clicked() {
-                                *pending = Some(GroupCommand::Select(index));
-                            }
-                        });
-                    });
+                let draggable = ui.available_size();
+                let layout = egui::Layout::left_to_right(egui::Align::Center);
+                ui.allocate_ui_with_layout(draggable, layout, |ui| {
+                    show_group_row(ui, index, group, selected, pending);
                 });
-            })
-            .response
-            .on_hover_cursor(egui::CursorIcon::Grab);
-
-        if let Some(target) = drop_target(ui, &row, index)
-            && let Some(from) = row.dnd_release_payload::<usize>()
-        {
-            *pending = Some(GroupCommand::Move {
-                from: *from,
-                before: target,
             });
-        }
+        });
+    }
+}
+
+fn show_group_row(
+    ui: &mut Ui,
+    index: usize,
+    group: &TileGroup,
+    selected: Option<usize>,
+    pending: &mut Option<GroupCommand>,
+) {
+    let id = egui::Id::new(("group_row", index));
+    let row = ui
+        .dnd_drag_source(id, index, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = GROUP_SWATCH_SPACING;
+
+                let (swatch, _response) =
+                    ui.allocate_exact_size(GROUP_SWATCH, egui::Sense::hover());
+                ui.painter().rect_filled(
+                    swatch,
+                    GROUP_SWATCH_CORNER_RADIUS,
+                    grid::group_color(index),
+                );
+
+                let name_area = ui.available_size();
+                let layout =
+                    egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true);
+                ui.allocate_ui_with_layout(name_area, layout, |ui| {
+                    let chosen = selected == Some(index);
+                    let label = ui
+                        .add(egui::Button::selectable(chosen, group.name.as_str()).truncate())
+                        .on_hover_text(describe_group(group));
+                    if label.clicked() {
+                        *pending = Some(GroupCommand::Select(index));
+                    }
+                });
+            });
+        })
+        .response
+        .on_hover_cursor(egui::CursorIcon::Grab);
+
+    if row.drag_started() {
+        *pending = Some(GroupCommand::Select(index));
+    }
+
+    if let Some(target) = drop_target(ui, &row, index)
+        && let Some(from) = row.dnd_release_payload::<usize>()
+    {
+        *pending = Some(GroupCommand::Move {
+            from: *from,
+            before: target,
+        });
     }
 }
 
