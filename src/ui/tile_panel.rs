@@ -71,15 +71,12 @@ impl TilePanel {
         });
         ui.add_space(4.0);
 
-        let mut changed = self.show_neighborhood(ui, tileset, texture);
+        let changed = self.show_neighborhood(ui, tileset, texture);
         ui.add_space(6.0);
         show_legend(ui);
 
         ui.add_space(6.0);
-        changed |= self.show_options(ui);
-
-        ui.add_space(6.0);
-        let edit = self.show_action(ui, changed);
+        let edit = self.show_options(ui, changed);
 
         if let Some(error) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, error);
@@ -89,11 +86,15 @@ impl TilePanel {
     }
 
     fn show_action(&mut self, ui: &mut Ui, changed: bool) -> Option<TileEdit> {
-        let remove = egui::Button::new("Remove rule");
-        if ui.add_enabled(self.has_rule, remove).clicked() {
-            self.has_rule = false;
-            self.error = None;
-            return Some(TileEdit::Remove);
+        if self.has_rule {
+            if ui.button("Remove rule").clicked() {
+                self.has_rule = false;
+                self.error = None;
+                return Some(TileEdit::Remove);
+            }
+        } else if ui.button("Add rule").clicked() {
+            self.has_rule = true;
+            return self.apply();
         }
 
         if !changed {
@@ -185,8 +186,8 @@ impl TilePanel {
         true
     }
 
-    fn show_options(&mut self, ui: &mut Ui) -> bool {
-        let mut changed = false;
+    fn show_options(&mut self, ui: &mut Ui, neighborhood_changed: bool) -> Option<TileEdit> {
+        let mut changed = neighborhood_changed;
 
         ui.label("Also place these transforms:");
         ui.horizontal_wrapped(|ui| {
@@ -196,18 +197,20 @@ impl TilePanel {
         });
 
         ui.add_space(4.0);
+
+        let mut edit = None;
         ui.horizontal(|ui| {
-            ui.label("Chance");
+            ui.label("Chance").on_hover_text(CHANCE_TOOLTIP);
             let chance = egui::DragValue::new(&mut self.chance_percent)
                 .range(MIN_CHANCE_PERCENT..=MAX_CHANCE_PERCENT)
                 .speed(CHANCE_DRAG_SPEED)
                 .suffix(" %");
             changed |= ui.add(chance).on_hover_text(CHANCE_TOOLTIP).changed();
-        })
-        .response
-        .on_hover_text(CHANCE_TOOLTIP);
 
-        changed
+            edit = self.show_action(ui, changed);
+        });
+
+        edit
     }
 }
 
