@@ -74,16 +74,17 @@ impl Project {
         }
     }
 
-    pub fn raise_group(&mut self, index: usize) {
-        if index > 0 && index < self.groups.len() {
-            self.groups.swap(index - 1, index);
+    pub fn move_group(&mut self, from: usize, before: usize) {
+        if from >= self.groups.len() || before > self.groups.len() {
+            return;
         }
-    }
 
-    pub fn lower_group(&mut self, index: usize) {
-        if index + 1 < self.groups.len() {
-            self.groups.swap(index, index + 1);
-        }
+        let group = self.groups.remove(from);
+        let target = match before > from {
+            true => before - 1,
+            false => before,
+        };
+        self.groups.insert(target, group);
     }
 
     pub fn is_free(&self, tile: usize) -> bool {

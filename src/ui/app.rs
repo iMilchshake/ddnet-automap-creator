@@ -18,14 +18,9 @@ use crate::ui::tile_dialog::{DialogAction, TileDialog};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 
 const SIDE_PANEL_WIDTH: f32 = 260.0;
-const SWATCH_SIZE: f32 = 12.0;
-const SELECTION_PICKER_WIDTH: f32 = 70.0;
+const HELP_WIDTH: f32 = 360.0;
+const GROUP_SWATCH: Vec2 = Vec2::new(12.0, 18.0);
 
-// Only egui's proportional chain is available here: Ubuntu-Light, NotoEmoji and
-// emoji-icon-font. Arrows like ▲ ▼ live in Hack-Regular, the monospace family,
-// so they render as blank boxes on a button.
-const RAISE_ICON: &str = "⏶";
-const LOWER_ICON: &str = "⏷";
 const REMOVE_ICON: &str = "✖";
 
 const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With groups selected, drag \
@@ -34,8 +29,7 @@ const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With group
 
 enum GroupCommand {
     Configure(usize),
-    Raise(usize),
-    Lower(usize),
+    Move { from: usize, before: usize },
     Remove(usize),
 }
 
@@ -63,6 +57,7 @@ pub struct AutomapperApp {
     define_groups: bool,
     drag_anchor: Option<usize>,
     hovered_tile: Option<usize>,
+    help_open: bool,
 }
 
 impl Default for AutomapperApp {
@@ -81,6 +76,7 @@ impl Default for AutomapperApp {
             define_groups: false,
             drag_anchor: None,
             hovered_tile: None,
+            help_open: false,
         }
     }
 }
@@ -101,6 +97,7 @@ impl eframe::App for AutomapperApp {
         self.show_tileset(ui, &ctx);
         self.show_dialog(&ctx);
         self.show_group_dialog(&ctx);
+        self.show_help(&ctx);
 
         if self.compiler.is_running() {
             ctx.request_repaint();
@@ -294,14 +291,9 @@ impl AutomapperApp {
                     }
                 });
 
-                ui.menu_button("Help", |ui| {
-                    ui.label(concat!(
-                        env!("CARGO_PKG_NAME"),
-                        " ",
-                        env!("CARGO_PKG_VERSION"),
-                        "\nGenerates rpp sources for DDNet automappers."
-                    ));
-                });
+                if ui.button("Help").clicked() {
+                    self.help_open = true;
+                }
 
                 ui.separator();
                 self.show_selection_picker(ui);
@@ -319,21 +311,11 @@ impl AutomapperApp {
 
         ui.add_enabled_ui(has_image, |ui| {
             ui.label("Selecting:");
-            egui::ComboBox::from_id_salt("selection_mode")
-                .selected_text(selection_label(self.define_groups))
-                .width(SELECTION_PICKER_WIDTH)
-                .show_ui(ui, |ui| {
-                    for defining in [false, true] {
-                        ui.selectable_value(
-                            &mut self.define_groups,
-                            defining,
-                            selection_label(defining),
-                        );
-                    }
-                })
-                .response
-                .on_hover_text(SELECTION_TOOLTIP);
-        });
+            ui.selectable_value(&mut self.define_groups, false, "Tiles");
+            ui.selectable_value(&mut self.define_groups, true, "Groups");
+        })
+        .response
+        .on_hover_text(SELECTION_TOOLTIP);
 
         if self.define_groups != was_defining {
             self.drag_anchor = None;
@@ -367,9 +349,9 @@ impl AutomapperApp {
             .exact_size(SIDE_PANEL_WIDTH)
             .show(ui, |ui| {
                 ui.add_enabled_ui(has_image, |ui| {
-                    ui.heading("Generator");
+                    ui.heading("Rules");
                     ui.horizontal(|ui| {
-                        ui.label("Rule set");
+                        ui.label("Rule name");
                         ui.text_edit_singleline(&mut self.rule_set_name);
                     });
                     ui.label(format!(
@@ -384,14 +366,14 @@ impl AutomapperApp {
                     let can_compile = exportable && !self.compiler.is_running();
                     ui.horizontal(|ui| {
                         if ui
-                            .add_enabled(can_compile, egui::Button::new("Export .rules…"))
+                            .add_enabled(can_compile, egui::Button::new("Export .rules"))
                             .on_hover_text("Compiles the rule set with rpp.")
                             .clicked()
                         {
                             compile = true;
                         }
                         if ui
-                            .add_enabled(exportable, egui::Button::new("Export .r…"))
+                            .add_enabled(exportable, egui::Button::new("Export .r"))
                             .on_hover_text("Saves the rpp source instead of compiling it.")
                             .clicked()
                         {
@@ -401,11 +383,7 @@ impl AutomapperApp {
 
                     ui.separator();
 
-                    ui.heading("Group editor");
-                    ui.weak(
-                        "Groups are placed top to bottom, and whoever comes first gets first pick.",
-                    );
-
+                    ui.heading("Groups");
                     ui.add_space(4.0);
                     self.show_group_list(ui, &mut pending);
                 });
@@ -413,8 +391,7 @@ impl AutomapperApp {
 
         match pending {
             Some(GroupCommand::Configure(index)) => self.open_group_dialog(index),
-            Some(GroupCommand::Raise(index)) => self.project.raise_group(index),
-            Some(GroupCommand::Lower(index)) => self.project.lower_group(index),
+            Some(GroupCommand::Move { from, before }) => self.project.move_group(from, before),
             Some(GroupCommand::Remove(index)) => self.project.remove_group(index),
             None => {}
         }
@@ -434,42 +411,55 @@ impl AutomapperApp {
         }
 
         for (index, group) in self.project.groups().iter().enumerate() {
-            ui.horizontal(|ui| {
-                let (rect, _response) =
-                    ui.allocate_exact_size(Vec2::splat(SWATCH_SIZE), egui::Sense::hover());
-                ui.painter()
-                    .rect_filled(rect, 2.0, grid::group_color(index));
+            let id = egui::Id::new(("group_row", index));
+            let row = ui
+                .dnd_drag_source(id, index, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
 
-                if ui
-                    .button(RAISE_ICON)
-                    .on_hover_text("Higher priority")
-                    .clicked()
-                {
-                    *pending = Some(GroupCommand::Raise(index));
-                }
-                if ui
-                    .button(LOWER_ICON)
-                    .on_hover_text("Lower priority")
-                    .clicked()
-                {
-                    *pending = Some(GroupCommand::Lower(index));
-                }
-                if ui
-                    .button(REMOVE_ICON)
-                    .on_hover_text("Remove group")
-                    .clicked()
-                {
-                    *pending = Some(GroupCommand::Remove(index));
-                }
+                        let (swatch, _response) =
+                            ui.allocate_exact_size(GROUP_SWATCH, egui::Sense::hover());
+                        ui.painter()
+                            .rect_filled(swatch, 2.0, grid::group_color(index));
 
-                let description = describe_group(group);
-                let label = ui
-                    .add(egui::Button::selectable(false, description.as_str()).truncate())
-                    .on_hover_text(description);
-                if label.clicked() {
-                    *pending = Some(GroupCommand::Configure(index));
-                }
-            });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            if ui
+                                .small_button(REMOVE_ICON)
+                                .on_hover_text("Remove group")
+                                .clicked()
+                            {
+                                *pending = Some(GroupCommand::Remove(index));
+                            }
+
+                            let name_area = ui.available_size();
+                            let layout = egui::Layout::left_to_right(egui::Align::Center)
+                                .with_main_justify(true);
+                            ui.allocate_ui_with_layout(name_area, layout, |ui| {
+                                let label = ui
+                                    .add(
+                                        egui::Button::selectable(false, group.name.as_str())
+                                            .truncate(),
+                                    )
+                                    .on_hover_text(describe_group(group));
+                                if label.clicked() {
+                                    *pending = Some(GroupCommand::Configure(index));
+                                }
+                            });
+                        });
+                    });
+                })
+                .response
+                .on_hover_cursor(egui::CursorIcon::Grab);
+
+            if let Some(target) = drop_target(ui, &row, index)
+                && let Some(from) = row.dnd_release_payload::<usize>()
+            {
+                *pending = Some(GroupCommand::Move {
+                    from: *from,
+                    before: target,
+                });
+            }
         }
     }
 
@@ -635,6 +625,34 @@ impl AutomapperApp {
         }
     }
 
+    fn show_help(&mut self, ctx: &Context) {
+        if !self.help_open {
+            return;
+        }
+
+        let modal = egui::Modal::new(egui::Id::new("help")).show(ctx, |ui| {
+            ui.set_max_width(HELP_WIDTH);
+            ui.heading(concat!(
+                env!("CARGO_PKG_NAME"),
+                " ",
+                env!("CARGO_PKG_VERSION")
+            ));
+            ui.label("Visual editor to easily create DDNet automappers.");
+
+            ui.add_space(8.0);
+            ui.colored_label(ui.visuals().warn_fg_color, "TODO: <add tutorial here>");
+
+            ui.separator();
+            if ui.button("Close").clicked() {
+                self.help_open = false;
+            }
+        });
+
+        if modal.should_close() {
+            self.help_open = false;
+        }
+    }
+
     fn show_dialog(&mut self, ctx: &Context) {
         let Workspace::Ready(loaded) = &self.workspace else {
             return;
@@ -660,9 +678,7 @@ fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
         TileState::Locked => format!("Tile {tile} · locked"),
         TileState::Grouped => format!("Tile {tile} · in a group"),
         TileState::Removed => format!("Tile {tile} · removed"),
-        TileState::Guessed(guess) => {
-            format!("Tile {tile} · guess {}", format_neighborhood(guess))
-        }
+        TileState::Guessed(_) => format!("Tile {tile}"),
         TileState::Configured(rule) => {
             let neighborhood = format_neighborhood(rule.neighborhood);
             match rule.chance.is_full() {
@@ -708,6 +724,21 @@ fn upload_atlas(ctx: &Context, tileset: &Tileset) -> TextureHandle {
     ctx.load_texture("tileset_atlas", image, TextureOptions::NEAREST)
 }
 
+fn drop_target(ui: &Ui, row: &egui::Response, index: usize) -> Option<usize> {
+    let pointer = ui.input(|input| input.pointer.interact_pos())?;
+    row.dnd_hover_payload::<usize>()?;
+
+    let above = pointer.y < row.rect.center().y;
+    let edge = match above {
+        true => row.rect.top(),
+        false => row.rect.bottom(),
+    };
+    let stroke = egui::Stroke::new(2.0, ui.visuals().selection.stroke.color);
+    ui.painter().hline(row.rect.x_range(), edge, stroke);
+
+    Some(index + usize::from(!above))
+}
+
 fn describe_group(group: &TileGroup) -> String {
     let mut text = format!(
         "{} — {}×{}, {}",
@@ -721,13 +752,6 @@ fn describe_group(group: &TileGroup) -> String {
     }
 
     text
-}
-
-fn selection_label(defining_groups: bool) -> &'static str {
-    match defining_groups {
-        true => "Groups",
-        false => "Tiles",
-    }
 }
 
 fn render_source(

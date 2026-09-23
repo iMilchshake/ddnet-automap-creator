@@ -15,10 +15,11 @@ const MIN_BADGE_CELL_SIZE: f32 = 16.0;
 const CHECKER_LIGHT: Color32 = Color32::from_gray(64);
 const CHECKER_DARK: Color32 = Color32::from_gray(48);
 
-const CONFIGURED_COLOR: Color32 = Color32::from_rgb(120, 200, 120);
 const REMOVED_COLOR: Color32 = Color32::from_rgb(220, 110, 110);
-const REMOVED_TINT: Color32 = Color32::from_gray(85);
 const CONFIGURED_OUTLINE: Color32 = Color32::from_gray(205);
+
+const UNUSED_SCRIM: u8 = 150;
+const REMOVED_SCRIM: u8 = 215;
 
 /// Hues a golden angle apart, so neighbouring groups never share a shade.
 const HUE_STEP: f32 = 137.5 / 360.0;
@@ -70,18 +71,16 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         let cell = cell_rect(rect, cell_size, index);
         let state = tile_state(view.tileset, view.project, index);
 
-        if matches!(state, TileState::Locked) {
-            painter.rect_filled(cell, 0.0, ui.visuals().extreme_bg_color);
-            continue;
+        paint_checkerboard(&painter, cell, index);
+
+        if !matches!(state, TileState::Locked) {
+            let uv = Rect::from_min_max(tile.uv_min.into(), tile.uv_max.into());
+            painter.image(view.texture.id(), cell, uv, Color32::WHITE);
         }
 
-        let tint = match state {
-            TileState::Removed => REMOVED_TINT,
-            _ => Color32::WHITE,
-        };
-        paint_checkerboard(&painter, cell, index);
-        let uv = Rect::from_min_max(tile.uv_min.into(), tile.uv_max.into());
-        painter.image(view.texture.id(), cell, uv, tint);
+        if let Some(scrim) = tile_scrim(state) {
+            painter.rect_filled(cell, 0.0, scrim);
+        }
 
         if matches!(state, TileState::Configured(_)) {
             painter.rect_stroke(
@@ -244,6 +243,14 @@ fn paint_checkerboard(painter: &egui::Painter, cell: Rect, index: usize) {
     painter.rect_filled(cell, 0.0, color);
 }
 
+fn tile_scrim(state: TileState) -> Option<Color32> {
+    match state {
+        TileState::Configured(_) | TileState::Grouped => None,
+        TileState::Locked | TileState::Guessed(_) => Some(Color32::from_black_alpha(UNUSED_SCRIM)),
+        TileState::Removed => Some(Color32::from_black_alpha(REMOVED_SCRIM)),
+    }
+}
+
 /// Shapes rather than glyphs, so badges do not depend on font coverage.
 fn paint_badge(
     painter: &egui::Painter,
@@ -263,19 +270,9 @@ fn paint_badge(
     );
 
     match state {
-        TileState::Locked | TileState::Grouped => {}
-        TileState::Guessed(_) => {
-            painter.text(
-                mark.right_top(),
-                egui::Align2::RIGHT_TOP,
-                "?",
-                egui::FontId::proportional(cell_size * 0.35),
-                visuals.warn_fg_color,
-            );
-        }
+        TileState::Locked | TileState::Grouped | TileState::Guessed(_) => {}
         TileState::Removed => paint_cross(painter, mark),
         TileState::Configured(rule) => {
-            paint_check(painter, mark);
             if !rule.chance.is_full() {
                 painter.text(
                     pos2(cell.left() + inset, cell.bottom() - inset),
@@ -287,15 +284,6 @@ fn paint_badge(
             }
         }
     }
-}
-
-fn paint_check(painter: &egui::Painter, mark: Rect) {
-    let stroke = Stroke::new((mark.width() * 0.18).max(1.5), CONFIGURED_COLOR);
-    let left = pos2(mark.left(), mark.center().y);
-    let bottom = pos2(mark.center().x - mark.width() * 0.1, mark.bottom());
-
-    painter.line_segment([left, bottom], stroke);
-    painter.line_segment([bottom, mark.right_top()], stroke);
 }
 
 fn paint_cross(painter: &egui::Painter, mark: Rect) {
