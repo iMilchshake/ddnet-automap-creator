@@ -1,0 +1,74 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Check out the repository and the pinned rpp
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo, before every cache whose files live under target/
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install emscripten, which the trunk pre_build hook needs for rpp
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.10
+          actions-cache-folder: emsdk
+
+      - name: Collect what the rpp wasm build depends on
+        id: rpp
+        run: |
+          echo "revision=$(git -C vendor/rpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "emcc=$(emcc -dumpversion)" >> "$GITHUB_OUTPUT"
+
+      - name: Reuse the rpp wasm build while those stay the same
+        uses: actions/cache@v4
+        with:
+          path: target/rpp
+          key: rpp-${{ steps.rpp.outputs.emcc }}-${{ steps.rpp.outputs.revision }}-${{ hashFiles('scripts/build-rpp.sh') }}
+
+      - uses: jetli/trunk-action@v0.5.1
+        with:
+          version: v0.21.14
+
+      - name: Reuse the wasm-bindgen trunk downloads for this lockfile
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trunk
+          key: trunk-v0.21.14-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build against the sub-path Pages serves from
+        run: trunk build --release --public-url "/${GITHUB_REPOSITORY#*/}/"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
