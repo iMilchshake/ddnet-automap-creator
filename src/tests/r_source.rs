@@ -1,7 +1,8 @@
 use crate::export::r_source::{ExportError, RuleSet, render};
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
-use crate::model::tile::{Chance, TileRule};
+use crate::model::pool::ChanceMode;
+use crate::model::tile::{Chance, MASK_TILE, TileRule};
 use crate::tests::support::{index_of, mods, outer_corner};
 
 fn rule(neighborhood: Neighborhood, percent: f32, can_rotate: bool) -> TileRule {
@@ -25,7 +26,23 @@ fn emit_with_groups(
         name: "Grass_Main",
         tiles,
         groups,
+        chance_mode: ChanceMode::Normalize,
     })
+}
+
+fn emit_exact(tiles: &[(usize, TileRule)]) -> String {
+    render(&RuleSet {
+        image_stem: "grass_main",
+        name: "Grass_Main",
+        tiles,
+        groups: &[],
+        chance_mode: ChanceMode::Exact,
+    })
+    .unwrap()
+}
+
+fn anywhere(percent: f32) -> TileRule {
+    rule(Neighborhood::uniform(NeighborState::Any), percent, false)
 }
 
 fn body(source: &str) -> Vec<&str> {
@@ -56,7 +73,8 @@ fn a_rotated_corner_and_a_weighted_pool_match_the_reference_output() {
             "Insert(32.R).If(IndexAt([0, 0]).IsFullAt(left, bottomLeft, bottom).IsEmptyAt(top, right));",
             "Insert(32.VH).If(IndexAt([0, 0]).IsFullAt(topLeft, top, left).IsEmptyAt(right, bottom));",
             "Insert(32.VHR).If(IndexAt([0, 0]).IsFullAt(top, topRight, right).IsEmptyAt(left, bottom));",
-            "Insert(1, 2, 3, 66, 67).Chance(100, 5, 1, 1, 1).If(IndexAt([0, 0]).IsFullAt(topLeft, top, topRight, left, right, bottomLeft, bottom, bottomRight));",
+            "Insert(g:mask).If(IndexAt([0, 0]).IsFullAt(topLeft, top, topRight, left, right, bottomLeft, bottom, bottomRight));",
+            "Insert(1, 2, 3, 66, 67).Chance(100, 5, 1, 1, 1).If(IndexAt([0, 0]).Is(g:mask));",
         ]
     );
 }
@@ -96,7 +114,10 @@ fn a_pool_at_full_chance_rolls_instead_of_listing_chances() {
     ];
     let source = emit(&tiles);
 
-    assert!(body(&source)[0].starts_with("Insert(1, 2).Roll()"));
+    assert_eq!(
+        body(&source)[1],
+        "Insert(1, 2).Roll().If(IndexAt([0, 0]).Is(g:mask));"
+    );
 }
 
 #[test]
@@ -108,7 +129,59 @@ fn fractional_chances_keep_their_shortest_form() {
     ];
     let source = emit(&tiles);
 
-    assert!(body(&source)[0].contains(".Chance(2.5, 100)"));
+    assert!(body(&source)[1].contains(".Chance(2.5, 100)"));
+}
+
+#[test]
+fn a_lone_tile_ignores_its_chance_when_normalized() {
+    assert_eq!(body(&emit(&[(5, anywhere(30.0))])), ["Insert(5);"]);
+}
+
+#[test]
+fn a_lone_tile_keeps_its_chance_when_exact() {
+    assert_eq!(
+        body(&emit_exact(&[(5, anywhere(30.0))])),
+        ["Insert(5).Chance(30);"]
+    );
+}
+
+#[test]
+fn a_pool_rolls_on_a_mask_it_places_first() {
+    let tiles = [(5, anywhere(30.0)), (6, anywhere(30.0))];
+
+    assert_eq!(
+        body(&emit(&tiles)),
+        [
+            "Insert(g:mask);",
+            "Insert(5, 6).Roll().If(IndexAt([0, 0]).Is(g:mask));",
+        ]
+    );
+}
+
+#[test]
+fn an_exact_pool_below_100_masks_only_its_total() {
+    let tiles = [(5, anywhere(30.0)), (6, anywhere(30.0))];
+
+    assert_eq!(body(&emit_exact(&tiles))[0], "Insert(g:mask).Chance(60);");
+}
+
+#[test]
+fn pool_chances_below_100_are_scaled_so_every_mask_is_replaced() {
+    let tiles = [(5, anywhere(10.0)), (6, anywhere(30.0))];
+
+    for source in [emit(&tiles), emit_exact(&tiles)] {
+        assert_eq!(
+            body(&source)[1],
+            "Insert(5, 6).Chance(25, 75).If(IndexAt([0, 0]).Is(g:mask));"
+        );
+    }
+}
+
+#[test]
+fn a_rule_on_the_mask_tile_is_refused() {
+    let error = emit_with_groups(&[(MASK_TILE, anywhere(100.0))], &[]).unwrap_err();
+
+    assert!(matches!(error, ExportError::MaskTile));
 }
 
 #[test]
@@ -152,6 +225,7 @@ fn a_rule_set_name_outside_the_allowed_characters_is_refused() {
             name,
             tiles: &tiles,
             groups: &[],
+            chance_mode: ChanceMode::Normalize,
         })
         .unwrap_err();
 

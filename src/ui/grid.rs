@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
+
 use egui::ecolor::Hsva;
 use egui::emath::GuiRounding as _;
 use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, Vec2, pos2};
 
 use crate::model::group::TileGroup;
 use crate::model::project::Project;
-use crate::model::tile::TILESET_SIDE;
+use crate::model::tile::{Chance, TILESET_SIDE};
 use crate::tileset::{TileSlice, Tileset};
 use crate::ui::group_panel::mode_label;
 use crate::ui::tile_state::{TileState, tile_state};
@@ -39,9 +41,12 @@ const CHANCE_FONT: f32 = 0.26;
 const CROSS_WIDTH: f32 = 0.18;
 const MIN_CROSS_WIDTH: f32 = 1.5;
 
+const PERCENT_ROUNDING: f32 = 10.0;
+
 pub struct GridView<'a> {
     pub tileset: &'a Tileset,
     pub project: &'a Project,
+    pub shares: &'a BTreeMap<usize, f32>,
     pub texture: &'a TextureHandle,
     pub group_editing: bool,
     pub drag_anchor: Option<usize>,
@@ -55,6 +60,13 @@ pub struct GridResponse {
     pub secondary_clicked: Option<usize>,
     pub drag_started: Option<usize>,
     pub drag_released: Option<usize>,
+}
+
+/// One decimal at most, and none for whole numbers.
+pub fn format_percent(percent: f32) -> String {
+    let rounded = (percent * PERCENT_ROUNDING).round() / PERCENT_ROUNDING;
+
+    format!("{rounded}%")
 }
 
 pub fn group_color(index: usize) -> Color32 {
@@ -107,7 +119,8 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
             );
         }
 
-        paint_badge(&painter, cell, cell_size, state, ui.visuals());
+        let share = view.shares.get(&index).copied();
+        paint_badge(&painter, cell, cell_size, state, share, ui.visuals());
     }
 
     for (index, group) in view.project.groups().iter().enumerate() {
@@ -319,6 +332,7 @@ fn paint_badge(
     cell: Rect,
     cell_size: f32,
     state: TileState,
+    share: Option<f32>,
     visuals: &egui::Visuals,
 ) {
     if cell_size < MIN_BADGE_CELL_SIZE {
@@ -335,12 +349,14 @@ fn paint_badge(
     match state {
         TileState::Locked | TileState::Grouped | TileState::Guessed(_) => {}
         TileState::Removed => paint_cross(painter, mark),
-        TileState::Configured(rule) => {
-            if !rule.chance.is_full() {
+        TileState::Configured(_) => {
+            if let Some(share) = share
+                && share < Chance::FULL.percent()
+            {
                 painter.text(
                     pos2(cell.left() + inset, cell.bottom() - inset),
                     egui::Align2::LEFT_BOTTOM,
-                    format!("{}%", rule.chance.percent()),
+                    format_percent(share),
                     egui::FontId::proportional(cell_size * CHANCE_FONT),
                     visuals.strong_text_color(),
                 );

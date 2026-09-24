@@ -30,12 +30,9 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 
 ## TODO
 
-- fix chance pools: DDNet keeps the last match, not the first
 - .map export (via ddnet-rs / twmap ?)
-- show effective chance after rpp unbias and roll
 - undo and redo for tile and group edits
 - rules for cells whose center is empty
-- visually link tiles that share a neighborhood while editing
 - autosave the project (in browser storage)
 - several rule sets in one .rules file
 - (live) .r source preview -> could be used as an interactive tool to learn r++?
@@ -43,6 +40,8 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 - drag-n-drop tilesets to load it
 - keyboard navigation / shortcuts?
 - rpp runs on the main thread, a hang could kill the tab
+- use an empty tileset tile as mask, not always 255
+- do we want to support modulo rules? how are they used?
 
 ## Acknowledgements 
 

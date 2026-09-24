@@ -1,10 +1,15 @@
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::project::Project;
-use crate::model::tile::{Chance, TileRule};
+use crate::model::tile::{Chance, MASK_TILE, TileRule};
 
 fn some_rule() -> TileRule {
     TileRule::new(Neighborhood::uniform(NeighborState::Full))
+}
+
+#[test]
+fn the_mask_tile_is_never_free() {
+    assert!(!Project::default().is_free(MASK_TILE));
 }
 
 #[test]

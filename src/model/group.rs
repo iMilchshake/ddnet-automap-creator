@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::model::tile::{Chance, TILESET_SIDE};
+use crate::model::tile::{Chance, MASK_TILE, TILESET_SIDE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupMode {
@@ -28,6 +28,9 @@ pub enum GroupError {
 
     #[error("a group cannot start at tile 0, which is always empty")]
     StartsAtZero,
+
+    #[error("a group cannot cover tile {MASK_TILE}, which rpp reserves as its mask")]
+    CoversMask,
 
     #[error("a {width}×{height} group at tile {top_left} runs off the tileset")]
     OutOfBounds {
@@ -93,6 +96,9 @@ impl TileGroup {
         }
         if self.top_left == 0 {
             return Err(GroupError::StartsAtZero);
+        }
+        if self.covers(MASK_TILE) {
+            return Err(GroupError::CoversMask);
         }
         if self.column() + self.width > TILESET_SIDE || self.row() + self.height > TILESET_SIDE {
             return Err(GroupError::OutOfBounds {

@@ -8,9 +8,15 @@ use crate::model::transform::Transform;
 const SOLID: char = '#';
 const SOLID_TILE: u8 = 1;
 
-/// Any non-zero seed keeps the preview stable; zero makes twmap roll its own.
-const SEED: u32 = 1;
+/// rpp rounds a chance slightly above 100% to `Random 1`, which is equivalent to having no Random.
+/// Its technically not wrong syntax, but also nonsensical as it could just be dropped.
+/// DDNet reads this without any problems, but twmap refuses it. So as a hotfix we drop it before parsing.
+const ALWAYS: &str = "Random 1";
 
+/// Any non-zero seed keeps the preview stable; zero makes twmap roll its own.
+pub const FIRST_SEED: u32 = 1;
+
+// TODO: add Assa's patterns
 pub const SAMPLE: [&str; 17] = [
     "................................",
     "..########.........#.....#.#.#..",
@@ -61,15 +67,27 @@ impl Automapped {
 
 /// Runs the first rule set of a compiled `.rules` file over [`SAMPLE`], the
 /// way DDNet's editor would.
-pub fn automap(rules: &str) -> Result<Automapped, PreviewError> {
-    let automapper = Automapper::parse(String::new(), rules)
+pub fn automap(rules: &str, seed: u32) -> Result<Automapped, PreviewError> {
+    let rules: String = rules
+        .lines()
+        .filter(|line| line.trim() != ALWAYS)
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let automapper = Automapper::parse(String::new(), &rules)
         .map_err(|error| PreviewError::Syntax(error.to_string()))?;
     let rule_set = automapper.configs.first().ok_or(PreviewError::NoRuleSet)?;
 
     let mut tiles = sample_tiles();
-    rule_set.run(SEED, &mut tiles);
+    rule_set.run(seed, &mut tiles);
 
     Ok(collect(&tiles))
+}
+
+pub fn next_seed(seed: u32) -> u32 {
+    match seed.wrapping_add(1) {
+        0 => FIRST_SEED,
+        next => next,
+    }
 }
 
 fn sample_tiles() -> Array2<Tile> {

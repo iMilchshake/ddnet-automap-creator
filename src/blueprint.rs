@@ -4,8 +4,9 @@ use thiserror::Error;
 
 use crate::model::group::{self, GroupError, GroupMode, TileGroup};
 use crate::model::neighbor::{NEIGHBOR_COUNT, NeighborState, Neighborhood};
+use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
-use crate::model::tile::{Chance, InvalidChance, TILE_COUNT, TileMods, TileRule};
+use crate::model::tile::{Chance, InvalidChance, MASK_TILE, TILE_COUNT, TileMods, TileRule};
 
 const VERSION: u32 = 1;
 
@@ -29,6 +30,9 @@ pub enum BlueprintError {
     #[error("tile {0} appears more than once")]
     DuplicateTile(usize),
 
+    #[error("tile {MASK_TILE} is reserved as rpp's mask and cannot hold a rule")]
+    MaskTile,
+
     #[error("`{0}` is not a neighbor state, expected 0 (empty), 1 (full) or 2 (any)")]
     NeighborCode(u8),
 
@@ -48,6 +52,8 @@ pub struct Blueprint {
     pub image: Option<String>,
     #[serde(default)]
     pub rule_set: String,
+    #[serde(default)]
+    pub chances: BlueprintChanceMode,
     pub tiles: Vec<BlueprintTile>,
     #[serde(default)]
     pub removed: Vec<usize>,
@@ -80,6 +86,14 @@ pub struct BlueprintGroup {
     pub chance: f32,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BlueprintChanceMode {
+    #[default]
+    Normalize,
+    Exact,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BlueprintMode {
@@ -97,6 +111,10 @@ pub fn to_json(project: &Project, image: &str, rule_set: &str) -> Result<String,
         version: VERSION,
         image: Some(image.to_owned()),
         rule_set: rule_set.to_owned(),
+        chances: match project.chance_mode() {
+            ChanceMode::Normalize => BlueprintChanceMode::Normalize,
+            ChanceMode::Exact => BlueprintChanceMode::Exact,
+        },
         tiles: project.rules().into_iter().map(store_tile).collect(),
         removed: project.removed_tiles(),
         groups: project.groups().iter().map(store_group).collect(),
@@ -128,9 +146,16 @@ pub fn from_json(text: &str, image: &str) -> Result<Loaded, BlueprintError> {
     }
 
     let mut project = Project::default();
+    project.set_chance_mode(match blueprint.chances {
+        BlueprintChanceMode::Normalize => ChanceMode::Normalize,
+        BlueprintChanceMode::Exact => ChanceMode::Exact,
+    });
     for tile in &blueprint.tiles {
         if tile.id >= TILE_COUNT {
             return Err(BlueprintError::TileId(tile.id));
+        }
+        if tile.id == MASK_TILE {
+            return Err(BlueprintError::MaskTile);
         }
         if project.rule(tile.id).is_some() {
             return Err(BlueprintError::DuplicateTile(tile.id));

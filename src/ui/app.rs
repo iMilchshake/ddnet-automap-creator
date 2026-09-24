@@ -9,15 +9,16 @@ use crate::file_picker::{FilePicker, PickedFile};
 use crate::file_saver::FileSaver;
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::pool::{self, ChanceMode};
 use crate::model::project::Project;
-use crate::model::tile::{Chance, TILESET_SIDE};
+use crate::model::tile::{Chance, MASK_TILE, TILESET_SIDE};
 use crate::preview::{self, Automapped};
 use crate::tileset::{self, Tileset};
 use crate::ui::grid::{self, GridResponse, GridView};
 use crate::ui::group_panel::{GroupPanel, mode_label};
 use crate::ui::preview as preview_view;
 use crate::ui::status::StatusLine;
-use crate::ui::tile_panel::{TileEdit, TilePanel};
+use crate::ui::tile_panel::{TileEdit, TilePanel, TileShares};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 
 const SIDE_PANEL_WIDTH: f32 = 260.0;
@@ -41,6 +42,12 @@ const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With group
 const EMPTY_INSPECTOR: &str = "Pick a tile or a group to edit it here.";
 const PREVIEW_TOOLTIP: &str = "Tileset edits the rules, Preview shows them applied to a sample \
                                map the way DDNet's automapper would.";
+const NORMALIZE_TOOLTIP: &str = "ON: chances are re-normalized to always add up to 100%\n\
+                                 OFF: allows tiles to remain unchanged if summed chance is below \
+                                 100%";
+const MASK_WARNING: &str = "is reserved: rpp uses it as a mask to roll tiles that share a \
+                            neighborhood.";
+const GENERATE_TOOLTIP: &str = "Roll the chances again with the next seed.";
 const PREVIEW_WAITING: &str = "Compiling the rules for the preview…";
 const GROUP_ORDER_NOTE: &str = "applied top to bottom";
 
@@ -88,7 +95,10 @@ enum CompileTarget {
 
 enum PreviewResult {
     Waiting,
-    Ready(Automapped),
+    Ready {
+        rules: String,
+        automapped: Automapped,
+    },
     Failed(String),
 }
 
@@ -121,6 +131,7 @@ pub struct AutomapperApp {
     view: View,
     preview: PreviewResult,
     preview_source: Option<String>,
+    preview_seed: u32,
     inspector: Inspector,
     define_groups: bool,
     drag_anchor: Option<usize>,
@@ -144,6 +155,7 @@ impl Default for AutomapperApp {
             view: View::Tileset,
             preview: PreviewResult::Waiting,
             preview_source: None,
+            preview_seed: preview::FIRST_SEED,
             inspector: Inspector::Empty,
             define_groups: false,
             drag_anchor: None,
@@ -330,10 +342,7 @@ impl AutomapperApp {
 
         match (target, result) {
             (CompileTarget::Preview, Ok(Compiled { rules, .. })) => {
-                self.preview = match preview::automap(&rules) {
-                    Ok(automapped) => PreviewResult::Ready(automapped),
-                    Err(error) => PreviewResult::Failed(error.to_string()),
-                };
+                self.preview = preview_result(rules, self.preview_seed);
             }
             (CompileTarget::Preview, Err(error)) => {
                 self.preview = PreviewResult::Failed(error.to_string());
@@ -444,6 +453,8 @@ impl AutomapperApp {
                     self.export_open = true;
                 }
 
+                ui.menu_button("Options", |ui| self.show_options(ui));
+
                 if ui.button("Help").clicked() {
                     self.help_open = true;
                 }
@@ -451,7 +462,10 @@ impl AutomapperApp {
                 ui.separator();
                 self.show_view_picker(ui);
                 ui.separator();
-                self.show_selection_picker(ui);
+                match self.view {
+                    View::Tileset => self.show_selection_picker(ui),
+                    View::Preview => self.show_regenerate(ui),
+                }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let credit = egui::RichText::new(CREDIT).weak();
@@ -476,11 +490,37 @@ impl AutomapperApp {
         .on_hover_text(PREVIEW_TOOLTIP);
     }
 
+    fn show_options(&mut self, ui: &mut Ui) {
+        let mut normalize = self.project.chance_mode() == ChanceMode::Normalize;
+        if ui
+            .checkbox(&mut normalize, "Normalize chances")
+            .on_hover_text(NORMALIZE_TOOLTIP)
+            .changed()
+        {
+            self.project.set_chance_mode(match normalize {
+                true => ChanceMode::Normalize,
+                false => ChanceMode::Exact,
+            });
+        }
+    }
+
+    fn show_regenerate(&mut self, ui: &mut Ui) {
+        let ready = matches!(self.preview, PreviewResult::Ready { .. });
+        if ui
+            .add_enabled(ready, egui::Button::new("Re-generate"))
+            .on_hover_text(GENERATE_TOOLTIP)
+            .clicked()
+        {
+            self.regenerate_preview();
+        }
+        ui.weak(format!("seed {}", self.preview_seed));
+    }
+
     fn show_selection_picker(&mut self, ui: &mut Ui) {
-        let editing = matches!(self.workspace, Workspace::Ready(_)) && self.view == View::Tileset;
+        let has_image = matches!(self.workspace, Workspace::Ready(_));
         let was_defining = self.define_groups;
 
-        ui.add_enabled_ui(editing, |ui| {
+        ui.add_enabled_ui(has_image, |ui| {
             ui.label("Selecting:");
             ui.selectable_value(&mut self.define_groups, false, "Tiles");
             ui.selectable_value(&mut self.define_groups, true, "Groups");
@@ -513,6 +553,7 @@ impl AutomapperApp {
     fn show_side_panel(&mut self, ui: &mut Ui) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
         let selected_group = self.inspector.group();
+        let pools = pool::pools(&self.project.rules());
         let mut pending = None;
         let mut tile_edit = None;
         let mut group_edit = None;
@@ -539,8 +580,15 @@ impl AutomapperApp {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         match (&self.workspace, &mut self.inspector) {
                             (Workspace::Ready(loaded), Inspector::Tile(panel)) => {
+                                let shares = TileShares {
+                                    pools: pools
+                                        .iter()
+                                        .filter(|pool| pool.contains(panel.tile()))
+                                        .collect(),
+                                    mode: self.project.chance_mode(),
+                                };
                                 tile_edit = panel
-                                    .show(ui, &loaded.tileset, &loaded.texture)
+                                    .show(ui, &loaded.tileset, &loaded.texture, &shares)
                                     .map(|edit| (panel.tile(), edit));
                             }
                             (_, Inspector::Group(panel)) => {
@@ -675,6 +723,9 @@ impl AutomapperApp {
     }
 
     fn show_tileset(&mut self, ui: &mut Ui, ctx: &Context) {
+        let pools = pool::pools(&self.project.rules());
+        let shares = pool::base_shares(&pools, self.project.chance_mode());
+
         let response = egui::CentralPanel::default()
             .show(ui, |ui| match &self.workspace {
                 Workspace::NoImage => {
@@ -693,6 +744,7 @@ impl AutomapperApp {
                             GridView {
                                 tileset: &loaded.tileset,
                                 project: &self.project,
+                                shares: &shares,
                                 texture: &loaded.texture,
                                 group_editing: self.define_groups,
                                 drag_anchor: self.drag_anchor,
@@ -706,6 +758,15 @@ impl AutomapperApp {
             .inner;
 
         self.handle_grid(ctx, response);
+    }
+
+    fn regenerate_preview(&mut self) {
+        let PreviewResult::Ready { rules, .. } = &self.preview else {
+            return;
+        };
+
+        self.preview_seed = preview::next_seed(self.preview_seed);
+        self.preview = preview_result(rules.clone(), self.preview_seed);
     }
 
     fn show_preview(&mut self, ui: &mut Ui) {
@@ -727,7 +788,7 @@ impl AutomapperApp {
                 PreviewResult::Failed(error) => {
                     ui.colored_label(ui.visuals().error_fg_color, error);
                 }
-                PreviewResult::Ready(automapped) => {
+                PreviewResult::Ready { automapped, .. } => {
                     ui.vertical_centered(|ui| {
                         preview_view::show(ui, &loaded.tileset, &loaded.texture, automapped);
                     });
@@ -771,6 +832,11 @@ impl AutomapperApp {
         if self.define_groups {
             self.handle_group_grid(ctx, response);
             return;
+        }
+
+        if response.clicked == Some(MASK_TILE) {
+            self.status
+                .warning(ctx, format!("Tile {MASK_TILE} {MASK_WARNING}"));
         }
 
         if let Some(tile) = response.clicked
@@ -837,6 +903,10 @@ impl AutomapperApp {
             chance: Chance::FULL,
         };
 
+        if let Err(error) = group.validate() {
+            self.status.warning(ctx, error.to_string());
+            return;
+        }
         if !group
             .footprint()
             .iter()
@@ -844,10 +914,6 @@ impl AutomapperApp {
         {
             self.status
                 .warning(ctx, "Those tiles already belong to a group or a rule");
-            return;
-        }
-        if let Err(error) = group.validate() {
-            self.status.warning(ctx, error.to_string());
             return;
         }
 
@@ -997,6 +1063,10 @@ fn show_group_row(
 }
 
 fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
+    if tile == MASK_TILE {
+        return format!("Tile {tile} · reserved as mask");
+    }
+
     match tile_state(tileset, project, tile) {
         TileState::Locked => format!("Tile {tile} · locked"),
         TileState::Grouped => format!("Tile {tile} · in a group"),
@@ -1077,6 +1147,13 @@ fn describe_group(group: &TileGroup) -> String {
     text
 }
 
+fn preview_result(rules: String, seed: u32) -> PreviewResult {
+    match preview::automap(&rules, seed) {
+        Ok(automapped) => PreviewResult::Ready { rules, automapped },
+        Err(error) => PreviewResult::Failed(error.to_string()),
+    }
+}
+
 fn render_source(
     project: &Project,
     image_stem: &str,
@@ -1088,6 +1165,7 @@ fn render_source(
         name: rule_set_name,
         tiles: &tiles,
         groups: project.groups(),
+        chance_mode: project.chance_mode(),
     };
 
     r_source::render(&rule_set)

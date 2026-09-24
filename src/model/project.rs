@@ -1,16 +1,26 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::group::TileGroup;
-use crate::model::tile::TileRule;
+use crate::model::pool::ChanceMode;
+use crate::model::tile::{MASK_TILE, TileRule};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Project {
     rules: BTreeMap<usize, TileRule>,
     removed: BTreeSet<usize>,
     groups: Vec<TileGroup>,
+    chance_mode: ChanceMode,
 }
 
 impl Project {
+    pub fn chance_mode(&self) -> ChanceMode {
+        self.chance_mode
+    }
+
+    pub fn set_chance_mode(&mut self, mode: ChanceMode) {
+        self.chance_mode = mode;
+    }
+
     pub fn rule(&self, tile: usize) -> Option<&TileRule> {
         self.rules.get(&tile)
     }
@@ -94,7 +104,7 @@ impl Project {
     }
 
     pub fn is_free(&self, tile: usize) -> bool {
-        self.rule(tile).is_none() && self.group_at(tile).is_none()
+        tile != MASK_TILE && self.rule(tile).is_none() && self.group_at(tile).is_none()
     }
 
     pub fn group_at(&self, tile: usize) -> Option<usize> {

@@ -1,7 +1,9 @@
 use egui::{Color32, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui, Vec2};
 
 use crate::model::neighbor::{NeighborState, Neighborhood, neighbor_index_at};
+use crate::model::pool::{ChanceMode, Pool};
 use crate::model::tile::{Chance, TileMods, TileRule};
+use crate::model::transform::Transform;
 use crate::tileset::Tileset;
 use crate::ui::grid;
 
@@ -29,8 +31,18 @@ const PREVIEW_DARK: Color32 = Color32::from_gray(48);
 
 const CELL_TOOLTIP: &str = "Left-click for the next state, right-click for the previous one, \
                             or press 1 (empty), 2 (full), 3 (any) while hovering.";
-const CHANCE_TOOLTIP: &str = "Tiles declaring the same neighborhood split it between them, \
-                              anything left over falls through to a less specific rule.";
+const CHANCE_TOOLTIP: &str = "Tiles declaring the same neighborhood split it between them by \
+                              their chances. With Normalize chances off, a total below 100 % \
+                              leaves the rest of the cells unchanged.";
+const SHARES_TOOLTIP: &str = "What each tile ends up on, of the cells matching a neighborhood \
+                              this tile places itself on.";
+const UNCHANGED: &str = "unchanged";
+
+/// The pools the inspected tile is a member of, with how their chances apply.
+pub struct TileShares<'a> {
+    pub pools: Vec<&'a Pool>,
+    pub mode: ChanceMode,
+}
 
 pub enum TileEdit {
     Apply(TileRule),
@@ -68,6 +80,7 @@ impl TilePanel {
         ui: &mut Ui,
         tileset: &Tileset,
         texture: &TextureHandle,
+        shares: &TileShares,
     ) -> Option<TileEdit> {
         ui.heading(match self.has_rule {
             true => format!("Tile {}", self.tile),
@@ -86,7 +99,44 @@ impl TilePanel {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
 
+        if is_worth_showing(shares) {
+            ui.add_space(SECTION_SPACING);
+            self.show_shares(ui, shares);
+        }
+
         edit
+    }
+
+    fn show_shares(&self, ui: &mut Ui, shares: &TileShares) {
+        ui.label("Resulting chances:").on_hover_text(SHARES_TOOLTIP);
+
+        for (index, pool) in shares.pools.iter().enumerate() {
+            if index > 0 {
+                ui.separator();
+            }
+
+            egui::Grid::new(("tile_shares", index)).show(ui, |ui| {
+                for (member, share) in pool.members.iter().zip(pool.shares(shares.mode)) {
+                    let name = format!("Tile {}{}", member.tile, transform_label(member.transform));
+                    let name = egui::RichText::new(name);
+                    let name = match member.tile == self.tile {
+                        true => name.strong(),
+                        false => name,
+                    };
+                    ui.label(name);
+                    ui.label(grid::format_percent(share));
+                    ui.end_row();
+                }
+
+                let unchanged = Chance::FULL.percent() - pool.coverage(shares.mode);
+                if unchanged > 0.0 {
+                    let warn = ui.visuals().warn_fg_color;
+                    ui.colored_label(warn, UNCHANGED);
+                    ui.colored_label(warn, grid::format_percent(unchanged));
+                    ui.end_row();
+                }
+            });
+        }
     }
 
     fn show_action(&mut self, ui: &mut Ui, changed: bool) -> Option<TileEdit> {
@@ -215,6 +265,30 @@ impl TilePanel {
         });
 
         edit
+    }
+}
+
+fn is_worth_showing(shares: &TileShares) -> bool {
+    shares
+        .pools
+        .iter()
+        .any(|pool| pool.members.len() > 1 || pool.coverage(shares.mode) < Chance::FULL.percent())
+}
+
+fn transform_label(transform: Transform) -> String {
+    let parts: Vec<&str> = [
+        (transform.x_flip, "X-Flip"),
+        (transform.y_flip, "Y-Flip"),
+        (transform.rot, "Rotate"),
+    ]
+    .into_iter()
+    .filter(|(applied, _)| *applied)
+    .map(|(_, name)| name)
+    .collect();
+
+    match parts.is_empty() {
+        true => String::new(),
+        false => format!(" with {}", parts.join(", ")),
     }
 }
 

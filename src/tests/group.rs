@@ -1,5 +1,5 @@
 use crate::model::group::{GroupError, GroupMode, TileGroup, validate_all};
-use crate::model::tile::Chance;
+use crate::model::tile::{Chance, MASK_TILE};
 
 fn group(name: &str, top_left: usize, width: usize, height: usize) -> TileGroup {
     TileGroup {
@@ -10,6 +10,14 @@ fn group(name: &str, top_left: usize, width: usize, height: usize) -> TileGroup 
         mode: GroupMode::Fill,
         chance: Chance::FULL,
     }
+}
+
+#[test]
+fn a_group_over_the_mask_tile_is_refused() {
+    let corner = group("a", MASK_TILE - 17, 2, 2);
+
+    assert!(corner.covers(MASK_TILE));
+    assert!(matches!(corner.validate(), Err(GroupError::CoversMask)));
 }
 
 #[test]
@@ -94,7 +102,7 @@ fn a_group_cannot_start_at_zero_or_leave_the_tileset() {
 
     assert!(group("a", 15, 2, 1).validate().is_err());
     assert!(group("a", 240, 1, 2).validate().is_err());
-    assert!(group("a", 239, 1, 2).validate().is_ok());
+    assert!(group("a", 238, 1, 2).validate().is_ok());
 }
 
 #[test]

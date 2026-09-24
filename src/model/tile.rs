@@ -5,6 +5,9 @@ use crate::model::neighbor::Neighborhood;
 pub const TILESET_SIDE: usize = 16;
 pub const TILE_COUNT: usize = TILESET_SIDE * TILESET_SIDE;
 
+/// rpp's `g:mask`, the tile randomized pools are rolled onto.
+pub const MASK_TILE: usize = TILE_COUNT - 1;
+
 #[derive(Debug, Error)]
 #[error("chance must be greater than 0 and at most 100, got {0}")]
 pub struct InvalidChance(pub f32);

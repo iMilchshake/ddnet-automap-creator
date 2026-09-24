@@ -1,8 +1,9 @@
 use crate::blueprint::{self, BlueprintError};
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
-use crate::model::tile::{Chance, TileRule};
+use crate::model::tile::{Chance, MASK_TILE, TileRule};
 use crate::tests::support::{mods, outer_corner};
 
 const IMAGE: &str = "grass_main";
@@ -120,6 +121,30 @@ fn a_tile_outside_the_tileset_is_refused() {
         load(&json).unwrap_err(),
         BlueprintError::TileId(256)
     ));
+}
+
+#[test]
+fn a_rule_on_the_mask_tile_is_refused() {
+    let json = one_tile(&format!(
+        r#"{{"id": {MASK_TILE}, "con": [0,0,0,0,0,0,0,0], "chance": 100.0,
+            "mods": {{"x_flip": false, "y_flip": false, "rot": false}}}}"#
+    ));
+    assert!(matches!(load(&json).unwrap_err(), BlueprintError::MaskTile));
+}
+
+#[test]
+fn the_chance_mode_survives_a_round_trip() {
+    let mut project = furnished();
+    project.set_chance_mode(ChanceMode::Exact);
+
+    assert_eq!(round_trip(&project).chance_mode(), ChanceMode::Exact);
+}
+
+#[test]
+fn a_file_without_a_chance_mode_normalizes() {
+    let json = r#"{"version": 1, "image": "grass_main", "tiles": []}"#;
+
+    assert_eq!(load(json).unwrap().chance_mode(), ChanceMode::Normalize);
 }
 
 #[test]
