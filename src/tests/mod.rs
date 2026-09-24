@@ -2,6 +2,7 @@ mod blueprint;
 mod bundle;
 mod group;
 mod neighbor;
+mod preview;
 mod project;
 mod r_source;
 mod support;

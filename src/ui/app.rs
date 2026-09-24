@@ -11,9 +11,11 @@ use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::project::Project;
 use crate::model::tile::{Chance, TILESET_SIDE};
+use crate::preview::{self, Automapped};
 use crate::tileset::{self, Tileset};
 use crate::ui::grid::{self, GridResponse, GridView};
 use crate::ui::group_panel::{GroupPanel, mode_label};
+use crate::ui::preview as preview_view;
 use crate::ui::status::StatusLine;
 use crate::ui::tile_panel::{TileEdit, TilePanel};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
@@ -37,6 +39,9 @@ const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With group
                                  across the tileset to add one, click one to edit it, right-click \
                                  to remove it.";
 const EMPTY_INSPECTOR: &str = "Pick a tile or a group to edit it here.";
+const PREVIEW_TOOLTIP: &str = "Tileset edits the rules, Preview shows them applied to a sample \
+                               map the way DDNet's automapper would.";
+const PREVIEW_WAITING: &str = "Compiling the rules for the preview…";
 const GROUP_ORDER_NOTE: &str = "applied top to bottom";
 
 enum GroupCommand {
@@ -69,6 +74,24 @@ impl Inspector {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum View {
+    Tileset,
+    Preview,
+}
+
+enum CompileTarget {
+    Rules,
+    Bundle(PendingBundle),
+    Preview,
+}
+
+enum PreviewResult {
+    Waiting,
+    Ready(Automapped),
+    Failed(String),
+}
+
 enum Workspace {
     NoImage,
     Ready(LoadedTileset),
@@ -93,8 +116,11 @@ pub struct AutomapperApp {
     blueprint_picker: FilePicker,
     saver: FileSaver,
     compiler: RulesCompiler,
+    compile_target: Option<CompileTarget>,
     status: StatusLine,
-    pending_bundle: Option<PendingBundle>,
+    view: View,
+    preview: PreviewResult,
+    preview_source: Option<String>,
     inspector: Inspector,
     define_groups: bool,
     drag_anchor: Option<usize>,
@@ -113,8 +139,11 @@ impl Default for AutomapperApp {
             blueprint_picker: FilePicker::new(BLUEPRINT),
             saver: FileSaver::new(),
             compiler: RulesCompiler::new(),
+            compile_target: None,
             status: StatusLine::default(),
-            pending_bundle: None,
+            view: View::Tileset,
+            preview: PreviewResult::Waiting,
+            preview_source: None,
             inspector: Inspector::Empty,
             define_groups: false,
             drag_anchor: None,
@@ -138,7 +167,10 @@ impl eframe::App for AutomapperApp {
         self.show_menu_bar(ui, &ctx);
         self.show_status_bar(ui);
         self.show_side_panel(ui);
-        self.show_tileset(ui, &ctx);
+        match self.view {
+            View::Tileset => self.show_tileset(ui, &ctx),
+            View::Preview => self.show_preview(ui),
+        }
         self.show_export(&ctx);
         self.show_help(&ctx);
 
@@ -246,8 +278,7 @@ impl AutomapperApp {
         let stem = loaded.tileset.stem.clone();
         match render_source(&self.project, &stem, &self.rule_set_name) {
             Ok(source) => {
-                self.pending_bundle = None;
-                self.compiler.start(source, r_source::output_file(&stem));
+                self.start_compile(source, &stem, CompileTarget::Rules);
                 self.status.info(ctx, "Compiling with rpp…");
             }
             Err(error) => self.status.warning(ctx, error.to_string()),
@@ -275,28 +306,47 @@ impl AutomapperApp {
             }
         };
 
-        self.compiler
-            .start(source.clone(), r_source::output_file(&stem));
-        self.pending_bundle = Some(PendingBundle {
-            image_stem: stem,
-            source,
+        let pending = PendingBundle {
+            image_stem: stem.clone(),
+            source: source.clone(),
             blueprint,
-        });
+        };
+        self.start_compile(source, &stem, CompileTarget::Bundle(pending));
         self.status.info(ctx, "Compiling with rpp…");
+    }
+
+    fn start_compile(&mut self, source: String, stem: &str, target: CompileTarget) {
+        self.compiler.start(source, r_source::output_file(stem));
+        self.compile_target = Some(target);
     }
 
     fn receive_compiled_rules(&mut self, ctx: &Context) {
         let Some(result) = self.compiler.poll() else {
             return;
         };
-        let pending = self.pending_bundle.take();
+        let Some(target) = self.compile_target.take() else {
+            return;
+        };
 
-        match result {
-            Ok(Compiled { file_name, rules }) => match pending {
-                Some(pending) => self.save_bundle(ctx, pending, &rules),
-                None => self.saver.save_text(RULES, &file_name, rules),
-            },
-            Err(error) => self.status.warning(ctx, error.to_string()),
+        match (target, result) {
+            (CompileTarget::Preview, Ok(Compiled { rules, .. })) => {
+                self.preview = match preview::automap(&rules) {
+                    Ok(automapped) => PreviewResult::Ready(automapped),
+                    Err(error) => PreviewResult::Failed(error.to_string()),
+                };
+            }
+            (CompileTarget::Preview, Err(error)) => {
+                self.preview = PreviewResult::Failed(error.to_string());
+            }
+            (CompileTarget::Rules, Ok(Compiled { file_name, rules })) => {
+                self.saver.save_text(RULES, &file_name, rules);
+            }
+            (CompileTarget::Bundle(pending), Ok(Compiled { rules, .. })) => {
+                self.save_bundle(ctx, pending, &rules);
+            }
+            (CompileTarget::Rules | CompileTarget::Bundle(_), Err(error)) => {
+                self.status.warning(ctx, error.to_string());
+            }
         }
     }
 
@@ -344,6 +394,8 @@ impl AutomapperApp {
         self.inspector = Inspector::Empty;
         self.drag_anchor = None;
         self.hovered_tile = None;
+        self.preview = PreviewResult::Waiting;
+        self.preview_source = None;
         self.workspace = Workspace::Ready(LoadedTileset { tileset, texture });
     }
 
@@ -397,6 +449,8 @@ impl AutomapperApp {
                 }
 
                 ui.separator();
+                self.show_view_picker(ui);
+                ui.separator();
                 self.show_selection_picker(ui);
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -411,11 +465,22 @@ impl AutomapperApp {
         }
     }
 
-    fn show_selection_picker(&mut self, ui: &mut Ui) {
+    fn show_view_picker(&mut self, ui: &mut Ui) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
-        let was_defining = self.define_groups;
 
         ui.add_enabled_ui(has_image, |ui| {
+            ui.selectable_value(&mut self.view, View::Tileset, "Tileset");
+            ui.selectable_value(&mut self.view, View::Preview, "Preview");
+        })
+        .response
+        .on_hover_text(PREVIEW_TOOLTIP);
+    }
+
+    fn show_selection_picker(&mut self, ui: &mut Ui) {
+        let editing = matches!(self.workspace, Workspace::Ready(_)) && self.view == View::Tileset;
+        let was_defining = self.define_groups;
+
+        ui.add_enabled_ui(editing, |ui| {
             ui.label("Selecting:");
             ui.selectable_value(&mut self.define_groups, false, "Tiles");
             ui.selectable_value(&mut self.define_groups, true, "Groups");
@@ -641,6 +706,59 @@ impl AutomapperApp {
             .inner;
 
         self.handle_grid(ctx, response);
+    }
+
+    fn show_preview(&mut self, ui: &mut Ui) {
+        self.hovered_tile = None;
+        self.refresh_preview();
+
+        egui::CentralPanel::default().show(ui, |ui| {
+            let Workspace::Ready(loaded) = &self.workspace else {
+                return;
+            };
+
+            match &self.preview {
+                PreviewResult::Waiting => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.weak(PREVIEW_WAITING);
+                    });
+                }
+                PreviewResult::Failed(error) => {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
+                PreviewResult::Ready(automapped) => {
+                    ui.vertical_centered(|ui| {
+                        preview_view::show(ui, &loaded.tileset, &loaded.texture, automapped);
+                    });
+                }
+            }
+        });
+    }
+
+    fn refresh_preview(&mut self) {
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
+        };
+        if self.compiler.is_running() {
+            return;
+        }
+
+        let stem = loaded.tileset.stem.clone();
+        let source = match render_source(&self.project, &stem, &self.rule_set_name) {
+            Ok(source) => source,
+            Err(error) => {
+                self.preview = PreviewResult::Failed(error.to_string());
+                self.preview_source = None;
+                return;
+            }
+        };
+        if self.preview_source.as_ref() == Some(&source) {
+            return;
+        }
+
+        self.preview_source = Some(source.clone());
+        self.start_compile(source, &stem, CompileTarget::Preview);
     }
 
     fn handle_grid(&mut self, ctx: &Context, response: GridResponse) {

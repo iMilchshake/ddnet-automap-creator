@@ -6,6 +6,7 @@ mod file_filter;
 mod file_picker;
 mod file_saver;
 mod model;
+mod preview;
 #[cfg(test)]
 mod tests;
 mod tileset;

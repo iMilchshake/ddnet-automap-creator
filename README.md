@@ -30,7 +30,7 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 
 ## TODO
 
-- preview automapper output via twmap+twgpu?
+- fix chance pools: DDNet keeps the last match, not the first
 - .map export (via ddnet-rs / twmap ?)
 - show effective chance after rpp unbias and roll
 - undo and redo for tile and group edits
