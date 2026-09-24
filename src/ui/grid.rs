@@ -199,6 +199,19 @@ fn paint_group(
         egui::FontId::proportional(cell_size * GROUP_NAME_FONT),
         Color32::WHITE,
     );
+
+    if group.chance.is_full() || cell_size < MIN_BADGE_CELL_SIZE {
+        return;
+    }
+
+    let inset = Vec2::new(cell_size * BADGE_INSET, -cell_size * BADGE_INSET);
+    painter.text(
+        area.left_bottom() + inset,
+        egui::Align2::LEFT_BOTTOM,
+        format!("{}%", group.chance.percent()),
+        egui::FontId::proportional(cell_size * CHANCE_FONT),
+        Color32::WHITE,
+    );
 }
 
 fn paint_selection(
