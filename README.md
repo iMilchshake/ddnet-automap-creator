@@ -32,7 +32,7 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 
 - .map export (via ddnet-rs / twmap ?)
 - undo and redo for tile and group edits
-- rules for cells whose center is empty
+- (doodad rules) on empty cells, re-runnable via transparent marker tile
 - autosave the project (in browser storage)
 - several rule sets in one .rules file
 - (live) .r source preview -> could be used as an interactive tool to learn r++?
@@ -45,7 +45,9 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 
 ## Acknowledgements 
 
-This project is based on a PyQt6-based [project](https://github.com/AssassinTee/SimpleDDNetAutomapper) **by Assa**, doing the obligatory rust rewrite to enable good web support and integration with existing tooling such as twmap. Export of rules is based on [r++](https://github.com/Aerll/rpp) **by HiPulsar** to support more complex features such as grouped tiles.
+This project is a Rust rewrite and extension of a PyQt6 [project](https://github.com/AssassinTee/SimpleDDNetAutomapper) **by Assa**, to enable good web support and integration with existing tooling such as twmap. Export of rules is based on [r++](https://github.com/Aerll/rpp) **by HiPulsar** to support more complex features such as grouped tiles.
+
+The preview map `dm1` is from [teeworlds-maps](https://github.com/teeworlds/teeworlds-maps), under [CC-BY-SA 3.0](http://creativecommons.org/licenses/by-sa/3.0/).
 
 For more information about DDNet automappers check out the [wiki](https://wiki.ddnet.org/wiki/Automapper).
 

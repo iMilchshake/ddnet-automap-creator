@@ -12,7 +12,7 @@ use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode, Pool};
 use crate::model::project::Project;
 use crate::model::tile::{Chance, MASK_TILE, TILESET_SIDE};
-use crate::preview::{self, Automapped};
+use crate::preview::{self, Automapped, Sample};
 use crate::tileset::{self, Tileset};
 use crate::ui::grid::{self, GridResponse, GridView};
 use crate::ui::group_panel::{GroupPanel, mode_label};
@@ -32,9 +32,14 @@ const GROUP_ROW_SPACING: f32 = 2.0;
 const GROUP_SWATCH_SPACING: f32 = 4.0;
 const HEADING_SPACING: f32 = 4.0;
 const DROP_LINE_WIDTH: f32 = 2.0;
+const FIRST_PREVIEW_SEED: u32 = 42;
 
 const REMOVE_ICON: &str = "✖";
 const CREDIT: &str = env!("CARGO_PKG_NAME");
+const ORIGINAL_PROJECT: &str = "https://github.com/AssassinTee/SimpleDDNetAutomapper";
+const RPP: &str = "https://github.com/Aerll/rpp";
+const DM1_SOURCE: &str = "https://github.com/teeworlds/teeworlds-maps";
+const DM1_LICENSE: &str = "http://creativecommons.org/licenses/by-sa/3.0/";
 
 const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With groups selected, drag \
                                  across the tileset to add one, click one to edit it, right-click \
@@ -132,6 +137,7 @@ pub struct AutomapperApp {
     preview: PreviewResult,
     preview_source: Option<String>,
     preview_seed: u32,
+    preview_sample: Sample,
     inspector: Inspector,
     define_groups: bool,
     drag_anchor: Option<usize>,
@@ -155,7 +161,8 @@ impl Default for AutomapperApp {
             view: View::Tileset,
             preview: PreviewResult::Waiting,
             preview_source: None,
-            preview_seed: preview::FIRST_SEED,
+            preview_seed: FIRST_PREVIEW_SEED,
+            preview_sample: Sample::default(),
             inspector: Inspector::Empty,
             define_groups: false,
             drag_anchor: None,
@@ -342,7 +349,7 @@ impl AutomapperApp {
 
         match (target, result) {
             (CompileTarget::Preview, Ok(Compiled { rules, .. })) => {
-                self.preview = preview_result(rules, self.preview_seed);
+                self.preview = preview_result(rules, self.preview_sample, self.preview_seed);
             }
             (CompileTarget::Preview, Err(error)) => {
                 self.preview = PreviewResult::Failed(error.to_string());
@@ -464,7 +471,7 @@ impl AutomapperApp {
                 ui.separator();
                 match self.view {
                     View::Tileset => self.show_selection_picker(ui),
-                    View::Preview => self.show_regenerate(ui),
+                    View::Preview => self.show_preview_controls(ui),
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -504,8 +511,20 @@ impl AutomapperApp {
         }
     }
 
-    fn show_regenerate(&mut self, ui: &mut Ui) {
+    fn show_preview_controls(&mut self, ui: &mut Ui) {
         let ready = matches!(self.preview, PreviewResult::Ready { .. });
+
+        ui.label("Map:");
+        for sample in Sample::ALL {
+            if ui
+                .selectable_label(self.preview_sample == sample, sample.name())
+                .clicked()
+            {
+                self.switch_sample(sample);
+            }
+        }
+        ui.separator();
+
         if ui
             .add_enabled(ready, egui::Button::new("Re-generate"))
             .on_hover_text(GENERATE_TOOLTIP)
@@ -780,8 +799,18 @@ impl AutomapperApp {
             return;
         };
 
-        self.preview_seed = preview::next_seed(self.preview_seed);
-        self.preview = preview_result(rules.clone(), self.preview_seed);
+        self.preview_seed += 1;
+        self.preview = preview_result(rules.clone(), self.preview_sample, self.preview_seed);
+    }
+
+    fn switch_sample(&mut self, sample: Sample) {
+        self.preview_sample = sample;
+
+        let PreviewResult::Ready { rules, .. } = &self.preview else {
+            self.preview_source = None;
+            return;
+        };
+        self.preview = preview_result(rules.clone(), sample, self.preview_seed);
     }
 
     fn show_preview(&mut self, ui: &mut Ui) {
@@ -979,6 +1008,9 @@ impl AutomapperApp {
             ui.add_space(8.0);
             ui.colored_label(ui.visuals().warn_fg_color, "TODO: <add tutorial here>");
 
+            ui.add_space(8.0);
+            show_acknowledgements(ui);
+
             ui.separator();
             if ui.button("Close").clicked() {
                 self.help_open = false;
@@ -989,6 +1021,34 @@ impl AutomapperApp {
             self.help_open = false;
         }
     }
+}
+
+fn show_acknowledgements(ui: &mut Ui) {
+    ui.strong("Acknowledgements");
+    show_sentence(ui, |ui| {
+        ui.label("A Rust rewrite and extension of a PyQt6 ");
+        ui.hyperlink_to("project", ORIGINAL_PROJECT);
+        ui.label(" by Assa.");
+    });
+    show_sentence(ui, |ui| {
+        ui.label("Rules are exported via ");
+        ui.hyperlink_to("r++", RPP);
+        ui.label(" by HiPulsar, which enables features such as grouped tiles.");
+    });
+    show_sentence(ui, |ui| {
+        ui.label("The preview map dm1 is from ");
+        ui.hyperlink_to("teeworlds-maps", DM1_SOURCE);
+        ui.label(", under ");
+        ui.hyperlink_to("CC-BY-SA 3.0", DM1_LICENSE);
+        ui.label(".");
+    });
+}
+
+fn show_sentence(ui: &mut Ui, add_words: impl FnOnce(&mut Ui)) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        add_words(ui);
+    });
 }
 
 fn show_group_list(
@@ -1162,8 +1222,8 @@ fn describe_group(group: &TileGroup) -> String {
     text
 }
 
-fn preview_result(rules: String, seed: u32) -> PreviewResult {
-    match preview::automap(&rules, seed) {
+fn preview_result(rules: String, sample: Sample, seed: u32) -> PreviewResult {
+    match preview::automap(&rules, sample, seed) {
         Ok(automapped) => PreviewResult::Ready { rules, automapped },
         Err(error) => PreviewResult::Failed(error.to_string()),
     }
