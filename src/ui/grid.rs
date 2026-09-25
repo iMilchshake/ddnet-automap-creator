@@ -21,6 +21,7 @@ const CHECKER_DARK: Color32 = Color32::from_gray(48);
 const REMOVED_COLOR: Color32 = Color32::from_rgb(220, 110, 110);
 const CONFIGURED_OUTLINE: Color32 = Color32::from_gray(205);
 const SELECTED_OUTLINE: Color32 = Color32::from_rgb(255, 214, 102);
+const POOL_MATE_OUTLINE: Color32 = Color32::from_rgb(102, 204, 255);
 
 const UNUSED_SCRIM: u8 = 150;
 const REMOVED_SCRIM: u8 = 215;
@@ -51,6 +52,7 @@ pub struct GridView<'a> {
     pub group_editing: bool,
     pub drag_anchor: Option<usize>,
     pub selected: Option<usize>,
+    pub pool_mates: &'a [usize],
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -111,12 +113,7 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         }
 
         if matches!(state, TileState::Configured(_)) {
-            painter.rect_stroke(
-                cell,
-                0.0,
-                Stroke::new(OUTLINE_WIDTH, CONFIGURED_OUTLINE),
-                StrokeKind::Inside,
-            );
+            paint_configured_outline(&painter, &view, cell, index, pixels_per_point);
         }
 
         let share = view.shares.get(&index).copied();
@@ -140,22 +137,20 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         );
     }
 
-    if let Some(index) = view.selected {
-        painter.rect_stroke(
-            cell_rect(rect, cell_size, index),
-            0.0,
-            Stroke::new(SELECTED_OUTLINE_WIDTH, SELECTED_OUTLINE),
-            StrokeKind::Inside,
-        );
+    let outliner = BorderOutliner {
+        painter: ui.painter_at(rect.expand(SELECTED_OUTLINE_WIDTH)),
+        grid: rect,
+        cell_size,
+        pixels_per_point,
+    };
+    for &index in view.pool_mates {
+        outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, POOL_MATE_OUTLINE);
     }
-
+    if let Some(index) = view.selected {
+        outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, SELECTED_OUTLINE);
+    }
     if let Some(index) = hovered {
-        painter.rect_stroke(
-            cell_rect(rect, cell_size, index),
-            0.0,
-            Stroke::new(OUTLINE_WIDTH, ui.visuals().selection.stroke.color),
-            StrokeKind::Inside,
-        );
+        outliner.paint_centred_on_border(index, OUTLINE_WIDTH, ui.visuals().selection.stroke.color);
     }
 
     let response = match hovered.and_then(|index| describe_group(view.project, index)) {
@@ -260,6 +255,72 @@ pub fn corners(first: usize, second: usize) -> (usize, usize) {
 
 fn tile_span(grid: Rect, cell_size: f32, top_left: usize, bottom_right: usize) -> Rect {
     cell_rect(grid, cell_size, top_left).union(cell_rect(grid, cell_size, bottom_right))
+}
+
+struct BorderOutliner {
+    painter: egui::Painter,
+    grid: Rect,
+    cell_size: f32,
+    pixels_per_point: f32,
+}
+
+impl BorderOutliner {
+    fn paint_centred_on_border(&self, index: usize, width: f32, color: Color32) {
+        let half = (width / 2.0 * self.pixels_per_point).round().max(1.0) / self.pixels_per_point;
+        let cell = cell_rect(self.grid, self.cell_size, index);
+        let outer = cell.expand(half);
+
+        for edge in [
+            Rect::from_min_max(outer.min, pos2(outer.max.x, cell.min.y + half)),
+            Rect::from_min_max(pos2(outer.min.x, cell.max.y - half), outer.max),
+            Rect::from_min_max(outer.min, pos2(cell.min.x + half, outer.max.y)),
+            Rect::from_min_max(pos2(cell.max.x - half, outer.min.y), outer.max),
+        ] {
+            self.painter.rect_filled(edge, 0.0, color);
+        }
+    }
+}
+
+fn is_configured(view: &GridView<'_>, index: usize) -> bool {
+    matches!(
+        tile_state(view.tileset, view.project, index),
+        TileState::Configured(_)
+    )
+}
+
+fn paint_configured_outline(
+    painter: &egui::Painter,
+    view: &GridView<'_>,
+    cell: Rect,
+    index: usize,
+    pixels_per_point: f32,
+) {
+    let pixel = 1.0 / pixels_per_point;
+    let column = index % TILESET_SIDE;
+    let row = index / TILESET_SIDE;
+    let right_is_configured = column + 1 < TILESET_SIDE && is_configured(view, index + 1);
+    let below_is_configured = row + 1 < TILESET_SIDE && is_configured(view, index + TILESET_SIDE);
+
+    let mut edges = vec![
+        Rect::from_min_max(cell.min, pos2(cell.max.x, cell.min.y + pixel)),
+        Rect::from_min_max(cell.min, pos2(cell.min.x + pixel, cell.max.y)),
+    ];
+    if !right_is_configured {
+        edges.push(Rect::from_min_max(
+            pos2(cell.max.x - pixel, cell.min.y),
+            cell.max,
+        ));
+    }
+    if !below_is_configured {
+        edges.push(Rect::from_min_max(
+            pos2(cell.min.x, cell.max.y - pixel),
+            cell.max,
+        ));
+    }
+
+    for edge in edges {
+        painter.rect_filled(edge, 0.0, CONFIGURED_OUTLINE);
+    }
 }
 
 fn cell_rect(grid: Rect, cell_size: f32, index: usize) -> Rect {

@@ -5,7 +5,7 @@ use crate::model::pool::{ChanceMode, Pool};
 use crate::model::tile::{Chance, TileMods, TileRule};
 use crate::model::transform::Transform;
 use crate::tileset::Tileset;
-use crate::ui::grid;
+use crate::ui::{grid, preview};
 
 const MIN_CELL_SIZE: f32 = 32.0;
 const MAX_CELL_SIZE: f32 = 80.0;
@@ -20,6 +20,7 @@ const LEGEND_SPACING: f32 = 4.0;
 const LEGEND_GAP: f32 = 4.0;
 const SECTION_SPACING: f32 = 6.0;
 const CORNER_RADIUS: f32 = 2.0;
+const MEMBER_SIZE: f32 = 20.0;
 const OUTLINE_WIDTH: f32 = 2.0;
 
 const EMPTY_FILL: Color32 = Color32::from_gray(28);
@@ -29,19 +30,25 @@ const ANY_DARK: Color32 = Color32::from_gray(64);
 const PREVIEW_LIGHT: Color32 = Color32::from_gray(64);
 const PREVIEW_DARK: Color32 = Color32::from_gray(48);
 
-const CELL_TOOLTIP: &str = "Left-click for the next state, right-click for the previous one, \
-                            or press 1 (empty), 2 (full), 3 (any) while hovering.";
+const CELL_TOOLTIP: &str = "Left-click for the next state, right-click for the previous one. \
+                            Or press 1 (empty), 2 (full), 3 (any) while hovering.";
 const CHANCE_TOOLTIP: &str = "Tiles declaring the same neighborhood split it between them by \
                               their chances. With Normalize chances off, a total below 100 % \
-                              leaves the rest of the cells unchanged.";
-const SHARES_TOOLTIP: &str = "What each tile ends up on, of the cells matching a neighborhood \
-                              this tile places itself on.";
+                              can leave tiles unchanged.";
+const POOL_TOOLTIP: &str = "A pool holds all tiles with the exact neighborhood, considering \
+                            rotations and flips.";
 const UNCHANGED: &str = "unchanged";
 
-/// The pools the inspected tile is a member of, with how their chances apply.
-pub struct TileShares<'a> {
+pub struct TilePools<'a> {
     pub pools: Vec<&'a Pool>,
     pub mode: ChanceMode,
+}
+
+struct PoolView<'a> {
+    tileset: &'a Tileset,
+    texture: &'a TextureHandle,
+    mode: ChanceMode,
+    as_drawn_share: String,
 }
 
 pub enum TileEdit {
@@ -80,7 +87,7 @@ impl TilePanel {
         ui: &mut Ui,
         tileset: &Tileset,
         texture: &TextureHandle,
-        shares: &TileShares,
+        pools: &TilePools,
     ) -> Option<TileEdit> {
         ui.heading(match self.has_rule {
             true => format!("Tile {}", self.tile),
@@ -99,44 +106,87 @@ impl TilePanel {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
 
-        if is_worth_showing(shares) {
+        if !pools.pools.is_empty() {
             ui.add_space(SECTION_SPACING);
-            self.show_shares(ui, shares);
+            self.show_pools(ui, tileset, texture, pools);
         }
 
         edit
     }
 
-    fn show_shares(&self, ui: &mut Ui, shares: &TileShares) {
-        ui.label("Resulting chances:").on_hover_text(SHARES_TOOLTIP);
+    fn show_pools(
+        &self,
+        ui: &mut Ui,
+        tileset: &Tileset,
+        texture: &TextureHandle,
+        pools: &TilePools,
+    ) {
+        let view = PoolView {
+            tileset,
+            texture,
+            mode: pools.mode,
+            as_drawn_share: self.share_label(pools.pools[0], pools.mode),
+        };
+        for (index, pool) in pools.pools.iter().enumerate() {
+            self.show_pool(ui, &view, pool, index == 0);
+        }
+    }
 
-        for (index, pool) in shares.pools.iter().enumerate() {
-            if index > 0 {
-                ui.separator();
+    fn show_pool(&self, ui: &mut Ui, view: &PoolView, pool: &Pool, open: bool) {
+        let transform = pool
+            .member_of(self.tile)
+            .map_or(Transform::IDENTITY, |member| member.transform);
+        let share = self.share_label(pool, view.mode);
+        let title = format!(
+            "Pool {} · {} tiles · {share}",
+            transform_name(transform),
+            pool.members.len()
+        );
+        let title = match share == view.as_drawn_share {
+            true => egui::RichText::new(title),
+            false => egui::RichText::new(title).color(ui.visuals().warn_fg_color),
+        };
+
+        let header = egui::CollapsingHeader::new(title)
+            .id_salt(("pool", self.tile, pool.neighborhood))
+            .default_open(open)
+            .show(ui, |ui| self.show_members(ui, view, pool));
+        header.header_response.on_hover_text(POOL_TOOLTIP);
+    }
+
+    fn show_members(&self, ui: &mut Ui, view: &PoolView, pool: &Pool) {
+        egui::Grid::new(("pool_members", pool.neighborhood)).show(ui, |ui| {
+            for (member, share) in pool.members.iter().zip(pool.shares(view.mode)) {
+                let (rect, _response) =
+                    ui.allocate_exact_size(Vec2::splat(MEMBER_SIZE), Sense::hover());
+                paint_checker(ui.painter(), rect, PREVIEW_LIGHT, PREVIEW_DARK);
+                let slice = &view.tileset.tiles[member.tile];
+                preview::paint_turned(ui.painter(), rect, view.texture, slice, member.transform);
+
+                let name = egui::RichText::new(format!("Tile {}", member.tile));
+                ui.label(match member.tile == self.tile {
+                    true => name.strong(),
+                    false => name,
+                });
+                ui.label(grid::format_percent(share));
+                ui.end_row();
             }
 
-            egui::Grid::new(("tile_shares", index)).show(ui, |ui| {
-                for (member, share) in pool.members.iter().zip(pool.shares(shares.mode)) {
-                    let name = format!("Tile {}{}", member.tile, transform_label(member.transform));
-                    let name = egui::RichText::new(name);
-                    let name = match member.tile == self.tile {
-                        true => name.strong(),
-                        false => name,
-                    };
-                    ui.label(name);
-                    ui.label(grid::format_percent(share));
-                    ui.end_row();
-                }
+            let unchanged = Chance::FULL.percent() - pool.coverage(view.mode);
+            if unchanged > 0.0 {
+                let warn = ui.visuals().warn_fg_color;
+                ui.label("");
+                ui.colored_label(warn, UNCHANGED);
+                ui.colored_label(warn, grid::format_percent(unchanged));
+                ui.end_row();
+            }
+        });
+    }
 
-                let unchanged = Chance::FULL.percent() - pool.coverage(shares.mode);
-                if unchanged > 0.0 {
-                    let warn = ui.visuals().warn_fg_color;
-                    ui.colored_label(warn, UNCHANGED);
-                    ui.colored_label(warn, grid::format_percent(unchanged));
-                    ui.end_row();
-                }
-            });
-        }
+    fn share_label(&self, pool: &Pool, mode: ChanceMode) -> String {
+        pool.share_of(self.tile, mode)
+            .map(grid::format_percent)
+            .unwrap_or_default()
     }
 
     fn show_action(&mut self, ui: &mut Ui, changed: bool) -> Option<TileEdit> {
@@ -268,27 +318,15 @@ impl TilePanel {
     }
 }
 
-fn is_worth_showing(shares: &TileShares) -> bool {
-    shares
-        .pools
-        .iter()
-        .any(|pool| pool.members.len() > 1 || pool.coverage(shares.mode) < Chance::FULL.percent())
-}
-
-fn transform_label(transform: Transform) -> String {
-    let parts: Vec<&str> = [
-        (transform.x_flip, "X-Flip"),
-        (transform.y_flip, "Y-Flip"),
-        (transform.rot, "Rotate"),
-    ]
-    .into_iter()
-    .filter(|(applied, _)| *applied)
-    .map(|(_, name)| name)
-    .collect();
-
-    match parts.is_empty() {
-        true => String::new(),
-        false => format!(" with {}", parts.join(", ")),
+fn transform_name(transform: Transform) -> &'static str {
+    match (transform.x_flip, transform.y_flip, transform.rot) {
+        (false, false, false) => "as drawn",
+        (false, false, true) => "rotated 90°",
+        (true, true, false) => "rotated 180°",
+        (true, true, true) => "rotated 270°",
+        (true, false, false) => "mirrored left-right",
+        (false, true, false) => "mirrored top-bottom",
+        (true, false, true) | (false, true, true) => "mirrored diagonally",
     }
 }
 

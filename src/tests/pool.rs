@@ -1,5 +1,5 @@
 use crate::model::neighbor::{NeighborState, Neighborhood};
-use crate::model::pool::{ChanceMode, Pool, base_shares, pools};
+use crate::model::pool::{ChanceMode, Pool, base_shares, pools, pools_of};
 use crate::model::tile::{Chance, TileRule};
 use crate::tests::support::{index_of, mods};
 
@@ -108,4 +108,42 @@ fn base_shares_follow_the_untransformed_variant() {
 
     assert_eq!(shares.get(&3), Some(&100.0));
     assert_eq!(shares.get(&8), Some(&50.0));
+}
+
+fn rotating(rotate: bool) -> TileRule {
+    TileRule {
+        neighborhood: only("left"),
+        mods: mods(false, false, rotate),
+        chance: Chance::FULL,
+    }
+}
+
+#[test]
+fn a_rotating_tile_joins_every_turned_pool_after_its_own() {
+    let tiles: Vec<(usize, TileRule)> = (1..=4).map(|tile| (tile, rotating(true))).collect();
+    let pools = pools(&tiles);
+
+    let joined = pools_of(&pools, 1);
+    let mates: Vec<usize> = joined[0].members.iter().map(|member| member.tile).collect();
+
+    assert_eq!(joined.len(), 4);
+    assert_eq!(joined[0].neighborhood, only("left"));
+    assert_eq!(mates, [1, 2, 3, 4]);
+}
+
+#[test]
+fn a_turned_pool_can_split_differently_than_the_tiles_own() {
+    let tiles = [
+        (1, rotating(true)),
+        (2, rotating(true)),
+        (3, rotating(false)),
+    ];
+    let pools = pools(&tiles);
+
+    let shares: Vec<f32> = pools_of(&pools, 1)
+        .iter()
+        .filter_map(|pool| pool.share_of(1, ChanceMode::Normalize))
+        .collect();
+
+    assert_close(&shares, &[33.333_3, 50.0, 50.0, 50.0]);
 }

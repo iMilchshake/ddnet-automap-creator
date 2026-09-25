@@ -9,7 +9,7 @@ use crate::file_picker::{FilePicker, PickedFile};
 use crate::file_saver::FileSaver;
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
-use crate::model::pool::{self, ChanceMode};
+use crate::model::pool::{self, ChanceMode, Pool};
 use crate::model::project::Project;
 use crate::model::tile::{Chance, MASK_TILE, TILESET_SIDE};
 use crate::preview::{self, Automapped};
@@ -18,7 +18,7 @@ use crate::ui::grid::{self, GridResponse, GridView};
 use crate::ui::group_panel::{GroupPanel, mode_label};
 use crate::ui::preview as preview_view;
 use crate::ui::status::StatusLine;
-use crate::ui::tile_panel::{TileEdit, TilePanel, TileShares};
+use crate::ui::tile_panel::{TileEdit, TilePanel, TilePools};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 
 const SIDE_PANEL_WIDTH: f32 = 260.0;
@@ -580,15 +580,12 @@ impl AutomapperApp {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         match (&self.workspace, &mut self.inspector) {
                             (Workspace::Ready(loaded), Inspector::Tile(panel)) => {
-                                let shares = TileShares {
-                                    pools: pools
-                                        .iter()
-                                        .filter(|pool| pool.contains(panel.tile()))
-                                        .collect(),
+                                let tile_pools = TilePools {
+                                    pools: pool::pools_of(&pools, panel.tile()),
                                     mode: self.project.chance_mode(),
                                 };
                                 tile_edit = panel
-                                    .show(ui, &loaded.tileset, &loaded.texture, &shares)
+                                    .show(ui, &loaded.tileset, &loaded.texture, &tile_pools)
                                     .map(|edit| (panel.tile(), edit));
                             }
                             (_, Inspector::Group(panel)) => {
@@ -722,9 +719,26 @@ impl AutomapperApp {
         }
     }
 
+    fn pool_mates(&self, pools: &[Pool]) -> Vec<usize> {
+        let Some(tile) = self.inspector.tile() else {
+            return Vec::new();
+        };
+        let Some(as_drawn) = pool::pools_of(pools, tile).first().copied() else {
+            return Vec::new();
+        };
+
+        as_drawn
+            .members
+            .iter()
+            .map(|member| member.tile)
+            .filter(|mate| *mate != tile)
+            .collect()
+    }
+
     fn show_tileset(&mut self, ui: &mut Ui, ctx: &Context) {
         let pools = pool::pools(&self.project.rules());
         let shares = pool::base_shares(&pools, self.project.chance_mode());
+        let pool_mates = self.pool_mates(&pools);
 
         let response = egui::CentralPanel::default()
             .show(ui, |ui| match &self.workspace {
@@ -749,6 +763,7 @@ impl AutomapperApp {
                                 group_editing: self.define_groups,
                                 drag_anchor: self.drag_anchor,
                                 selected: self.inspector.tile(),
+                                pool_mates: &pool_mates,
                             },
                         )
                     })

@@ -3,7 +3,7 @@ use egui::epaint::Vertex;
 use egui::{Color32, Mesh, Pos2, Rect, Sense, TextureHandle, Vec2, pos2};
 
 use crate::model::transform::Transform;
-use crate::preview::{Automapped, PlacedTile};
+use crate::preview::Automapped;
 use crate::tileset::{TileSlice, Tileset};
 
 const MIN_CELL_SIZE: f32 = 4.0;
@@ -42,7 +42,7 @@ pub fn show(
 
             let min = rect.min + Vec2::new(column as f32, row as f32) * cell_size;
             let cell = Rect::from_min_size(min, Vec2::splat(cell_size));
-            add_tile(&mut mesh, cell, slice, placed);
+            add_tile(&mut mesh, cell, slice, placed.transform);
         }
     }
 
@@ -59,14 +59,26 @@ fn whole_pixel_cell_size(available: Vec2, automapped: &Automapped, pixels_per_po
     (points * pixels_per_point).floor() / pixels_per_point
 }
 
-fn add_tile(mesh: &mut Mesh, cell: Rect, slice: &TileSlice, placed: PlacedTile) {
+pub fn paint_turned(
+    painter: &egui::Painter,
+    cell: Rect,
+    texture: &TextureHandle,
+    slice: &TileSlice,
+    transform: Transform,
+) {
+    let mut mesh = Mesh::with_texture(texture.id());
+    add_tile(&mut mesh, cell, slice, transform);
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+fn add_tile(mesh: &mut Mesh, cell: Rect, slice: &TileSlice, transform: Transform) {
     let corners = [
         cell.left_top(),
         cell.right_top(),
         cell.right_bottom(),
         cell.left_bottom(),
     ];
-    let uvs = corner_uvs(slice, placed.transform);
+    let uvs = corner_uvs(slice, transform);
 
     let first = mesh.vertices.len() as u32;
     for (pos, uv) in corners.into_iter().zip(uvs) {

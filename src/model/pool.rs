@@ -64,6 +64,28 @@ impl Pool {
     pub fn contains(&self, tile: usize) -> bool {
         self.members.iter().any(|member| member.tile == tile)
     }
+
+    pub fn places_as_drawn(&self, tile: usize) -> bool {
+        self.member_of(tile)
+            .is_some_and(|member| member.transform == Transform::IDENTITY)
+    }
+
+    pub fn member_of(&self, tile: usize) -> Option<&Variant> {
+        self.members.iter().find(|member| member.tile == tile)
+    }
+
+    pub fn share_of(&self, tile: usize, mode: ChanceMode) -> Option<f32> {
+        let position = self.members.iter().position(|member| member.tile == tile)?;
+
+        Some(self.shares(mode)[position])
+    }
+}
+
+pub fn pools_of(pools: &[Pool], tile: usize) -> Vec<&Pool> {
+    let mut joined: Vec<&Pool> = pools.iter().filter(|pool| pool.contains(tile)).collect();
+    joined.sort_by_key(|pool| !pool.places_as_drawn(tile));
+
+    joined
 }
 
 /// What each configured tile places where its own, untransformed neighborhood
