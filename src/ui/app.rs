@@ -173,6 +173,19 @@ impl Default for AutomapperApp {
     }
 }
 
+impl AutomapperApp {
+    pub fn new(ctx: &Context, image: Option<PickedFile>, blueprint: Option<PickedFile>) -> Self {
+        let mut app = Self::default();
+        if let Some(image) = image {
+            app.load_tileset(ctx, image);
+        }
+        if let Some(blueprint) = blueprint {
+            app.load_blueprint(ctx, blueprint);
+        }
+        app
+    }
+}
+
 impl eframe::App for AutomapperApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();

@@ -16,7 +16,28 @@ mod ui;
 const APP_TITLE: &str = env!("CARGO_PKG_NAME");
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(clap::Parser)]
+#[command(version, about)]
+struct Args {
+    /// Tileset image to open
+    #[arg(value_parser = read_file)]
+    image: Option<file_picker::PickedFile>,
+
+    /// Blueprint to load onto the image
+    #[arg(short, long, requires = "image", value_parser = read_file)]
+    blueprint: Option<file_picker::PickedFile>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_file(path: &str) -> Result<file_picker::PickedFile, file_picker::PickError> {
+    file_picker::read_file(std::path::Path::new(path))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
+    use clap::Parser as _;
+
+    let args = Args::parse();
     env_logger::init();
 
     let options = eframe::NativeOptions {
@@ -27,7 +48,10 @@ fn main() -> eframe::Result {
     eframe::run_native(
         APP_TITLE,
         options,
-        Box::new(|_cc| Ok(Box::new(ui::AutomapperApp::default()))),
+        Box::new(|cc| {
+            let app = ui::AutomapperApp::new(&cc.egui_ctx, args.image, args.blueprint);
+            Ok(Box::new(app))
+        }),
     )
 }
 
@@ -52,7 +76,7 @@ fn main() {
             .start(
                 canvas,
                 eframe::WebOptions::default(),
-                Box::new(|_cc| Ok(Box::new(ui::AutomapperApp::default()))),
+                Box::new(|cc| Ok(Box::new(ui::AutomapperApp::new(&cc.egui_ctx, None, None)))),
             )
             .await
             .expect("failed to start eframe");

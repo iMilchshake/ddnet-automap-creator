@@ -54,21 +54,24 @@ fn spawn_dialog(sender: Sender<PickResult>, filter: FileFilter) {
             return;
         };
 
-        let name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let result = match std::fs::read(&path) {
-            Ok(bytes) => Ok(PickedFile { name, bytes }),
-            Err(error) => Err(PickError::Read {
-                name,
-                message: error.to_string(),
-            }),
-        };
-
         // The receiver is gone only if the app shut down.
-        let _ = sender.send(result);
+        let _ = sender.send(read_file(&path));
     });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_file(path: &std::path::Path) -> PickResult {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(PickedFile { name, bytes }),
+        Err(error) => Err(PickError::Read {
+            name,
+            message: error.to_string(),
+        }),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
