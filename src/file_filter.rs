@@ -4,6 +4,17 @@ pub struct FileFilter {
     pub extensions: &'static [&'static str],
 }
 
+impl FileFilter {
+    pub fn matches(&self, file_name: &str) -> bool {
+        let Some((_stem, extension)) = file_name.rsplit_once('.') else {
+            return false;
+        };
+        self.extensions
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(extension))
+    }
+}
+
 pub const TILESET_IMAGE: FileFilter = FileFilter {
     name: "Tileset image",
     extensions: &["png", "jpg", "jpeg", "bmp"],

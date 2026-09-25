@@ -1,4 +1,6 @@
-use egui::{Context, TextureHandle, TextureOptions, Ui, Vec2};
+use egui::{
+    Align2, Color32, Context, FontId, Id, LayerId, Order, TextureHandle, TextureOptions, Ui, Vec2,
+};
 
 use crate::blueprint;
 use crate::export::bundle::{self, Bundle};
@@ -33,6 +35,8 @@ const GROUP_SWATCH_SPACING: f32 = 4.0;
 const HEADING_SPACING: f32 = 4.0;
 const DROP_LINE_WIDTH: f32 = 2.0;
 const FIRST_PREVIEW_SEED: u32 = 42;
+const DROP_OVERLAY_ALPHA: u8 = 160;
+const DROP_HINT_SIZE: f32 = 24.0;
 
 const REMOVE_ICON: &str = "✖";
 const CREDIT: &str = env!("CARGO_PKG_NAME");
@@ -55,6 +59,8 @@ const MASK_WARNING: &str = "is reserved: rpp uses it as a mask to roll tiles tha
 const GENERATE_TOOLTIP: &str = "Roll the chances again with the next seed.";
 const PREVIEW_WAITING: &str = "Compiling the rules for the preview…";
 const GROUP_ORDER_NOTE: &str = "applied top to bottom";
+const DROP_HINT: &str = "Drop a tileset image or a blueprint";
+const NO_IMAGE_FOR_BLUEPRINT: &str = "Open a tileset image before loading a blueprint";
 
 enum GroupCommand {
     Select(usize),
@@ -128,7 +134,6 @@ pub struct AutomapperApp {
     project: Project,
     rule_set_name: String,
     picker: FilePicker,
-    blueprint_picker: FilePicker,
     saver: FileSaver,
     compiler: RulesCompiler,
     compile_target: Option<CompileTarget>,
@@ -152,8 +157,7 @@ impl Default for AutomapperApp {
             workspace: Workspace::NoImage,
             project: Project::default(),
             rule_set_name: String::new(),
-            picker: FilePicker::new(TILESET_IMAGE),
-            blueprint_picker: FilePicker::new(BLUEPRINT),
+            picker: FilePicker::new(),
             saver: FileSaver::new(),
             compiler: RulesCompiler::new(),
             compile_target: None,
@@ -190,8 +194,7 @@ impl eframe::App for AutomapperApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        self.receive_picked_file(&ctx);
-        self.receive_blueprint_file(&ctx);
+        self.receive_files(&ctx);
         self.receive_saved_file(&ctx);
         self.receive_compiled_rules(&ctx);
         self.handle_shortcuts(&ctx);
@@ -205,6 +208,7 @@ impl eframe::App for AutomapperApp {
         }
         self.show_export(&ctx);
         self.show_help(&ctx);
+        show_drop_hint(&ctx);
 
         if self.compiler.is_running() {
             ctx.request_repaint();
@@ -213,30 +217,35 @@ impl eframe::App for AutomapperApp {
 }
 
 impl AutomapperApp {
-    fn receive_picked_file(&mut self, ctx: &Context) {
-        let Some(result) = self.picker.poll() else {
-            return;
-        };
+    fn receive_files(&mut self, ctx: &Context) {
+        let mut dropped = ctx.input(|input| input.raw.dropped_files.clone());
+        dropped.sort_by_key(|file| BLUEPRINT.matches(&file.path().to_string_lossy()));
+        self.picker.read_dropped(ctx, dropped);
 
-        match result {
-            Ok(picked) => self.load_tileset(ctx, picked),
-            Err(error) => self.status.warning(ctx, error.to_string()),
+        while let Some(result) = self.picker.poll() {
+            match result {
+                Ok(picked) => self.load_file(ctx, picked),
+                Err(error) => self.status.warning(ctx, error.to_string()),
+            }
         }
     }
 
-    fn receive_blueprint_file(&mut self, ctx: &Context) {
-        let Some(result) = self.blueprint_picker.poll() else {
-            return;
-        };
-
-        match result {
-            Ok(picked) => self.load_blueprint(ctx, picked),
-            Err(error) => self.status.warning(ctx, error.to_string()),
+    fn load_file(&mut self, ctx: &Context, picked: PickedFile) {
+        if TILESET_IMAGE.matches(&picked.name) {
+            return self.load_tileset(ctx, picked);
         }
+        if BLUEPRINT.matches(&picked.name) {
+            return self.load_blueprint(ctx, picked);
+        }
+        self.status.warning(
+            ctx,
+            format!("{} is neither a tileset image nor a blueprint", picked.name),
+        );
     }
 
     fn load_blueprint(&mut self, ctx: &Context, picked: PickedFile) {
         let Workspace::Ready(loaded) = &self.workspace else {
+            self.status.warning(ctx, NO_IMAGE_FOR_BLUEPRINT);
             return;
         };
 
@@ -430,7 +439,7 @@ impl AutomapperApp {
 
     fn handle_shortcuts(&mut self, ctx: &Context) {
         if ctx.input_mut(|input| input.consume_shortcut(&open_image_shortcut())) {
-            self.picker.open();
+            self.picker.open(TILESET_IMAGE);
         }
     }
 
@@ -444,7 +453,7 @@ impl AutomapperApp {
                     let open = egui::Button::new("Open image…")
                         .shortcut_text(ui.ctx().format_shortcut(&open_image_shortcut()));
                     if ui.add(open).clicked() {
-                        self.picker.open();
+                        self.picker.open(TILESET_IMAGE);
                         ui.close();
                     }
 
@@ -454,7 +463,7 @@ impl AutomapperApp {
                         .add_enabled(has_image, egui::Button::new("Load blueprint…"))
                         .clicked()
                     {
-                        self.blueprint_picker.open();
+                        self.picker.open(BLUEPRINT);
                         ui.close();
                     }
                     if ui
@@ -778,7 +787,7 @@ impl AutomapperApp {
                     ui.vertical_centered(|ui| {
                         ui.add_space(ui.available_height() * 0.4);
                         if ui.button("Select Image").clicked() {
-                            self.picker.open();
+                            self.picker.open(TILESET_IMAGE);
                         }
                     });
                     GridResponse::default()
@@ -1055,6 +1064,23 @@ fn show_acknowledgements(ui: &mut Ui) {
         ui.hyperlink_to("CC-BY-SA 3.0", DM1_LICENSE);
         ui.label(".");
     });
+}
+
+fn show_drop_hint(ctx: &Context) {
+    if ctx.input(|input| input.raw.hovered_files.is_empty()) {
+        return;
+    }
+
+    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("drop_hint")));
+    let screen = ctx.content_rect();
+    painter.rect_filled(screen, 0.0, Color32::from_black_alpha(DROP_OVERLAY_ALPHA));
+    painter.text(
+        screen.center(),
+        Align2::CENTER_CENTER,
+        DROP_HINT,
+        FontId::proportional(DROP_HINT_SIZE),
+        Color32::WHITE,
+    );
 }
 
 fn show_sentence(ui: &mut Ui, add_words: impl FnOnce(&mut Ui)) {

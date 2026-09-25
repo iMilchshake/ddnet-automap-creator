@@ -37,7 +37,6 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 - several rule sets in one .rules file
 - (live) .r source preview -> could be used as an interactive tool to learn r++?
 - DDNet install integration (native only)
-- drag-n-drop tilesets to load it
 - keyboard navigation / shortcuts?
 - rpp runs on the main thread, a hang could kill the tab
 - use an empty tileset tile as mask, not always 255
