@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "image": "grass_main",
+  "active": 0,
+  "rule_sets": [
+    {
+      "name": "grass_main",
+      "normalize": true,
+      "tiles": [
+        { "id": 1, "con": [ 1, 1, 1, 1, 1, 1, 1, 1 ], "chance": 100.0, "mods": { "x_flip": false, "y_flip": false, "rot": false } },
+        { "id": 5, "con": [ 2, 0, 2, 1, 0, 1, 1, 2 ], "chance": 100.0, "mods": { "x_flip": true, "y_flip": false, "rot": false } },
+        { "id": 16, "con": [ 2, 0, 2, 1, 1, 1, 1, 1 ], "chance": 100.0, "mods": { "x_flip": false, "y_flip": false, "rot": false } },
+        { "id": 21, "con": [ 1, 1, 2, 1, 0, 1, 1, 2 ], "chance": 100.0, "mods": { "x_flip": true, "y_flip": false, "rot": false } },
+        { "id": 32, "con": [ 2, 0, 1, 0, 1, 1, 1, 1 ], "chance": 100.0, "mods": { "x_flip": true, "y_flip": false, "rot": false } },
+        { "id": 37, "con": [ 1, 1, 2, 1, 0, 2, 0, 2 ], "chance": 100.0, "mods": { "x_flip": true, "y_flip": false, "rot": false } },
+        { "id": 38, "con": [ 1, 1, 2, 1, 0, 1, 1, 1 ], "chance": 100.0, "mods": { "x_flip": true, "y_flip": false, "rot": false } },
+        { "id": 49, "con": [ 1, 1, 0, 1, 1, 1, 1, 1 ], "chance": 100.0, "mods": { "x_flip": true, "y_flip": false, "rot": false } },
+        { "id": 52, "con": [ 1, 1, 1, 1, 1, 2, 0, 2 ], "chance": 100.0, "mods": { "x_flip": false, "y_flip": false, "rot": false } },
+        { "id": 53, "con": [ 1, 1, 1, 1, 1, 1, 1, 0 ], "chance": 100.0, "mods": { "x_flip": true, "y_flip": false, "rot": false } }
+      ],
+      "removed": [ ],
+      "groups": [ ]
+    }
+  ]
+}
