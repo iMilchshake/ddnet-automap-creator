@@ -28,17 +28,20 @@ Required: [trunk](https://trunkrs.dev) and `emscripten`.
 
 Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 
-## TODO
+## Planned Features 
 
-- .map export (via ddnet-rs / twmap ?)
-- undo and redo for tile and group edits
-- (doodad rules) on empty cells, re-runnable via transparent marker tile
-- autosave the project (in browser storage)
-- (live) .r source preview -> could be used as an interactive tool to learn r++?
-- DDNet install integration (native only)
 - keyboard navigation / shortcuts?
-- rpp runs on the main thread, a hang could kill the tab
+- rules on empty cells 
+- undo and redo for tile and group edits
+- autosave the project (in browser storage)
 - use an empty tileset tile as mask, not always 255
+
+## Further Ideas
+
+- toggle single rotations/flips per tile, e.g. no upward edge
+- .map export (via ddnet-rs / twmap ?)
+- (live) .r source preview -> could be used as an interactive tool to learn r++?
+- DDNet install integration (native only) -> we could use twstorage
 - do we want to support modulo rules? how are they used?
 
 ## Acknowledgements 
