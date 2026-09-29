@@ -16,8 +16,11 @@ const ON_MASK: &str = ".If(IndexAt([0, 0]).Is(g:mask))";
 
 #[derive(Debug, Error)]
 pub enum ExportError {
-    #[error("no tile and no group is configured, there is nothing to export")]
-    NothingConfigured,
+    #[error("rule set `{0}` has no tile and no group, there is nothing to export")]
+    EmptyRuleSet(String),
+
+    #[error("`{0}` names more than one rule set")]
+    DuplicateName(String),
 
     #[error("rule set name `{0}` must be 1 to 128 letters, digits, `_` or `-`")]
     Name(String),
@@ -44,18 +47,29 @@ pub fn output_file(image_stem: &str) -> String {
     format!("{image_stem}.rules")
 }
 
-pub fn render(rule_set: &RuleSet) -> Result<String, ExportError> {
-    if rule_set.tiles.is_empty() && rule_set.groups.is_empty() {
-        return Err(ExportError::NothingConfigured);
+pub fn render(rule_sets: &[RuleSet]) -> Result<String, ExportError> {
+    for rule_set in rule_sets {
+        if rule_set.tiles.is_empty() && rule_set.groups.is_empty() {
+            return Err(ExportError::EmptyRuleSet(rule_set.name.to_owned()));
+        }
+        if !is_valid_name(rule_set.name) {
+            return Err(ExportError::Name(rule_set.name.to_owned()));
+        }
+        if rule_set.tiles.iter().any(|(tile, _)| *tile == MASK_TILE) {
+            return Err(ExportError::MaskTile);
+        }
+        group::validate_all(rule_set.groups)?;
+        reject_claimed_tiles(rule_set)?;
     }
-    if !is_valid_name(rule_set.name) {
-        return Err(ExportError::Name(rule_set.name.to_owned()));
+    if let Some(duplicate) = duplicate_name(rule_sets) {
+        return Err(ExportError::DuplicateName(duplicate));
     }
-    if rule_set.tiles.iter().any(|(tile, _)| *tile == MASK_TILE) {
-        return Err(ExportError::MaskTile);
-    }
-    group::validate_all(rule_set.groups)?;
-    reject_claimed_tiles(rule_set)?;
+
+    let Some(first) = rule_sets.first() else {
+        return Ok(String::new());
+    };
+    // We only need prefixes to fix naming collisions, if we have more than one rule set.
+    let namespaced = rule_sets.len() > 1;
 
     let mut lines = vec![
         "// created with ddnet-automap-creator (https://github.com/iMilchshake/ddnet-automap-creator)"
@@ -63,12 +77,25 @@ pub fn render(rule_set: &RuleSet) -> Result<String, ExportError> {
         "// compile with rpp (https://github.com/Aerll/rpp), base.r has to sit next to this file"
             .to_owned(),
         "#include \"base.r\"".to_owned(),
-        format!("#output \"{}\"", output_file(rule_set.image_stem)),
+        format!("#output \"{}\"", output_file(first.image_stem)),
         String::new(),
     ];
 
+    for (index, rule_set) in rule_sets.iter().enumerate() {
+        render_rule_set(&mut lines, index, namespaced, rule_set);
+    }
+
+    Ok(lines.join("\n"))
+}
+
+fn render_rule_set(lines: &mut Vec<String>, index: usize, namespaced: bool, rule_set: &RuleSet) {
     if !rule_set.groups.is_empty() {
-        lines.extend(rule_set.groups.iter().map(object_line));
+        lines.extend(
+            rule_set
+                .groups
+                .iter()
+                .map(|group| object_line(index, namespaced, group)),
+        );
         lines.push(String::new());
     }
 
@@ -90,7 +117,7 @@ pub fn render(rule_set: &RuleSet) -> Result<String, ExportError> {
             rule_set
                 .groups
                 .iter()
-                .map(|group| insert_object_block(group, rule_set.groups)),
+                .map(|group| insert_object_block(index, namespaced, group, rule_set.groups)),
         );
 
         lines.push(String::new());
@@ -100,8 +127,18 @@ pub fn render(rule_set: &RuleSet) -> Result<String, ExportError> {
     }
 
     lines.push(String::new());
+}
 
-    Ok(lines.join("\n"))
+// Checks whether rules with colliding names exist.
+fn duplicate_name(rule_sets: &[RuleSet]) -> Option<String> {
+    let mut seen: Vec<&str> = Vec::with_capacity(rule_sets.len());
+    for rule_set in rule_sets {
+        if seen.contains(&rule_set.name) {
+            return Some(rule_set.name.to_owned());
+        }
+        seen.push(rule_set.name);
+    }
+    None
 }
 
 fn is_valid_name(name: &str) -> bool {
@@ -126,21 +163,34 @@ fn reject_claimed_tiles(rule_set: &RuleSet) -> Result<(), ExportError> {
     Ok(())
 }
 
-fn object_name(group: &TileGroup) -> String {
-    format!("{OBJECT_PREFIX}{}", group.name)
+/// Construct a globally unique object name which does not conflict with rpp's
+/// reserved keywords or names of different rule sets by adding unique prefixes
+fn object_name(index: usize, namespaced: bool, group: &TileGroup) -> String {
+    match namespaced {
+        true => format!("{OBJECT_PREFIX}{index}{}", group.name),
+        false => format!("{OBJECT_PREFIX}{}", group.name),
+    }
 }
 
-fn object_line(group: &TileGroup) -> String {
+fn object_line(index: usize, namespaced: bool, group: &TileGroup) -> String {
     format!(
         "object {} = Rect({}, {});",
-        object_name(group),
+        object_name(index, namespaced, group),
         group.top_left,
         group.bottom_right()
     )
 }
 
-fn insert_object_block(group: &TileGroup, every_group: &[TileGroup]) -> String {
-    let names: Vec<String> = every_group.iter().map(object_name).collect();
+fn insert_object_block(
+    index: usize,
+    namespaced: bool,
+    group: &TileGroup,
+    every_group: &[TileGroup],
+) -> String {
+    let names: Vec<String> = every_group
+        .iter()
+        .map(|group| object_name(index, namespaced, group))
+        .collect();
 
     let mut tests = vec![
         "    Object().HasSpace()".to_owned(),
@@ -157,7 +207,7 @@ fn insert_object_block(group: &TileGroup, every_group: &[TileGroup]) -> String {
 
     format!(
         "InsertObject({}){}.If(\n{}\n);",
-        object_name(group),
+        object_name(index, namespaced, group),
         chance_call(group.chance),
         tests.join(",\n"),
     )

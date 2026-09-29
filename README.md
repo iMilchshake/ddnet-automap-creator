@@ -34,7 +34,6 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 - undo and redo for tile and group edits
 - (doodad rules) on empty cells, re-runnable via transparent marker tile
 - autosave the project (in browser storage)
-- several rule sets in one .rules file
 - (live) .r source preview -> could be used as an interactive tool to learn r++?
 - DDNet install integration (native only)
 - keyboard navigation / shortcuts?

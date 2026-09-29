@@ -21,23 +21,23 @@ fn emit_with_groups(
     tiles: &[(usize, TileRule)],
     groups: &[TileGroup],
 ) -> Result<String, ExportError> {
-    render(&RuleSet {
+    render(&[RuleSet {
         image_stem: "grass_main",
         name: "Grass_Main",
         tiles,
         groups,
         chance_mode: ChanceMode::Normalize,
-    })
+    }])
 }
 
 fn emit_exact(tiles: &[(usize, TileRule)]) -> String {
-    render(&RuleSet {
+    render(&[RuleSet {
         image_stem: "grass_main",
         name: "Grass_Main",
         tiles,
         groups: &[],
         chance_mode: ChanceMode::Exact,
-    })
+    }])
     .unwrap()
 }
 
@@ -220,13 +220,13 @@ fn a_rule_set_name_outside_the_allowed_characters_is_refused() {
     let tiles = [(7, rule(outer_corner(), 100.0, false))];
 
     for name in ["", "grass main", "grass\"main", &"g".repeat(129)] {
-        let error = render(&RuleSet {
+        let error = render(&[RuleSet {
             image_stem: "grass_main",
             name,
             tiles: &tiles,
             groups: &[],
             chance_mode: ChanceMode::Normalize,
-        })
+        }])
         .unwrap_err();
 
         assert!(matches!(error, ExportError::Name(_)), "accepted `{name}`");
@@ -237,7 +237,7 @@ fn a_rule_set_name_outside_the_allowed_characters_is_refused() {
 fn an_empty_rule_set_is_refused() {
     let error = emit_with_groups(&[], &[]).unwrap_err();
 
-    assert!(matches!(error, ExportError::NothingConfigured));
+    assert!(matches!(error, ExportError::EmptyRuleSet(name) if name == "Grass_Main"));
 }
 
 fn tile_group(name: &str, top_left: usize, mode: GroupMode, percent: f32) -> TileGroup {
@@ -369,4 +369,72 @@ fn an_invalid_group_stops_the_export() {
 fn groups_alone_are_enough_to_export() {
     let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
     assert!(emit_with_groups(&[], &groups).is_ok());
+}
+
+fn rule_set<'a>(
+    name: &'a str,
+    tiles: &'a [(usize, TileRule)],
+    groups: &'a [TileGroup],
+) -> RuleSet<'a> {
+    RuleSet {
+        image_stem: "grass_main",
+        name,
+        tiles,
+        groups,
+        chance_mode: ChanceMode::Normalize,
+    }
+}
+
+#[test]
+fn several_rule_sets_share_one_output_and_header() {
+    let tiles_a = [(1, rule(Neighborhood::default(), 100.0, false))];
+    let tiles_b = [(2, rule(Neighborhood::default(), 100.0, false))];
+
+    let source = render(&[
+        rule_set("SetA", &tiles_a, &[]),
+        rule_set("SetB", &tiles_b, &[]),
+    ])
+    .unwrap();
+
+    assert_eq!(source.matches("#output").count(), 1);
+    assert!(source.contains("AutoMapper(\"SetA\");"));
+    assert!(source.contains("AutoMapper(\"SetB\");"));
+    assert!(source.find("AutoMapper(\"SetA\")") < source.find("AutoMapper(\"SetB\")"));
+}
+
+#[test]
+fn several_rule_sets_namespace_same_named_groups() {
+    let tiles = [(1, rule(Neighborhood::default(), 100.0, false))];
+    let groups_a = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let groups_b = [tile_group("bones", 100, GroupMode::Fill, 100.0)];
+
+    let source = render(&[
+        rule_set("SetA", &tiles, &groups_a),
+        rule_set("SetB", &tiles, &groups_b),
+    ])
+    .unwrap();
+
+    assert!(source.contains("object o:0bones = Rect(64, 81);"));
+    assert!(source.contains("object o:1bones = Rect(100, 117);"));
+    assert!(!source.contains("object o:bones"));
+}
+
+#[test]
+fn a_single_rule_set_keeps_unnamespaced_object_names() {
+    let tiles = [(1, rule(Neighborhood::default(), 100.0, false))];
+    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+
+    let source = render(&[rule_set("SetA", &tiles, &groups)]).unwrap();
+
+    assert!(source.contains("object o:bones = Rect(64, 81);"));
+}
+
+#[test]
+fn two_rule_sets_sharing_a_name_are_refused() {
+    let tiles = [(1, rule(Neighborhood::default(), 100.0, false))];
+
+    let error =
+        render(&[rule_set("SetA", &tiles, &[]), rule_set("SetA", &tiles, &[])]).unwrap_err();
+
+    assert!(matches!(error, ExportError::DuplicateName(name) if name == "SetA"));
 }

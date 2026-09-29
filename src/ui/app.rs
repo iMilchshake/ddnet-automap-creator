@@ -13,7 +13,8 @@ use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode, Pool};
 use crate::model::project::Project;
-use crate::model::tile::{Chance, MASK_TILE, TILESET_SIDE};
+use crate::model::rule_sets::RuleSets;
+use crate::model::tile::{Chance, MASK_TILE, TILESET_SIDE, TileRule};
 use crate::preview::{self, Automapped, Sample};
 use crate::tileset::{self, Tileset};
 use crate::ui::grid::{self, GridResponse, GridView};
@@ -39,6 +40,7 @@ const DROP_OVERLAY_ALPHA: u8 = 160;
 const DROP_HINT_SIZE: f32 = 24.0;
 
 const REMOVE_ICON: &str = "✖";
+const DUPLICATE_ICON: &str = "⎘";
 const CREDIT: &str = env!("CARGO_PKG_NAME");
 const ORIGINAL_PROJECT: &str = "https://github.com/AssassinTee/SimpleDDNetAutomapper";
 const RPP: &str = "https://github.com/Aerll/rpp";
@@ -66,6 +68,13 @@ enum GroupCommand {
     Select(usize),
     Move { from: usize, before: usize },
     Remove(usize),
+}
+
+enum RuleSetCommand {
+    Select(usize),
+    Add,
+    Duplicate,
+    Remove,
 }
 
 #[derive(Default)]
@@ -131,8 +140,7 @@ struct LoadedTileset {
 
 pub struct AutomapperApp {
     workspace: Workspace,
-    project: Project,
-    rule_set_name: String,
+    rule_sets: RuleSets,
     picker: FilePicker,
     saver: FileSaver,
     compiler: RulesCompiler,
@@ -155,8 +163,7 @@ impl Default for AutomapperApp {
     fn default() -> Self {
         Self {
             workspace: Workspace::NoImage,
-            project: Project::default(),
-            rule_set_name: String::new(),
+            rule_sets: RuleSets::default(),
             picker: FilePicker::new(),
             saver: FileSaver::new(),
             compiler: RulesCompiler::new(),
@@ -260,8 +267,7 @@ impl AutomapperApp {
 
         match blueprint::from_json(text, &loaded.tileset.stem) {
             Ok(blueprint) => {
-                self.project = blueprint.project;
-                self.rule_set_name = blueprint.rule_set;
+                self.rule_sets = blueprint.rule_sets;
                 self.inspector = Inspector::Empty;
                 self.drag_anchor = None;
                 self.status.info(ctx, format!("Loaded {}", picked.name));
@@ -278,7 +284,7 @@ impl AutomapperApp {
         };
 
         let stem = &loaded.tileset.stem;
-        match blueprint::to_json(&self.project, stem, &self.rule_set_name) {
+        match blueprint::to_json(&self.rule_sets, stem) {
             Ok(text) => self
                 .saver
                 .save_text(BLUEPRINT, &format!("{stem}.json"), text),
@@ -303,7 +309,7 @@ impl AutomapperApp {
         };
 
         let stem = loaded.tileset.stem.clone();
-        match render_source(&self.project, &stem, &self.rule_set_name) {
+        match render_source(&self.rule_sets, &stem) {
             Ok(source) => self
                 .saver
                 .save_text(RPP_SOURCE, &format!("{stem}.r"), source),
@@ -317,7 +323,7 @@ impl AutomapperApp {
         };
 
         let stem = loaded.tileset.stem.clone();
-        match render_source(&self.project, &stem, &self.rule_set_name) {
+        match render_source(&self.rule_sets, &stem) {
             Ok(source) => {
                 self.start_compile(source, &stem, CompileTarget::Rules);
                 self.status.info(ctx, "Compiling with rpp…");
@@ -332,14 +338,14 @@ impl AutomapperApp {
         };
 
         let stem = loaded.tileset.stem.clone();
-        let source = match render_source(&self.project, &stem, &self.rule_set_name) {
+        let source = match render_source(&self.rule_sets, &stem) {
             Ok(source) => source,
             Err(error) => {
                 self.status.warning(ctx, error.to_string());
                 return;
             }
         };
-        let blueprint = match blueprint::to_json(&self.project, &stem, &self.rule_set_name) {
+        let blueprint = match blueprint::to_json(&self.rule_sets, &stem) {
             Ok(blueprint) => blueprint,
             Err(error) => {
                 self.status.warning(ctx, error.to_string());
@@ -427,8 +433,7 @@ impl AutomapperApp {
             ),
         );
 
-        self.project = Project::default();
-        self.rule_set_name = stem.clone();
+        self.rule_sets = RuleSets::new(stem.clone());
         self.inspector = Inspector::Empty;
         self.drag_anchor = None;
         self.hovered_tile = None;
@@ -520,16 +525,18 @@ impl AutomapperApp {
     }
 
     fn show_options(&mut self, ui: &mut Ui) {
-        let mut normalize = self.project.chance_mode() == ChanceMode::Normalize;
+        let mut normalize = self.rule_sets.active().chance_mode() == ChanceMode::Normalize;
         if ui
             .checkbox(&mut normalize, "Normalize chances")
             .on_hover_text(NORMALIZE_TOOLTIP)
             .changed()
         {
-            self.project.set_chance_mode(match normalize {
-                true => ChanceMode::Normalize,
-                false => ChanceMode::Exact,
-            });
+            self.rule_sets
+                .active_mut()
+                .set_chance_mode(match normalize {
+                    true => ChanceMode::Normalize,
+                    false => ChanceMode::Exact,
+                });
         }
     }
 
@@ -584,7 +591,11 @@ impl AutomapperApp {
                     if let (Workspace::Ready(loaded), Some(index)) =
                         (&self.workspace, self.hovered_tile)
                     {
-                        ui.weak(describe_tile(&loaded.tileset, &self.project, index));
+                        ui.weak(describe_tile(
+                            &loaded.tileset,
+                            self.rule_sets.active(),
+                            index,
+                        ));
                     }
                 });
             });
@@ -594,10 +605,11 @@ impl AutomapperApp {
     fn show_side_panel(&mut self, ui: &mut Ui) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
         let selected_group = self.inspector.group();
-        let pools = pool::pools(&self.project.rules());
+        let pools = pool::pools(&self.rule_sets.active().rules());
         let mut pending = None;
         let mut tile_edit = None;
         let mut group_edit = None;
+        let mut rule_set_command = None;
 
         egui::Panel::right("tools")
             .resizable(true)
@@ -606,14 +618,30 @@ impl AutomapperApp {
             .max_size(MAX_SIDE_PANEL_WIDTH)
             .show(ui, |ui| {
                 ui.add_enabled_ui(has_image, |ui| {
+                    show_rule_set_tabs(ui, &self.rule_sets, &mut rule_set_command);
                     ui.horizontal(|ui| {
-                        ui.label("Rule name");
-                        ui.text_edit_singleline(&mut self.rule_set_name);
+                        ui.label("Name");
+                        ui.text_edit_singleline(self.rule_sets.active_name_mut());
+                        if ui
+                            .button(DUPLICATE_ICON)
+                            .on_hover_text("Duplicate this rule set")
+                            .clicked()
+                        {
+                            rule_set_command = Some(RuleSetCommand::Duplicate);
+                        }
+                        let can_remove = self.rule_sets.len() > 1;
+                        if ui
+                            .add_enabled(can_remove, egui::Button::new(REMOVE_ICON))
+                            .on_hover_text("Remove this rule set")
+                            .clicked()
+                        {
+                            rule_set_command = Some(RuleSetCommand::Remove);
+                        }
                     });
                     ui.label(format!(
                         "{} tiles, {} groups configured",
-                        self.project.rule_count(),
-                        self.project.groups().len()
+                        self.rule_sets.active().rule_count(),
+                        self.rule_sets.active().groups().len()
                     ));
 
                     ui.separator();
@@ -623,7 +651,7 @@ impl AutomapperApp {
                             (Workspace::Ready(loaded), Inspector::Tile(panel)) => {
                                 let tile_pools = TilePools {
                                     pools: pool::pools_of(&pools, panel.tile()),
-                                    mode: self.project.chance_mode(),
+                                    mode: self.rule_sets.active().chance_mode(),
                                 };
                                 tile_edit = panel
                                     .show(ui, &loaded.tileset, &loaded.texture, &tile_pools)
@@ -631,7 +659,7 @@ impl AutomapperApp {
                             }
                             (_, Inspector::Group(panel)) => {
                                 group_edit = panel
-                                    .show(ui, self.project.groups())
+                                    .show(ui, self.rule_sets.active().groups())
                                     .map(|group| (panel.index(), group));
                             }
                             _ => {
@@ -646,34 +674,71 @@ impl AutomapperApp {
                             ui.add(egui::Label::new(note).truncate());
                         });
                         ui.add_space(HEADING_SPACING);
-                        show_group_list(ui, self.project.groups(), selected_group, &mut pending);
+                        show_group_list(
+                            ui,
+                            self.rule_sets.active().groups(),
+                            selected_group,
+                            &mut pending,
+                        );
                     });
                 });
             });
 
         if let Some((tile, edit)) = tile_edit {
             match edit {
-                TileEdit::Apply(rule) => self.project.set_rule(tile, rule),
-                TileEdit::Remove => self.project.clear_rule(tile),
+                TileEdit::Apply(rule) => self.rule_sets.active_mut().set_rule(tile, rule),
+                TileEdit::Remove => self.rule_sets.active_mut().clear_rule(tile),
             }
         }
         if let Some((index, group)) = group_edit {
-            self.project.replace_group(index, group);
+            self.rule_sets.active_mut().replace_group(index, group);
         }
 
         match pending {
             Some(GroupCommand::Select(index)) => self.select_group(index),
             Some(GroupCommand::Move { from, before }) => {
                 self.forget_group_selection();
-                if let Some(index) = self.project.move_group(from, before) {
+                if let Some(index) = self.rule_sets.active_mut().move_group(from, before) {
                     self.select_group(index);
                 }
             }
             Some(GroupCommand::Remove(index)) => {
-                self.project.remove_group(index);
+                self.rule_sets.active_mut().remove_group(index);
                 self.forget_group_selection();
             }
             None => {}
+        }
+
+        match rule_set_command {
+            Some(RuleSetCommand::Select(index)) => self.select_rule_set(index),
+            Some(RuleSetCommand::Add) => {
+                let index = self.rule_sets.add();
+                self.select_rule_set(index);
+            }
+            Some(RuleSetCommand::Duplicate) => {
+                let index = self.rule_sets.active_index();
+                if let Some(index) = self.rule_sets.duplicate(index) {
+                    self.select_rule_set(index);
+                }
+            }
+            Some(RuleSetCommand::Remove) => self.remove_active_rule_set(),
+            None => {}
+        }
+    }
+
+    fn select_rule_set(&mut self, index: usize) {
+        self.rule_sets.select(index);
+        self.inspector = Inspector::Empty;
+        self.drag_anchor = None;
+        self.hovered_tile = None;
+    }
+
+    fn remove_active_rule_set(&mut self) {
+        let index = self.rule_sets.active_index();
+        if self.rule_sets.remove(index) {
+            self.inspector = Inspector::Empty;
+            self.drag_anchor = None;
+            self.hovered_tile = None;
         }
     }
 
@@ -682,7 +747,11 @@ impl AutomapperApp {
             return;
         }
 
-        let exportable = self.project.rule_count() > 0 || !self.project.groups().is_empty();
+        let exportable = self
+            .rule_sets
+            .sets()
+            .iter()
+            .any(|(_, project)| project.rule_count() > 0 || !project.groups().is_empty());
         let can_compile = exportable && !self.compiler.is_running();
         let mut export = false;
         let mut compile = false;
@@ -691,11 +760,7 @@ impl AutomapperApp {
         let modal = egui::Modal::new(egui::Id::new("export")).show(ctx, |ui| {
             ui.set_max_width(EXPORT_WIDTH);
             ui.heading("Export");
-            ui.label(format!(
-                "{} tiles, {} groups configured",
-                self.project.rule_count(),
-                self.project.groups().len()
-            ));
+            ui.label(format!("{} rule set(s) configured", self.rule_sets.len()));
             ui.separator();
 
             if ui
@@ -749,7 +814,7 @@ impl AutomapperApp {
     }
 
     fn select_group(&mut self, index: usize) {
-        if let Some(group) = self.project.groups().get(index) {
+        if let Some(group) = self.rule_sets.active().groups().get(index) {
             self.inspector = Inspector::Group(GroupPanel::new(index, group));
         }
     }
@@ -777,8 +842,8 @@ impl AutomapperApp {
     }
 
     fn show_tileset(&mut self, ui: &mut Ui, ctx: &Context) {
-        let pools = pool::pools(&self.project.rules());
-        let shares = pool::base_shares(&pools, self.project.chance_mode());
+        let pools = pool::pools(&self.rule_sets.active().rules());
+        let shares = pool::base_shares(&pools, self.rule_sets.active().chance_mode());
         let pool_mates = self.pool_mates(&pools);
 
         let response = egui::CentralPanel::default()
@@ -798,7 +863,7 @@ impl AutomapperApp {
                             ui,
                             GridView {
                                 tileset: &loaded.tileset,
-                                project: &self.project,
+                                project: self.rule_sets.active(),
                                 shares: &shares,
                                 texture: &loaded.texture,
                                 group_editing: self.define_groups,
@@ -872,7 +937,7 @@ impl AutomapperApp {
         }
 
         let stem = loaded.tileset.stem.clone();
-        let source = match render_source(&self.project, &stem, &self.rule_set_name) {
+        let source = match render_active_source(&self.rule_sets, &stem) {
             Ok(source) => source,
             Err(error) => {
                 self.preview = PreviewResult::Failed(error.to_string());
@@ -906,10 +971,10 @@ impl AutomapperApp {
         }
 
         if let Some(tile) = response.clicked
-            && tile_state(&loaded.tileset, &self.project, tile).is_editable()
+            && tile_state(&loaded.tileset, self.rule_sets.active(), tile).is_editable()
         {
-            let rule = seed_rule(&loaded.tileset, &self.project, tile);
-            let has_rule = self.project.rule(tile).is_some();
+            let rule = seed_rule(&loaded.tileset, self.rule_sets.active(), tile);
+            let has_rule = self.rule_sets.active().rule(tile).is_some();
             self.inspector = Inspector::Tile(TilePanel::new(tile, rule, has_rule));
         }
 
@@ -925,16 +990,16 @@ impl AutomapperApp {
 
         if let Some(index) = response
             .clicked
-            .and_then(|tile| self.project.group_at(tile))
+            .and_then(|tile| self.rule_sets.active().group_at(tile))
         {
             self.select_group(index);
         }
 
         if let Some(tile) = response.secondary_clicked
-            && let Some(index) = self.project.group_at(tile)
+            && let Some(index) = self.rule_sets.active().group_at(tile)
         {
-            let name = self.project.groups()[index].name.clone();
-            self.project.remove_group(index);
+            let name = self.rule_sets.active().groups()[index].name.clone();
+            self.rule_sets.active_mut().remove_group(index);
             self.forget_group_selection();
             self.status.info(ctx, format!("Removed group {name}"));
             self.drag_anchor = None;
@@ -949,7 +1014,7 @@ impl AutomapperApp {
             return;
         };
 
-        match self.project.group_at(anchor) {
+        match self.rule_sets.active().group_at(anchor) {
             Some(index) if anchor == corner => self.select_group(index),
             Some(_) => self
                 .status
@@ -961,7 +1026,7 @@ impl AutomapperApp {
     fn create_group(&mut self, ctx: &Context, anchor: usize, corner: usize) {
         let (top_left, bottom_right) = grid::corners(anchor, corner);
         let group = TileGroup {
-            name: self.project.unused_group_name(),
+            name: self.rule_sets.active().unused_group_name(),
             top_left,
             width: bottom_right % TILESET_SIDE - top_left % TILESET_SIDE + 1,
             height: bottom_right / TILESET_SIDE - top_left / TILESET_SIDE + 1,
@@ -976,7 +1041,7 @@ impl AutomapperApp {
         if !group
             .footprint()
             .iter()
-            .all(|tile| self.project.is_free(*tile))
+            .all(|tile| self.rule_sets.active().is_free(*tile))
         {
             self.status
                 .warning(ctx, "Those tiles already belong to a group or a rule");
@@ -984,7 +1049,7 @@ impl AutomapperApp {
         }
 
         self.status.info(ctx, format!("Added group {}", group.name));
-        self.project.add_group(group);
+        self.rule_sets.active_mut().add_group(group);
         self.select_group(0);
     }
 
@@ -993,18 +1058,18 @@ impl AutomapperApp {
             return;
         };
 
-        let state = tile_state(&loaded.tileset, &self.project, tile);
+        let state = tile_state(&loaded.tileset, self.rule_sets.active(), tile);
         if !state.is_editable() {
             return;
         }
 
         match state {
             TileState::Removed => {
-                self.project.restore(tile);
+                self.rule_sets.active_mut().restore(tile);
                 self.status.info(ctx, format!("Tile {tile} restored"));
             }
             _ => {
-                self.project.remove(tile);
+                self.rule_sets.active_mut().remove(tile);
                 if self.inspector.tile() == Some(tile) {
                     self.inspector = Inspector::Empty;
                 }
@@ -1087,6 +1152,24 @@ fn show_sentence(ui: &mut Ui, add_words: impl FnOnce(&mut Ui)) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         add_words(ui);
+    });
+}
+
+fn show_rule_set_tabs(ui: &mut Ui, rule_sets: &RuleSets, command: &mut Option<RuleSetCommand>) {
+    ui.horizontal_wrapped(|ui| {
+        for index in 0..rule_sets.len() {
+            let name = rule_sets.name(index).unwrap_or_default();
+            if ui
+                .selectable_label(index == rule_sets.active_index(), name)
+                .clicked()
+            {
+                *command = Some(RuleSetCommand::Select(index));
+            }
+        }
+
+        if ui.small_button("+").on_hover_text("Add rule set").clicked() {
+            *command = Some(RuleSetCommand::Add);
+        }
     });
 }
 
@@ -1268,19 +1351,41 @@ fn preview_result(rules: String, sample: Sample, seed: u32) -> PreviewResult {
     }
 }
 
-fn render_source(
-    project: &Project,
-    image_stem: &str,
-    rule_set_name: &str,
-) -> Result<String, ExportError> {
+fn render_source(rule_sets: &RuleSets, image_stem: &str) -> Result<String, ExportError> {
+    let tiles: Vec<Vec<(usize, TileRule)>> = rule_sets
+        .sets()
+        .iter()
+        .map(|(_, project)| project.rules())
+        .collect();
+
+    let sets: Vec<RuleSet> = rule_sets
+        .sets()
+        .iter()
+        .zip(&tiles)
+        .map(|((name, project), tiles)| RuleSet {
+            image_stem,
+            name,
+            tiles,
+            groups: project.groups(),
+            chance_mode: project.chance_mode(),
+        })
+        .collect();
+
+    r_source::render(&sets)
+}
+
+// We have a separate function which only considers the active rule set, so it works
+// regardless of errors in other rule sets.
+fn render_active_source(rule_sets: &RuleSets, image_stem: &str) -> Result<String, ExportError> {
+    let project = rule_sets.active();
     let tiles = project.rules();
     let rule_set = RuleSet {
         image_stem,
-        name: rule_set_name,
+        name: rule_sets.active_name(),
         tiles: &tiles,
         groups: project.groups(),
         chance_mode: project.chance_mode(),
     };
 
-    r_source::render(&rule_set)
+    r_source::render(std::slice::from_ref(&rule_set))
 }

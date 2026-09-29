@@ -3,6 +3,7 @@ use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
+use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{Chance, MASK_TILE, TileRule};
 use crate::tests::support::{mods, outer_corner};
 
@@ -54,8 +55,13 @@ fn furnished() -> Project {
 }
 
 fn round_trip(project: &Project) -> Project {
-    let text = blueprint::to_json(project, IMAGE, "Grass Main").unwrap();
-    blueprint::from_json(&text, IMAGE).unwrap().project
+    let rule_sets = RuleSets::from_parts(vec![("Grass Main".to_owned(), project.clone())], 0);
+    let text = blueprint::to_json(&rule_sets, IMAGE).unwrap();
+    blueprint::from_json(&text, IMAGE)
+        .unwrap()
+        .rule_sets
+        .active()
+        .clone()
 }
 
 #[test]
@@ -78,24 +84,31 @@ fn group_priority_order_survives_a_round_trip() {
 
 #[test]
 fn the_rule_set_name_is_carried_along() {
-    let text = blueprint::to_json(&furnished(), IMAGE, "Grass Main").unwrap();
+    let rule_sets = RuleSets::from_parts(vec![("Grass Main".to_owned(), furnished())], 0);
+    let text = blueprint::to_json(&rule_sets, IMAGE).unwrap();
     assert_eq!(
-        blueprint::from_json(&text, IMAGE).unwrap().rule_set,
+        blueprint::from_json(&text, IMAGE)
+            .unwrap()
+            .rule_sets
+            .active_name(),
         "Grass Main"
     );
 }
 
 fn load(json: &str) -> Result<Project, BlueprintError> {
-    blueprint::from_json(json, IMAGE).map(|loaded| loaded.project)
+    blueprint::from_json(json, IMAGE).map(|loaded| loaded.rule_sets.active().clone())
 }
 
 fn one_tile(body: &str) -> String {
-    format!(r#"{{"version": 1, "image": "grass_main", "tiles": [{body}]}}"#)
+    format!(
+        r#"{{"version": 1, "image": "grass_main",
+            "rule_sets": [{{"name": "Grass Main", "tiles": [{body}]}}]}}"#
+    )
 }
 
 #[test]
 fn a_blueprint_for_another_image_is_refused() {
-    let json = r#"{"version": 1, "image": "desert_main", "tiles": []}"#;
+    let json = r#"{"version": 1, "image": "desert_main", "rule_sets": []}"#;
     assert!(matches!(
         load(json).unwrap_err(),
         BlueprintError::WrongImage { .. }
@@ -104,11 +117,41 @@ fn a_blueprint_for_another_image_is_refused() {
 
 #[test]
 fn an_unsupported_version_is_refused() {
-    let json = r#"{"version": 2, "image": "grass_main", "tiles": []}"#;
+    let json = r#"{"version": 3, "image": "grass_main", "rule_sets": []}"#;
     assert!(matches!(
         load(json).unwrap_err(),
-        BlueprintError::UnsupportedVersion(2)
+        BlueprintError::UnsupportedVersion(3)
     ));
+}
+
+#[test]
+fn a_blueprint_with_no_rule_sets_is_refused() {
+    let json = r#"{"version": 1, "image": "grass_main", "rule_sets": []}"#;
+    assert!(matches!(
+        load(json).unwrap_err(),
+        BlueprintError::NoRuleSets
+    ));
+}
+
+#[test]
+fn a_blueprint_round_trips_several_rule_sets() {
+    let mut set_a = Project::default();
+    set_a.set_rule(1, TileRule::new(Neighborhood::uniform(NeighborState::Full)));
+    let mut set_b = Project::default();
+    set_b.set_rule(2, TileRule::new(Neighborhood::uniform(NeighborState::Any)));
+
+    let rule_sets = RuleSets::from_parts(
+        vec![("Grass".to_owned(), set_a), ("Doodads".to_owned(), set_b)],
+        1,
+    );
+    let text = blueprint::to_json(&rule_sets, IMAGE).unwrap();
+    let loaded = blueprint::from_json(&text, IMAGE).unwrap().rule_sets;
+
+    assert_eq!(loaded.len(), 2);
+    assert_eq!(loaded.active_index(), 1);
+    assert_eq!(loaded.name(0), Some("Grass"));
+    assert_eq!(loaded.name(1), Some("Doodads"));
+    assert_eq!(loaded.active().rule(2), rule_sets.active().rule(2));
 }
 
 #[test]
@@ -142,7 +185,8 @@ fn the_chance_mode_survives_a_round_trip() {
 
 #[test]
 fn a_file_without_a_chance_mode_normalizes() {
-    let json = r#"{"version": 1, "image": "grass_main", "tiles": []}"#;
+    let json = r#"{"version": 1, "image": "grass_main",
+        "rule_sets": [{"name": "Grass Main", "tiles": []}]}"#;
 
     assert_eq!(load(json).unwrap().chance_mode(), ChanceMode::Normalize);
 }
@@ -184,29 +228,31 @@ fn a_chance_outside_its_range_is_refused() {
 
 #[test]
 fn an_invalid_group_is_refused() {
-    let json = r#"{"version": 1, "image": "grass_main", "tiles": [],
+    let json = r#"{"version": 1, "image": "grass_main", "rule_sets": [{"name": "Grass Main",
+        "tiles": [],
         "groups": [{"name": "bones", "top_left": 64, "width": 1, "height": 1,
-                    "mode": "fill", "chance": 100.0}]}"#;
+                    "mode": "fill", "chance": 100.0}]}]}"#;
     assert!(matches!(load(json).unwrap_err(), BlueprintError::Group(_)));
 }
 
 #[test]
 fn two_groups_sharing_a_name_are_refused() {
-    let json = r#"{"version": 1, "image": "grass_main", "tiles": [],
+    let json = r#"{"version": 1, "image": "grass_main", "rule_sets": [{"name": "Grass Main",
+        "tiles": [],
         "groups": [{"name": "bones", "top_left": 64, "width": 2, "height": 2,
                     "mode": "fill", "chance": 100.0},
                    {"name": "bones", "top_left": 100, "width": 2, "height": 2,
-                    "mode": "fill", "chance": 100.0}]}"#;
+                    "mode": "fill", "chance": 100.0}]}]}"#;
     assert!(matches!(load(json).unwrap_err(), BlueprintError::Group(_)));
 }
 
 #[test]
 fn a_group_over_a_configured_tile_is_refused() {
-    let json = r#"{"version": 1, "image": "grass_main",
+    let json = r#"{"version": 1, "image": "grass_main", "rule_sets": [{"name": "Grass Main",
         "tiles": [{"id": 65, "con": [0,0,0,0,0,0,0,0], "chance": 100.0,
                    "mods": {"x_flip": false, "y_flip": false, "rot": false}}],
         "groups": [{"name": "bones", "top_left": 64, "width": 2, "height": 2,
-                    "mode": "fill", "chance": 100.0}]}"#;
+                    "mode": "fill", "chance": 100.0}]}]}"#;
     assert!(matches!(
         load(json).unwrap_err(),
         BlueprintError::Claimed { tile: 65, .. }
@@ -246,7 +292,8 @@ fn removed_tiles_are_kept_apart_from_rules() {
 
 #[test]
 fn a_neighborhood_is_stored_in_index_order() {
-    let text = blueprint::to_json(&furnished(), IMAGE, "Grass Main").unwrap();
+    let rule_sets = RuleSets::from_parts(vec![("Grass Main".to_owned(), furnished())], 0);
+    let text = blueprint::to_json(&rule_sets, IMAGE).unwrap();
     assert!(
         text.contains("\"con\": [ 2, 0, 2, 0, 1, 2, 1, 1 ]"),
         "{text}"

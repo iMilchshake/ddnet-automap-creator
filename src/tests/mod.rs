@@ -7,6 +7,7 @@ mod pool;
 mod preview;
 mod project;
 mod r_source;
+mod rule_sets;
 mod support;
 mod tile;
 mod tileset;

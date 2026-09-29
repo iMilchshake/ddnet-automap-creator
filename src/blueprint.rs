@@ -6,6 +6,7 @@ use crate::model::group::{self, GroupError, GroupMode, TileGroup};
 use crate::model::neighbor::{NEIGHBOR_COUNT, NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
+use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{Chance, InvalidChance, MASK_TILE, TILE_COUNT, TileMods, TileRule};
 
 const VERSION: u32 = 1;
@@ -44,21 +45,30 @@ pub enum BlueprintError {
 
     #[error("group `{group}` covers tile {tile}, which is also configured on its own")]
     Claimed { group: String, tile: usize },
+
+    #[error("blueprint holds no rule sets")]
+    NoRuleSets,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Blueprint {
-    pub version: u32,
-    pub image: Option<String>,
+struct Blueprint {
+    version: u32,
+    image: Option<String>,
     #[serde(default)]
-    pub rule_set: String,
+    active: usize,
+    rule_sets: Vec<BlueprintRuleSet>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BlueprintRuleSet {
+    name: String,
+    #[serde(default = "default_normalize")]
+    normalize: bool,
+    tiles: Vec<BlueprintTile>,
     #[serde(default)]
-    pub chances: BlueprintChanceMode,
-    pub tiles: Vec<BlueprintTile>,
+    removed: Vec<usize>,
     #[serde(default)]
-    pub removed: Vec<usize>,
-    #[serde(default)]
-    pub groups: Vec<BlueprintGroup>,
+    groups: Vec<BlueprintGroup>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -86,12 +96,8 @@ pub struct BlueprintGroup {
     pub chance: f32,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum BlueprintChanceMode {
-    #[default]
-    Normalize,
-    Exact,
+fn default_normalize() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -102,22 +108,19 @@ pub enum BlueprintMode {
 }
 
 pub struct Loaded {
-    pub project: Project,
-    pub rule_set: String,
+    pub rule_sets: RuleSets,
 }
 
-pub fn to_json(project: &Project, image: &str, rule_set: &str) -> Result<String, BlueprintError> {
+pub fn to_json(rule_sets: &RuleSets, image: &str) -> Result<String, BlueprintError> {
     let blueprint = Blueprint {
         version: VERSION,
         image: Some(image.to_owned()),
-        rule_set: rule_set.to_owned(),
-        chances: match project.chance_mode() {
-            ChanceMode::Normalize => BlueprintChanceMode::Normalize,
-            ChanceMode::Exact => BlueprintChanceMode::Exact,
-        },
-        tiles: project.rules().into_iter().map(store_tile).collect(),
-        removed: project.removed_tiles(),
-        groups: project.groups().iter().map(store_group).collect(),
+        active: rule_sets.active_index(),
+        rule_sets: rule_sets
+            .sets()
+            .iter()
+            .map(|(name, project)| store_rule_set(name, project))
+            .collect(),
     };
 
     let mut target = Vec::new();
@@ -135,8 +138,33 @@ pub fn from_json(text: &str, image: &str) -> Result<Loaded, BlueprintError> {
     if blueprint.version != VERSION {
         return Err(BlueprintError::UnsupportedVersion(blueprint.version));
     }
+    check_image(&blueprint.image, image)?;
 
-    if let Some(wanted) = &blueprint.image
+    if blueprint.rule_sets.is_empty() {
+        return Err(BlueprintError::NoRuleSets);
+    }
+
+    let sets = blueprint
+        .rule_sets
+        .into_iter()
+        .map(|rule_set| {
+            let project = load_project(
+                rule_set.normalize,
+                &rule_set.tiles,
+                &rule_set.removed,
+                &rule_set.groups,
+            )?;
+            Ok((rule_set.name, project))
+        })
+        .collect::<Result<_, BlueprintError>>()?;
+
+    Ok(Loaded {
+        rule_sets: RuleSets::from_parts(sets, blueprint.active),
+    })
+}
+
+fn check_image(wanted: &Option<String>, image: &str) -> Result<(), BlueprintError> {
+    if let Some(wanted) = wanted
         && wanted != image
     {
         return Err(BlueprintError::WrongImage {
@@ -145,12 +173,21 @@ pub fn from_json(text: &str, image: &str) -> Result<Loaded, BlueprintError> {
         });
     }
 
+    Ok(())
+}
+
+fn load_project(
+    normalize: bool,
+    tiles: &[BlueprintTile],
+    removed: &[usize],
+    groups: &[BlueprintGroup],
+) -> Result<Project, BlueprintError> {
     let mut project = Project::default();
-    project.set_chance_mode(match blueprint.chances {
-        BlueprintChanceMode::Normalize => ChanceMode::Normalize,
-        BlueprintChanceMode::Exact => ChanceMode::Exact,
+    project.set_chance_mode(match normalize {
+        true => ChanceMode::Normalize,
+        false => ChanceMode::Exact,
     });
-    for tile in &blueprint.tiles {
+    for tile in tiles {
         if tile.id >= TILE_COUNT {
             return Err(BlueprintError::TileId(tile.id));
         }
@@ -163,20 +200,16 @@ pub fn from_json(text: &str, image: &str) -> Result<Loaded, BlueprintError> {
         project.set_rule(tile.id, load_tile(tile)?);
     }
 
-    for &tile in &blueprint.removed {
+    for &tile in removed {
         if tile >= TILE_COUNT {
             return Err(BlueprintError::TileId(tile));
         }
         project.remove(tile);
     }
 
-    let groups: Vec<TileGroup> = blueprint
-        .groups
-        .iter()
-        .map(load_group)
-        .collect::<Result<_, _>>()?;
-    group::validate_all(&groups)?;
-    for group in groups {
+    let loaded_groups: Vec<TileGroup> = groups.iter().map(load_group).collect::<Result<_, _>>()?;
+    group::validate_all(&loaded_groups)?;
+    for group in loaded_groups {
         for tile in group.footprint() {
             if project.rule(tile).is_some() {
                 return Err(BlueprintError::Claimed {
@@ -188,10 +221,17 @@ pub fn from_json(text: &str, image: &str) -> Result<Loaded, BlueprintError> {
         project.append_group(group);
     }
 
-    Ok(Loaded {
-        project,
-        rule_set: blueprint.rule_set,
-    })
+    Ok(project)
+}
+
+fn store_rule_set(name: &str, project: &Project) -> BlueprintRuleSet {
+    BlueprintRuleSet {
+        name: name.to_owned(),
+        normalize: project.chance_mode() == ChanceMode::Normalize,
+        tiles: project.rules().into_iter().map(store_tile).collect(),
+        removed: project.removed_tiles(),
+        groups: project.groups().iter().map(store_group).collect(),
+    }
 }
 
 fn store_tile((id, rule): (usize, TileRule)) -> BlueprintTile {
