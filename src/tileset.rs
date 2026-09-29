@@ -9,10 +9,8 @@ pub enum TilesetError {
     #[error("could not decode the image: {0}")]
     Decode(#[from] image::ImageError),
 
-    #[error(
-        "image is {width}×{height}, too small to slice into {TILESET_SIDE}×{TILESET_SIDE} tiles"
-    )]
-    TooSmall { width: u32, height: u32 },
+    #[error("image is {width}×{height}, must be divisible by {TILESET_SIDE}")]
+    NotDivisible { width: u32, height: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,18 +40,14 @@ pub fn decode_tileset(bytes: &[u8], stem: &str) -> Result<Tileset, TilesetError>
     let (width, height) = rgba.dimensions();
 
     let side = TILESET_SIDE as u32;
-    let tile_size = [width / side, height / side];
-    if tile_size[0] == 0 || tile_size[1] == 0 {
-        return Err(TilesetError::TooSmall { width, height });
+    if width % side != 0 || height % side != 0 {
+        return Err(TilesetError::NotDivisible { width, height });
     }
 
-    let stride = [
-        width as f32 / TILESET_SIDE as f32,
-        height as f32 / TILESET_SIDE as f32,
-    ];
+    let tile_size = [width / side, height / side];
 
     let tiles = (0..TILE_COUNT)
-        .map(|index| slice_tile(&rgba, index, tile_size, stride))
+        .map(|index| slice_tile(&rgba, index, tile_size))
         .collect();
 
     Ok(Tileset {
@@ -72,15 +66,10 @@ pub fn file_stem(file_name: &str) -> String {
     }
 }
 
-/// Origins follow the fractional stride, so images whose size is not a
-/// multiple of 16 do not drift off the art by the end of a row.
-fn slice_tile(rgba: &RgbaImage, index: usize, tile_size: [u32; 2], stride: [f32; 2]) -> TileSlice {
+fn slice_tile(rgba: &RgbaImage, index: usize, tile_size: [u32; 2]) -> TileSlice {
     let column = (index % TILESET_SIDE) as u32;
     let row = (index / TILESET_SIDE) as u32;
-    let origin = [
-        (column as f32 * stride[0]) as u32,
-        (row as f32 * stride[1]) as u32,
-    ];
+    let origin = [column * tile_size[0], row * tile_size[1]];
 
     let (width, height) = rgba.dimensions();
     let uv_min = [

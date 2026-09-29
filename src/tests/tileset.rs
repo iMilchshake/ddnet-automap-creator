@@ -35,22 +35,27 @@ fn slices_a_divisible_image_into_256_tiles() {
 }
 
 #[test]
-fn non_divisible_sizes_place_origins_on_the_float_stride() {
-    // 40 / 16 = 2.5: tiles are 2 px wide but sit 2.5 px apart.
-    let tileset = decode_tileset(&opaque_image(40, 40), "odd").unwrap();
-
-    assert_eq!(tileset.tile_size, [2, 2]);
-    assert_eq!(tileset.tiles[3].uv_min[0], 7.0 / 40.0); // floor(3 * 2.5), not 6
-    assert_eq!(tileset.tiles[15].uv_min[0], 37.0 / 40.0); // floor(15 * 2.5), not 30
-    assert_eq!(tileset.tiles[15].uv_max[0], 39.0 / 40.0);
+fn a_size_not_divisible_by_the_grid_is_refused() {
+    let error = decode_tileset(&opaque_image(40, 40), "odd").unwrap_err();
+    assert!(matches!(
+        error,
+        crate::tileset::TilesetError::NotDivisible { .. }
+    ));
 }
 
 #[test]
-fn rejects_images_smaller_than_the_grid() {
-    let error = decode_tileset(&opaque_image(15, 64), "tiny").unwrap_err();
+fn a_non_square_image_is_accepted() {
+    let tileset = decode_tileset(&opaque_image(32, 64), "tall").unwrap();
+
+    assert_eq!(tileset.tile_size, [2, 4]);
+}
+
+#[test]
+fn a_height_not_divisible_by_the_grid_is_refused() {
+    let error = decode_tileset(&opaque_image(32, 40), "tall_odd").unwrap_err();
     assert!(matches!(
         error,
-        crate::tileset::TilesetError::TooSmall { .. }
+        crate::tileset::TilesetError::NotDivisible { .. }
     ));
 }
 

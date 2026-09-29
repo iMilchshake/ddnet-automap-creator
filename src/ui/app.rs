@@ -425,13 +425,17 @@ impl AutomapperApp {
         let texture = upload_atlas(ctx, &tileset);
         let [width, height] = tileset.image_size;
         let [tile_width, tile_height] = tileset.tile_size;
-        self.status.info(
-            ctx,
-            format!(
-                "Loaded {} ({width}×{height}, {tile_width}×{tile_height} per tile)",
-                picked.name
-            ),
+        let message = format!(
+            "Loaded {} ({width}×{height}, {tile_width}×{tile_height} per tile)",
+            picked.name
         );
+        match width == height {
+            true => self.status.info(ctx, message),
+            false => self.status.warning(
+                ctx,
+                format!("{message}, not square, tiles will be stretched, might be unintentional"),
+            ),
+        }
 
         self.rule_sets = RuleSets::new(stem.clone());
         self.inspector = Inspector::Empty;
