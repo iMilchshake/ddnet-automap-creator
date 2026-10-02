@@ -22,9 +22,6 @@ pub enum BlueprintError {
     #[error("blueprint version {0} is not supported, this app writes version {VERSION}")]
     UnsupportedVersion(u32),
 
-    #[error("blueprint was made for `{wanted}`, but `{loaded}` is open")]
-    WrongImage { wanted: String, loaded: String },
-
     #[error("tile {0} is outside the tileset")]
     TileId(usize),
 
@@ -109,6 +106,7 @@ pub enum BlueprintMode {
 
 pub struct Loaded {
     pub rule_sets: RuleSets,
+    pub image: Option<String>,
 }
 
 pub fn to_json(rule_sets: &RuleSets, image: &str) -> Result<String, BlueprintError> {
@@ -133,13 +131,19 @@ pub fn to_json(rule_sets: &RuleSets, image: &str) -> Result<String, BlueprintErr
     Ok(String::from_utf8(target).expect("serde_json writes utf-8"))
 }
 
-pub fn from_json(text: &str, image: &str) -> Result<Loaded, BlueprintError> {
-    let blueprint: Blueprint = serde_json::from_str(text)?;
-    if blueprint.version != VERSION {
-        return Err(BlueprintError::UnsupportedVersion(blueprint.version));
-    }
-    check_image(&blueprint.image, image)?;
+pub fn parse(text: &str) -> Result<Loaded, BlueprintError> {
+    build(read(text)?)
+}
 
+fn read(text: &str) -> Result<Blueprint, BlueprintError> {
+    let blueprint: Blueprint = serde_json::from_str(text)?;
+    match blueprint.version == VERSION {
+        true => Ok(blueprint),
+        false => Err(BlueprintError::UnsupportedVersion(blueprint.version)),
+    }
+}
+
+fn build(blueprint: Blueprint) -> Result<Loaded, BlueprintError> {
     if blueprint.rule_sets.is_empty() {
         return Err(BlueprintError::NoRuleSets);
     }
@@ -160,20 +164,8 @@ pub fn from_json(text: &str, image: &str) -> Result<Loaded, BlueprintError> {
 
     Ok(Loaded {
         rule_sets: RuleSets::from_parts(sets, blueprint.active),
+        image: blueprint.image,
     })
-}
-
-fn check_image(wanted: &Option<String>, image: &str) -> Result<(), BlueprintError> {
-    if let Some(wanted) = wanted
-        && wanted != image
-    {
-        return Err(BlueprintError::WrongImage {
-            wanted: wanted.clone(),
-            loaded: image.to_owned(),
-        });
-    }
-
-    Ok(())
 }
 
 fn load_project(

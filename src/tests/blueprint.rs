@@ -57,11 +57,7 @@ fn furnished() -> Project {
 fn round_trip(project: &Project) -> Project {
     let rule_sets = RuleSets::from_parts(vec![("Grass Main".to_owned(), project.clone())], 0);
     let text = blueprint::to_json(&rule_sets, IMAGE).unwrap();
-    blueprint::from_json(&text, IMAGE)
-        .unwrap()
-        .rule_sets
-        .active()
-        .clone()
+    blueprint::parse(&text).unwrap().rule_sets.active().clone()
 }
 
 #[test]
@@ -87,16 +83,13 @@ fn the_rule_set_name_is_carried_along() {
     let rule_sets = RuleSets::from_parts(vec![("Grass Main".to_owned(), furnished())], 0);
     let text = blueprint::to_json(&rule_sets, IMAGE).unwrap();
     assert_eq!(
-        blueprint::from_json(&text, IMAGE)
-            .unwrap()
-            .rule_sets
-            .active_name(),
+        blueprint::parse(&text).unwrap().rule_sets.active_name(),
         "Grass Main"
     );
 }
 
 fn load(json: &str) -> Result<Project, BlueprintError> {
-    blueprint::from_json(json, IMAGE).map(|loaded| loaded.rule_sets.active().clone())
+    blueprint::parse(json).map(|loaded| loaded.rule_sets.active().clone())
 }
 
 fn one_tile(body: &str) -> String {
@@ -106,13 +99,15 @@ fn one_tile(body: &str) -> String {
     )
 }
 
+const DESERT_BLUEPRINT: &str = r#"{"version": 1, "image": "desert_main",
+    "rule_sets": [{"name": "Desert", "tiles": []}]}"#;
+
 #[test]
-fn a_blueprint_for_another_image_is_refused() {
-    let json = r#"{"version": 1, "image": "desert_main", "rule_sets": []}"#;
-    assert!(matches!(
-        load(json).unwrap_err(),
-        BlueprintError::WrongImage { .. }
-    ));
+fn parsing_accepts_another_image_and_exposes_its_name() {
+    let loaded = blueprint::parse(DESERT_BLUEPRINT).unwrap();
+
+    assert_eq!(loaded.image.as_deref(), Some("desert_main"));
+    assert_eq!(loaded.rule_sets.active_name(), "Desert");
 }
 
 #[test]
@@ -145,7 +140,7 @@ fn a_blueprint_round_trips_several_rule_sets() {
         1,
     );
     let text = blueprint::to_json(&rule_sets, IMAGE).unwrap();
-    let loaded = blueprint::from_json(&text, IMAGE).unwrap().rule_sets;
+    let loaded = blueprint::parse(&text).unwrap().rule_sets;
 
     assert_eq!(loaded.len(), 2);
     assert_eq!(loaded.active_index(), 1);

@@ -51,6 +51,16 @@ impl RuleSets {
         self.sets.get(index).map(|(name, _)| name.as_str())
     }
 
+    pub fn is_name_shared(&self, index: usize) -> bool {
+        let Some(name) = self.name(index) else {
+            return false;
+        };
+        self.sets
+            .iter()
+            .enumerate()
+            .any(|(other, (existing, _))| other != index && existing == name)
+    }
+
     pub fn select(&mut self, index: usize) {
         if index < self.sets.len() {
             self.active = index;
@@ -77,7 +87,7 @@ impl RuleSets {
     /// Insert a copy at `index` right after it, and select it
     pub fn duplicate(&mut self, index: usize) -> Option<usize> {
         let (name, project) = self.sets.get(index)?.clone();
-        let name = self.copy_name(&name);
+        let name = self.distinct_name(name);
         let insert_at = index + 1;
 
         self.sets.insert(insert_at, (name, project));
@@ -85,19 +95,32 @@ impl RuleSets {
         Some(insert_at)
     }
 
+    pub fn merge(&mut self, incoming: RuleSets) -> usize {
+        let merged = incoming.sets.len();
+        for (name, project) in incoming.sets {
+            let name = self.distinct_name(name);
+            self.sets.push((name, project));
+        }
+        merged
+    }
+
+    fn has_name(&self, name: &str) -> bool {
+        self.sets.iter().any(|(existing, _)| existing == name)
+    }
+
+    fn distinct_name(&self, name: String) -> String {
+        let mut candidate = name.clone();
+        let mut number = 1;
+        while self.has_name(&candidate) {
+            number += 1;
+            candidate = format!("{name}{number}");
+        }
+        candidate
+    }
+
     fn unused_name(&self) -> String {
         (0..)
             .map(|number| format!("ruleset{number}"))
-            .find(|name| self.sets.iter().all(|(existing, _)| existing != name))
-            .expect("the candidate names never run out")
-    }
-
-    fn copy_name(&self, base: &str) -> String {
-        (1..)
-            .map(|number| match number {
-                1 => format!("{base} copy"),
-                number => format!("{base} copy {number}"),
-            })
             .find(|name| self.sets.iter().all(|(existing, _)| existing != name))
             .expect("the candidate names never run out")
     }

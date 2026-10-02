@@ -28,6 +28,7 @@ const SIDE_PANEL_WIDTH: f32 = 260.0;
 const MIN_SIDE_PANEL_WIDTH: f32 = 220.0;
 const MAX_SIDE_PANEL_WIDTH: f32 = 520.0;
 const HELP_WIDTH: f32 = 360.0;
+const MERGE_WIDTH: f32 = 360.0;
 const EXPORT_WIDTH: f32 = 320.0;
 const GROUP_SWATCH: Vec2 = Vec2::new(12.0, 18.0);
 const GROUP_SWATCH_CORNER_RADIUS: f32 = 2.0;
@@ -50,6 +51,7 @@ const DM1_LICENSE: &str = "http://creativecommons.org/licenses/by-sa/3.0/";
 const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With groups selected, drag \
                                  across the tileset to add one, click one to edit it, right-click \
                                  to remove it.";
+const SHARED_NAME_HINT: &str = "Another rule set has this name";
 const EMPTY_INSPECTOR: &str = "Pick a tile or a group to edit it here.";
 const PREVIEW_TOOLTIP: &str = "Tileset edits the rules, Preview shows them applied to a sample \
                                map the way DDNet's automapper would.";
@@ -63,6 +65,15 @@ const PREVIEW_WAITING: &str = "Compiling the rules for the preview…";
 const GROUP_ORDER_NOTE: &str = "applied top to bottom";
 const DROP_HINT: &str = "Drop a tileset image or a blueprint";
 const NO_IMAGE_FOR_BLUEPRINT: &str = "Open a tileset image before loading a blueprint";
+const MERGE_HEADING: &str = "Merge blueprint";
+const MERGE_WARNING: &str = "Its tile ids are merged as they are.";
+const MERGE_CONFIRM: &str = "Merge anyway";
+const MERGE_CANCELLED: &str = "Merge cancelled";
+const LOAD_HEADING: &str = "Load blueprint";
+const LOAD_WARNING: &str = "Its tile ids are loaded as they are.";
+const LOAD_CONFIRM: &str = "Load anyway";
+const LOAD_CANCELLED: &str = "Load cancelled";
+const BLUEPRINT_CANCEL: &str = "Cancel";
 
 enum GroupCommand {
     Select(usize),
@@ -122,6 +133,54 @@ enum PreviewResult {
     Failed(String),
 }
 
+enum BlueprintDecision {
+    Confirm,
+    Cancel,
+}
+
+#[derive(Clone, Copy)]
+enum BlueprintAction {
+    Load,
+    Merge,
+}
+
+impl BlueprintAction {
+    fn heading(self) -> &'static str {
+        match self {
+            Self::Load => LOAD_HEADING,
+            Self::Merge => MERGE_HEADING,
+        }
+    }
+
+    fn warning(self) -> &'static str {
+        match self {
+            Self::Load => LOAD_WARNING,
+            Self::Merge => MERGE_WARNING,
+        }
+    }
+
+    fn confirm(self) -> &'static str {
+        match self {
+            Self::Load => LOAD_CONFIRM,
+            Self::Merge => MERGE_CONFIRM,
+        }
+    }
+
+    fn cancelled(self) -> &'static str {
+        match self {
+            Self::Load => LOAD_CANCELLED,
+            Self::Merge => MERGE_CANCELLED,
+        }
+    }
+}
+
+struct PendingBlueprint {
+    file_name: String,
+    wanted_image: String,
+    rule_sets: RuleSets,
+    action: BlueprintAction,
+}
+
 enum Workspace {
     NoImage,
     Ready(LoadedTileset),
@@ -142,6 +201,8 @@ pub struct AutomapperApp {
     workspace: Workspace,
     rule_sets: RuleSets,
     picker: FilePicker,
+    merge_picker: FilePicker,
+    pending_blueprint: Option<PendingBlueprint>,
     saver: FileSaver,
     compiler: RulesCompiler,
     compile_target: Option<CompileTarget>,
@@ -165,6 +226,8 @@ impl Default for AutomapperApp {
             workspace: Workspace::NoImage,
             rule_sets: RuleSets::default(),
             picker: FilePicker::new(),
+            merge_picker: FilePicker::new(),
+            pending_blueprint: None,
             saver: FileSaver::new(),
             compiler: RulesCompiler::new(),
             compile_target: None,
@@ -215,6 +278,7 @@ impl eframe::App for AutomapperApp {
         }
         self.show_export(&ctx);
         self.show_help(&ctx);
+        self.show_blueprint_confirmation(&ctx);
         show_drop_hint(&ctx);
 
         if self.compiler.is_running() {
@@ -235,9 +299,17 @@ impl AutomapperApp {
                 Err(error) => self.status.warning(ctx, error.to_string()),
             }
         }
+
+        while let Some(result) = self.merge_picker.poll() {
+            match result {
+                Ok(picked) => self.merge_blueprint(ctx, picked),
+                Err(error) => self.status.warning(ctx, error.to_string()),
+            }
+        }
     }
 
     fn load_file(&mut self, ctx: &Context, picked: PickedFile) {
+        self.pending_blueprint = None;
         if TILESET_IMAGE.matches(&picked.name) {
             return self.load_tileset(ctx, picked);
         }
@@ -251,30 +323,115 @@ impl AutomapperApp {
     }
 
     fn load_blueprint(&mut self, ctx: &Context, picked: PickedFile) {
-        let Workspace::Ready(loaded) = &self.workspace else {
-            self.status.warning(ctx, NO_IMAGE_FOR_BLUEPRINT);
-            return;
+        self.submit_blueprint(ctx, picked, BlueprintAction::Load);
+    }
+
+    fn merge_blueprint(&mut self, ctx: &Context, picked: PickedFile) {
+        self.submit_blueprint(ctx, picked, BlueprintAction::Merge);
+    }
+
+    fn submit_blueprint(&mut self, ctx: &Context, picked: PickedFile, action: BlueprintAction) {
+        let (text, stem) = match blueprint_text(&self.workspace, &picked) {
+            Ok(found) => found,
+            Err(warning) => return self.status.warning(ctx, warning),
         };
 
-        let text = match std::str::from_utf8(&picked.bytes) {
-            Ok(text) => text,
-            Err(_) => {
+        let parsed = match blueprint::parse(text) {
+            Ok(parsed) => parsed,
+            Err(error) => {
                 self.status
-                    .warning(ctx, format!("{} is not text", picked.name));
+                    .warning(ctx, format!("{}: {error}", picked.name));
                 return;
             }
         };
 
-        match blueprint::from_json(text, &loaded.tileset.stem) {
-            Ok(blueprint) => {
-                self.rule_sets = blueprint.rule_sets;
-                self.inspector = Inspector::Empty;
-                self.drag_anchor = None;
-                self.status.info(ctx, format!("Loaded {}", picked.name));
+        let other_image = parsed.image.filter(|wanted| wanted != stem);
+        match other_image {
+            Some(wanted_image) => {
+                self.pending_blueprint = Some(PendingBlueprint {
+                    file_name: picked.name,
+                    wanted_image,
+                    rule_sets: parsed.rule_sets,
+                    action,
+                });
             }
-            Err(error) => self
-                .status
-                .warning(ctx, format!("{}: {error}", picked.name)),
+            None => self.apply_blueprint(ctx, action, &picked.name, parsed.rule_sets),
+        }
+    }
+
+    fn apply_blueprint(
+        &mut self,
+        ctx: &Context,
+        action: BlueprintAction,
+        file_name: &str,
+        rule_sets: RuleSets,
+    ) {
+        match action {
+            BlueprintAction::Load => self.apply_load(ctx, file_name, rule_sets),
+            BlueprintAction::Merge => self.apply_merge(ctx, file_name, rule_sets),
+        }
+    }
+
+    fn apply_load(&mut self, ctx: &Context, file_name: &str, rule_sets: RuleSets) {
+        self.rule_sets = rule_sets;
+        self.inspector = Inspector::Empty;
+        self.drag_anchor = None;
+        self.status.info(ctx, format!("Loaded {file_name}"));
+    }
+
+    fn apply_merge(&mut self, ctx: &Context, file_name: &str, rule_sets: RuleSets) {
+        let merged = self.rule_sets.merge(rule_sets);
+        self.status
+            .info(ctx, format!("Merged {merged} rule sets from {file_name}"));
+    }
+
+    fn show_blueprint_confirmation(&mut self, ctx: &Context) {
+        let (Some(pending), Workspace::Ready(loaded)) = (&self.pending_blueprint, &self.workspace)
+        else {
+            return;
+        };
+
+        let mut decision = None;
+        let modal = egui::Modal::new(egui::Id::new("blueprint")).show(ctx, |ui| {
+            ui.set_max_width(MERGE_WIDTH);
+            ui.heading(pending.action.heading());
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                format!(
+                    "{} was made for {}, but {} is open. {}",
+                    pending.file_name,
+                    pending.wanted_image,
+                    loaded.tileset.stem,
+                    pending.action.warning()
+                ),
+            );
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button(pending.action.confirm()).clicked() {
+                    decision = Some(BlueprintDecision::Confirm);
+                }
+                if ui.button(BLUEPRINT_CANCEL).clicked() {
+                    decision = Some(BlueprintDecision::Cancel);
+                }
+            });
+        });
+
+        if modal.should_close() {
+            decision = decision.or(Some(BlueprintDecision::Cancel));
+        }
+
+        let Some(decision) = decision else {
+            return;
+        };
+        let Some(pending) = self.pending_blueprint.take() else {
+            return;
+        };
+        match decision {
+            BlueprintDecision::Confirm => {
+                self.apply_blueprint(ctx, pending.action, &pending.file_name, pending.rule_sets)
+            }
+            BlueprintDecision::Cancel => self.status.info(ctx, pending.action.cancelled()),
         }
     }
 
@@ -480,6 +637,16 @@ impl AutomapperApp {
                         .clicked()
                     {
                         save_blueprint = true;
+                        ui.close();
+                    }
+
+                    ui.separator();
+
+                    if ui
+                        .add_enabled(has_image, egui::Button::new("Merge blueprint…"))
+                        .clicked()
+                    {
+                        self.merge_picker.open(BLUEPRINT);
                         ui.close();
                     }
                 });
@@ -1114,6 +1281,19 @@ impl AutomapperApp {
     }
 }
 
+fn blueprint_text<'a>(
+    workspace: &'a Workspace,
+    picked: &'a PickedFile,
+) -> Result<(&'a str, &'a str), String> {
+    let Workspace::Ready(loaded) = workspace else {
+        return Err(NO_IMAGE_FOR_BLUEPRINT.to_owned());
+    };
+
+    std::str::from_utf8(&picked.bytes)
+        .map(|text| (text, loaded.tileset.stem.as_str()))
+        .map_err(|_| format!("{} is not text", picked.name))
+}
+
 fn show_acknowledgements(ui: &mut Ui) {
     ui.strong("Acknowledgements");
     show_sentence(ui, |ui| {
@@ -1163,10 +1343,18 @@ fn show_rule_set_tabs(ui: &mut Ui, rule_sets: &RuleSets, command: &mut Option<Ru
     ui.horizontal_wrapped(|ui| {
         for index in 0..rule_sets.len() {
             let name = rule_sets.name(index).unwrap_or_default();
-            if ui
-                .selectable_label(index == rule_sets.active_index(), name)
-                .clicked()
-            {
+            let shared = rule_sets.is_name_shared(index);
+            let label = egui::RichText::new(name);
+            let label = if shared {
+                label.color(ui.visuals().error_fg_color)
+            } else {
+                label
+            };
+            let response = ui.selectable_label(index == rule_sets.active_index(), label);
+            if shared {
+                response.clone().on_hover_text(SHARED_NAME_HINT);
+            }
+            if response.clicked() {
                 *command = Some(RuleSetCommand::Select(index));
             }
         }

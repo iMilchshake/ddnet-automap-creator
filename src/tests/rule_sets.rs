@@ -84,18 +84,18 @@ fn duplicating_inserts_a_copy_right_after_and_selects_it() {
     assert_eq!(index, 1);
     assert_eq!(sets.len(), 3);
     assert_eq!(sets.active_index(), 1);
-    assert_eq!(sets.active_name(), "grass_main copy");
+    assert_eq!(sets.active_name(), "grass_main2");
     assert_eq!(sets.active(), &sets.sets()[0].1);
 }
 
 #[test]
-fn duplicating_avoids_an_existing_copy_name() {
+fn duplicating_avoids_an_existing_numbered_name() {
     let mut sets = RuleSets::new("grass_main".to_owned());
     sets.duplicate(0);
     sets.duplicate(0);
 
-    assert_eq!(sets.name(1), Some("grass_main copy 2"));
-    assert_eq!(sets.name(2), Some("grass_main copy"));
+    assert_eq!(sets.name(1), Some("grass_main3"));
+    assert_eq!(sets.name(2), Some("grass_main2"));
 }
 
 #[test]
@@ -109,4 +109,58 @@ fn from_parts_clamps_an_out_of_range_active_index() {
     );
 
     assert_eq!(sets.active_index(), 1);
+}
+
+fn named_sets(names: &[&str], active: usize) -> RuleSets {
+    let sets = names
+        .iter()
+        .map(|name| (name.to_string(), Default::default()))
+        .collect();
+    RuleSets::from_parts(sets, active)
+}
+
+fn names(sets: &RuleSets) -> Vec<&str> {
+    sets.sets().iter().map(|(name, _)| name.as_str()).collect()
+}
+
+#[test]
+fn only_sets_sharing_a_name_are_reported_as_shared() {
+    let unique = named_sets(&["grass", "rock"], 0);
+    assert!(!unique.is_name_shared(0));
+    assert!(!unique.is_name_shared(1));
+
+    let sets = named_sets(&["grass", "rock", "grass"], 0);
+    assert!(sets.is_name_shared(0));
+    assert!(!sets.is_name_shared(1));
+    assert!(sets.is_name_shared(2));
+    assert!(!sets.is_name_shared(3));
+}
+
+#[test]
+fn merging_appends_in_order_and_keeps_the_active_selection() {
+    let mut sets = named_sets(&["grass", "rock"], 1);
+
+    let merged = sets.merge(named_sets(&["sand", "snow"], 0));
+
+    assert_eq!(merged, 2);
+    assert_eq!(names(&sets), ["grass", "rock", "sand", "snow"]);
+    assert_eq!(sets.active_index(), 1);
+}
+
+#[test]
+fn merging_a_colliding_name_appends_the_smallest_free_number() {
+    let mut sets = named_sets(&["grass"], 0);
+
+    sets.merge(named_sets(&["grass", "grass"], 0));
+
+    assert_eq!(names(&sets), ["grass", "grass2", "grass3"]);
+}
+
+#[test]
+fn merging_skips_numbered_names_that_already_exist() {
+    let mut sets = named_sets(&["grass", "grass2"], 0);
+
+    sets.merge(named_sets(&["grass"], 0));
+
+    assert_eq!(names(&sets), ["grass", "grass2", "grass3"]);
 }
