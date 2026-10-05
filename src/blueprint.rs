@@ -7,7 +7,9 @@ use crate::model::neighbor::{NEIGHBOR_COUNT, NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{Chance, InvalidChance, MASK_TILE, TILE_COUNT, TileMods, TileRule};
+use crate::model::tile::{
+    AIR_TILE, Chance, InvalidChance, MASK_TILE, TILE_COUNT, TileMods, TileRule,
+};
 
 const VERSION: u32 = 1;
 
@@ -30,6 +32,9 @@ pub enum BlueprintError {
 
     #[error("tile {MASK_TILE} is reserved as rpp's mask and cannot hold a rule")]
     MaskTile,
+
+    #[error("tile {AIR_TILE} is reserved for air and cannot hold a rule")]
+    AirTile,
 
     #[error("`{0}` is not a neighbor state, expected 0 (empty), 1 (full) or 2 (any)")]
     NeighborCode(u8),
@@ -185,6 +190,9 @@ fn load_project(
         }
         if tile.id == MASK_TILE {
             return Err(BlueprintError::MaskTile);
+        }
+        if tile.id == AIR_TILE {
+            return Err(BlueprintError::AirTile);
         }
         if project.rule(tile.id).is_some() {
             return Err(BlueprintError::DuplicateTile(tile.id));

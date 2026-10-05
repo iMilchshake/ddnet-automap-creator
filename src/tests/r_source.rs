@@ -2,7 +2,7 @@ use crate::export::r_source::{ExportError, RuleSet, render};
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
-use crate::model::tile::{Chance, MASK_TILE, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, MASK_TILE, TileRule};
 use crate::tests::support::{index_of, mods, outer_corner};
 
 fn rule(neighborhood: Neighborhood, percent: f32, can_rotate: bool) -> TileRule {
@@ -182,6 +182,13 @@ fn a_rule_on_the_mask_tile_is_refused() {
     let error = emit_with_groups(&[(MASK_TILE, anywhere(100.0))], &[]).unwrap_err();
 
     assert!(matches!(error, ExportError::MaskTile));
+}
+
+#[test]
+fn a_rule_on_the_air_tile_is_refused() {
+    let error = emit_with_groups(&[(AIR_TILE, anywhere(100.0))], &[]).unwrap_err();
+
+    assert!(matches!(error, ExportError::AirTile));
 }
 
 #[test]

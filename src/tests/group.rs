@@ -94,10 +94,10 @@ fn a_group_must_cover_at_least_two_tiles() {
 }
 
 #[test]
-fn a_group_cannot_start_at_zero_or_leave_the_tileset() {
+fn a_group_cannot_cover_the_air_tile_or_leave_the_tileset() {
     assert_eq!(
         group("a", 0, 1, 2).validate(),
-        Err(GroupError::StartsAtZero)
+        Err(GroupError::CoversAirTile)
     );
 
     assert!(group("a", 15, 2, 1).validate().is_err());

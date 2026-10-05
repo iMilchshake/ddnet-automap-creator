@@ -4,7 +4,7 @@ use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{Chance, MASK_TILE, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, MASK_TILE, TileRule};
 use crate::tests::support::{mods, outer_corner};
 
 const IMAGE: &str = "grass_main";
@@ -168,6 +168,15 @@ fn a_rule_on_the_mask_tile_is_refused() {
             "mods": {{"x_flip": false, "y_flip": false, "rot": false}}}}"#
     ));
     assert!(matches!(load(&json).unwrap_err(), BlueprintError::MaskTile));
+}
+
+#[test]
+fn a_rule_on_the_air_tile_is_refused() {
+    let json = one_tile(&format!(
+        r#"{{"id": {AIR_TILE}, "con": [0,0,0,0,0,0,0,0], "chance": 100.0,
+            "mods": {{"x_flip": false, "y_flip": false, "rot": false}}}}"#
+    ));
+    assert!(matches!(load(&json).unwrap_err(), BlueprintError::AirTile));
 }
 
 #[test]

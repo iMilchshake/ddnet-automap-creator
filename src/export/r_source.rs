@@ -3,7 +3,7 @@ use thiserror::Error;
 use crate::model::group::{self, GroupError, GroupMode, TileGroup};
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode, Pool};
-use crate::model::tile::{Chance, MASK_TILE, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, MASK_TILE, TileRule};
 use crate::model::transform::Transform;
 
 /// Group names live under a prefix of our own. rpp keywords and base.r globals
@@ -31,6 +31,9 @@ pub enum ExportError {
     #[error("tile {MASK_TILE} is reserved as rpp's mask and cannot hold a rule")]
     MaskTile,
 
+    #[error("tile {AIR_TILE} is reserved for air and cannot hold a rule")]
+    AirTile,
+
     #[error(transparent)]
     Group(#[from] GroupError),
 }
@@ -57,6 +60,9 @@ pub fn render(rule_sets: &[RuleSet]) -> Result<String, ExportError> {
         }
         if rule_set.tiles.iter().any(|(tile, _)| *tile == MASK_TILE) {
             return Err(ExportError::MaskTile);
+        }
+        if rule_set.tiles.iter().any(|(tile, _)| *tile == AIR_TILE) {
+            return Err(ExportError::AirTile);
         }
         group::validate_all(rule_set.groups)?;
         reject_claimed_tiles(rule_set)?;

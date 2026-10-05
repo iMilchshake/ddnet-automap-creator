@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::group::TileGroup;
 use crate::model::pool::ChanceMode;
-use crate::model::tile::{MASK_TILE, TileRule};
+use crate::model::tile::{AIR_TILE, MASK_TILE, TileRule};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Project {
@@ -104,7 +104,10 @@ impl Project {
     }
 
     pub fn is_free(&self, tile: usize) -> bool {
-        tile != MASK_TILE && self.rule(tile).is_none() && self.group_at(tile).is_none()
+        tile != MASK_TILE
+            && tile != AIR_TILE
+            && self.rule(tile).is_none()
+            && self.group_at(tile).is_none()
     }
 
     pub fn group_at(&self, tile: usize) -> Option<usize> {

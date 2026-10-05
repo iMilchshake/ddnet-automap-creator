@@ -14,7 +14,7 @@ use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode, Pool};
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{Chance, MASK_TILE, TILESET_SIDE, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, MASK_TILE, TILESET_SIDE, TileRule};
 use crate::preview::{self, Automapped, Sample};
 use crate::tileset::{self, Tileset};
 use crate::ui::grid::{self, GridResponse, GridView};
@@ -64,6 +64,7 @@ const NORMALIZE_TOOLTIP: &str = "ON: chances are re-normalized to always add up 
                                  100%";
 const MASK_WARNING: &str = "is reserved: rpp uses it as a mask to roll tiles that share a \
                             neighborhood.";
+const AIR_WARNING: &str = "is reserved for air: DDNet treats it as empty.";
 const GENERATE_TOOLTIP: &str = "Roll the chances again with the next seed.";
 const PREVIEW_WAITING: &str = "Compiling the rules for the preview…";
 const GROUP_ORDER_NOTE: &str = "applied top to bottom";
@@ -1143,6 +1144,10 @@ impl AutomapperApp {
             self.status
                 .warning(ctx, format!("Tile {MASK_TILE} {MASK_WARNING}"));
         }
+        if response.clicked == Some(AIR_TILE) {
+            self.status
+                .warning(ctx, format!("Tile {AIR_TILE} {AIR_WARNING}"));
+        }
 
         if let Some(tile) = response.clicked
             && tile_state(&loaded.tileset, self.rule_sets.active(), tile).is_editable()
@@ -1519,6 +1524,9 @@ fn show_group_row(
 fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
     if tile == MASK_TILE {
         return format!("Tile {tile} · reserved as mask");
+    }
+    if tile == AIR_TILE {
+        return format!("Tile {tile} · reserved for air");
     }
 
     match tile_state(tileset, project, tile) {
