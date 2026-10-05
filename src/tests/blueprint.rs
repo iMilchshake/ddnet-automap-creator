@@ -44,8 +44,9 @@ fn furnished() -> Project {
         TileRule::new(Neighborhood::uniform(NeighborState::Any)),
     );
 
-    project.remove(7);
-    project.remove(9);
+    project.deactivate(7);
+    project.deactivate(9);
+    project.deactivate(32);
 
     project.append_group(group("bones", 64, GroupMode::Decorate, 1.0));
     project.append_group(group("pipes", 100, GroupMode::Fill, 100.0));
@@ -179,6 +180,29 @@ fn a_rule_on_the_air_tile_is_refused() {
     assert!(matches!(load(&json).unwrap_err(), BlueprintError::AirTile));
 }
 
+fn deactivating(tile: usize) -> String {
+    format!(
+        r#"{{"version": 1, "image": "grass_main",
+            "rule_sets": [{{"name": "Grass Main", "tiles": [], "deactivated": [{tile}]}}]}}"#
+    )
+}
+
+#[test]
+fn deactivating_the_mask_tile_is_refused() {
+    assert!(matches!(
+        load(&deactivating(MASK_TILE)).unwrap_err(),
+        BlueprintError::MaskTile
+    ));
+}
+
+#[test]
+fn deactivating_the_air_tile_is_refused() {
+    assert!(matches!(
+        load(&deactivating(AIR_TILE)).unwrap_err(),
+        BlueprintError::AirTile
+    ));
+}
+
 #[test]
 fn the_chance_mode_survives_a_round_trip() {
     let mut project = furnished();
@@ -264,7 +288,7 @@ fn a_group_over_a_configured_tile_is_refused() {
 }
 
 #[test]
-fn a_file_without_removed_or_groups_loads_as_empty() {
+fn a_file_without_deactivated_or_groups_loads_as_empty() {
     let json = one_tile(
         r#"{"id": 5, "con": [0,0,0,0,0,0,0,0], "chance": 100.0,
             "mods": {"x_flip": false, "y_flip": false, "rot": false}}"#,
@@ -272,7 +296,7 @@ fn a_file_without_removed_or_groups_loads_as_empty() {
     let project = load(&json).unwrap();
 
     assert_eq!(project.rule_count(), 1);
-    assert!(project.removed_tiles().is_empty());
+    assert!(project.deactivated_tiles().is_empty());
     assert!(project.groups().is_empty());
 }
 
@@ -286,12 +310,16 @@ fn the_retired_empty_flag_is_ignored_rather_than_refused() {
 }
 
 #[test]
-fn removed_tiles_are_kept_apart_from_rules() {
-    let project = round_trip(&furnished());
+fn deactivated_tiles_survive_with_their_rules() {
+    let original = furnished();
+    let project = round_trip(&original);
 
-    assert_eq!(project.removed_tiles(), [7, 9]);
-    assert!(project.is_removed(7));
+    assert_eq!(project.deactivated_tiles(), [7, 9, 32]);
+    assert!(project.is_deactivated(7));
     assert!(project.rule(7).is_none());
+    assert!(project.is_deactivated(32));
+    assert_eq!(project.rule(32), original.rule(32));
+    assert!(!project.is_deactivated(1));
 }
 
 #[test]

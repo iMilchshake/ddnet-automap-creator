@@ -20,13 +20,14 @@ const MIN_BADGE_CELL_SIZE: f32 = 16.0;
 const CHECKER_LIGHT: Color32 = Color32::from_gray(64);
 const CHECKER_DARK: Color32 = Color32::from_gray(48);
 
-const REMOVED_COLOR: Color32 = Color32::from_rgb(220, 110, 110);
+const DEACTIVATED_COLOR: Color32 = Color32::from_rgb(220, 110, 110);
 const CONFIGURED_OUTLINE: Color32 = Color32::from_gray(205);
+const DEACTIVATED_OUTLINE: Color32 = Color32::from_gray(100);
 const SELECTED_OUTLINE: Color32 = Color32::from_rgb(255, 214, 102);
 const POOL_MATE_OUTLINE: Color32 = Color32::from_rgb(102, 204, 255);
 
 const UNUSED_SCRIM: u8 = 150;
-const REMOVED_SCRIM: u8 = 215;
+const DEACTIVATED_SCRIM: u8 = 215;
 
 const OUTLINE_WIDTH: f32 = 2.0;
 const SELECTED_OUTLINE_WIDTH: f32 = 3.0;
@@ -111,8 +112,8 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
             painter.rect_filled(cell, 0.0, scrim);
         }
 
-        if matches!(state, TileState::Configured(_)) {
-            paint_configured_outline(&painter, &view, cell, index, pixels_per_point);
+        if let Some(color) = outline_color(state) {
+            paint_outline(&painter, &view, cell, index, color, pixels_per_point);
         }
 
         let share = view.shares.get(&index).copied();
@@ -293,37 +294,44 @@ impl BorderOutliner {
     }
 }
 
-fn is_configured(view: &GridView<'_>, index: usize) -> bool {
-    matches!(
-        tile_state(view.tileset, view.project, index),
-        TileState::Configured(_)
-    )
+fn outline_color(state: TileState) -> Option<Color32> {
+    match state {
+        TileState::Configured(_) => Some(CONFIGURED_OUTLINE),
+        TileState::Deactivated(Some(_)) => Some(DEACTIVATED_OUTLINE),
+        _ => None,
+    }
 }
 
-fn paint_configured_outline(
+fn has_same_outline(view: &GridView<'_>, index: usize, color: Color32) -> bool {
+    outline_color(tile_state(view.tileset, view.project, index)) == Some(color)
+}
+
+fn paint_outline(
     painter: &egui::Painter,
     view: &GridView<'_>,
     cell: Rect,
     index: usize,
+    color: Color32,
     pixels_per_point: f32,
 ) {
     let pixel = 1.0 / pixels_per_point;
     let column = index % TILESET_SIDE;
     let row = index / TILESET_SIDE;
-    let right_is_configured = column + 1 < TILESET_SIDE && is_configured(view, index + 1);
-    let below_is_configured = row + 1 < TILESET_SIDE && is_configured(view, index + TILESET_SIDE);
+    let right_has_outline = column + 1 < TILESET_SIDE && has_same_outline(view, index + 1, color);
+    let below_has_outline =
+        row + 1 < TILESET_SIDE && has_same_outline(view, index + TILESET_SIDE, color);
 
     let mut edges = vec![
         Rect::from_min_max(cell.min, pos2(cell.max.x, cell.min.y + pixel)),
         Rect::from_min_max(cell.min, pos2(cell.min.x + pixel, cell.max.y)),
     ];
-    if !right_is_configured {
+    if !right_has_outline {
         edges.push(Rect::from_min_max(
             pos2(cell.max.x - pixel, cell.min.y),
             cell.max,
         ));
     }
-    if !below_is_configured {
+    if !below_has_outline {
         edges.push(Rect::from_min_max(
             pos2(cell.min.x, cell.max.y - pixel),
             cell.max,
@@ -331,7 +339,7 @@ fn paint_configured_outline(
     }
 
     for edge in edges {
-        painter.rect_filled(edge, 0.0, CONFIGURED_OUTLINE);
+        painter.rect_filled(edge, 0.0, color);
     }
 }
 
@@ -397,7 +405,7 @@ fn tile_scrim(state: TileState) -> Option<Color32> {
         TileState::Locked | TileState::Unconfigured => {
             Some(Color32::from_black_alpha(UNUSED_SCRIM))
         }
-        TileState::Removed => Some(Color32::from_black_alpha(REMOVED_SCRIM)),
+        TileState::Deactivated(_) => Some(Color32::from_black_alpha(DEACTIVATED_SCRIM)),
     }
 }
 
@@ -415,15 +423,13 @@ fn paint_badge(
     }
 
     let inset = cell_size * BADGE_INSET;
-    let mark_size = cell_size * BADGE_MARK;
-    let mark = Rect::from_min_size(
-        pos2(cell.right() - inset - mark_size, cell.top() + inset),
-        Vec2::splat(mark_size),
-    );
 
     match state {
         TileState::Locked | TileState::Grouped | TileState::Unconfigured => {}
-        TileState::Removed => paint_cross(painter, mark),
+        TileState::Deactivated(_) => paint_cross(
+            painter,
+            Rect::from_center_size(cell.center(), Vec2::splat(cell_size * BADGE_MARK)),
+        ),
         TileState::Configured(_) => {
             if let Some(share) = share
                 && share < Chance::FULL.percent()
@@ -442,7 +448,7 @@ fn paint_badge(
 
 fn paint_cross(painter: &egui::Painter, mark: Rect) {
     let width = (mark.width() * CROSS_WIDTH).max(MIN_CROSS_WIDTH);
-    let stroke = Stroke::new(width, REMOVED_COLOR);
+    let stroke = Stroke::new(width, DEACTIVATED_COLOR);
 
     painter.line_segment([mark.left_top(), mark.right_bottom()], stroke);
     painter.line_segment([mark.right_top(), mark.left_bottom()], stroke);

@@ -7,7 +7,7 @@ use crate::model::tile::{AIR_TILE, MASK_TILE, TileRule};
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Project {
     rules: BTreeMap<usize, TileRule>,
-    removed: BTreeSet<usize>,
+    deactivated: BTreeSet<usize>,
     groups: Vec<TileGroup>,
     chance_mode: ChanceMode,
 }
@@ -25,12 +25,11 @@ impl Project {
         self.rules.get(&tile)
     }
 
-    pub fn is_removed(&self, tile: usize) -> bool {
-        self.removed.contains(&tile)
+    pub fn is_deactivated(&self, tile: usize) -> bool {
+        self.deactivated.contains(&tile)
     }
 
     pub fn set_rule(&mut self, tile: usize, rule: TileRule) {
-        self.removed.remove(&tile);
         self.rules.insert(tile, rule);
     }
 
@@ -38,24 +37,37 @@ impl Project {
         self.rules.remove(&tile);
     }
 
-    pub fn remove(&mut self, tile: usize) {
-        self.rules.remove(&tile);
-        self.removed.insert(tile);
+    pub fn deactivate(&mut self, tile: usize) {
+        self.deactivated.insert(tile);
     }
 
-    pub fn restore(&mut self, tile: usize) {
-        self.removed.remove(&tile);
+    pub fn reactivate(&mut self, tile: usize) {
+        self.deactivated.remove(&tile);
     }
 
-    pub fn removed_tiles(&self) -> Vec<usize> {
-        self.removed.iter().copied().collect()
+    pub fn deactivated_tiles(&self) -> Vec<usize> {
+        self.deactivated.iter().copied().collect()
     }
 
     pub fn rule_count(&self) -> usize {
         self.rules.len()
     }
 
+    pub fn deactivated_rule_count(&self) -> usize {
+        self.rules
+            .keys()
+            .filter(|tile| self.deactivated.contains(tile))
+            .count()
+    }
+
     pub fn rules(&self) -> Vec<(usize, TileRule)> {
+        self.all_rules()
+            .into_iter()
+            .filter(|(tile, _)| !self.is_deactivated(*tile))
+            .collect()
+    }
+
+    pub fn all_rules(&self) -> Vec<(usize, TileRule)> {
         self.rules
             .iter()
             .map(|(&tile, &rule)| (tile, rule))

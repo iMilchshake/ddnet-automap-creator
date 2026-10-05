@@ -25,6 +25,7 @@ fn emit_with_groups(
         image_stem: "grass_main",
         name: "Grass_Main",
         tiles,
+        deactivated: &[],
         groups,
         chance_mode: ChanceMode::Normalize,
     }])
@@ -35,6 +36,7 @@ fn emit_exact(tiles: &[(usize, TileRule)]) -> String {
         image_stem: "grass_main",
         name: "Grass_Main",
         tiles,
+        deactivated: &[],
         groups: &[],
         chance_mode: ChanceMode::Exact,
     }])
@@ -77,6 +79,58 @@ fn a_rotated_corner_and_a_weighted_pool_match_the_reference_output() {
             "Insert(1, 2, 3, 66, 67).Chance(100, 5, 1, 1, 1).If(IndexAt([0, 0]).Is(g:mask));",
         ]
     );
+}
+
+fn emit_deactivated(
+    tiles: &[(usize, TileRule)],
+    deactivated: &[usize],
+    groups: &[TileGroup],
+) -> Result<String, ExportError> {
+    render(&[RuleSet {
+        image_stem: "grass_main",
+        name: "Grass_Main",
+        tiles,
+        deactivated,
+        groups,
+        chance_mode: ChanceMode::Normalize,
+    }])
+}
+
+#[test]
+fn a_deactivated_rule_is_left_out_of_the_output() {
+    let tiles = [(1, anywhere(100.0)), (2, anywhere(100.0))];
+
+    let source = emit_deactivated(&tiles, &[1], &[]).unwrap();
+
+    assert_eq!(body(&source), body(&emit(&tiles[1..])));
+}
+
+#[test]
+fn a_rule_set_with_only_deactivated_rules_is_empty() {
+    let tiles = [(1, anywhere(100.0))];
+
+    assert!(matches!(
+        emit_deactivated(&tiles, &[1], &[]),
+        Err(ExportError::EmptyRuleSet(_))
+    ));
+}
+
+#[test]
+fn a_deactivated_rule_under_a_group_still_stops_the_export() {
+    let group = TileGroup {
+        name: "bones".to_owned(),
+        top_left: 64,
+        width: 2,
+        height: 2,
+        mode: GroupMode::Fill,
+        chance: Chance::FULL,
+    };
+    let tiles = [(65, anywhere(100.0)), (1, anywhere(100.0))];
+
+    assert!(matches!(
+        emit_deactivated(&tiles, &[65], &[group]),
+        Err(ExportError::TileIsConfigured { tile: 65, .. })
+    ));
 }
 
 #[test]
@@ -231,6 +285,7 @@ fn a_rule_set_name_outside_the_allowed_characters_is_refused() {
             image_stem: "grass_main",
             name,
             tiles: &tiles,
+            deactivated: &[],
             groups: &[],
             chance_mode: ChanceMode::Normalize,
         }])
@@ -387,6 +442,7 @@ fn rule_set<'a>(
         image_stem: "grass_main",
         name,
         tiles,
+        deactivated: &[],
         groups,
         chance_mode: ChanceMode::Normalize,
     }

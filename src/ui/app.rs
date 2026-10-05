@@ -821,11 +821,7 @@ impl AutomapperApp {
                             );
                         });
                     });
-                    ui.label(format!(
-                        "{} tiles, {} groups configured",
-                        self.rule_sets.active().rule_count(),
-                        self.rule_sets.active().groups().len()
-                    ));
+                    ui.label(describe_counts(self.rule_sets.active()));
 
                     ui.separator();
 
@@ -836,8 +832,16 @@ impl AutomapperApp {
                                     pools: pool::pools_of(&pools, panel.tile()),
                                     mode: self.rule_sets.active().chance_mode(),
                                 };
+                                let deactivated =
+                                    self.rule_sets.active().is_deactivated(panel.tile());
                                 tile_edit = panel
-                                    .show(ui, &loaded.tileset, &loaded.texture, &tile_pools)
+                                    .show(
+                                        ui,
+                                        &loaded.tileset,
+                                        &loaded.texture,
+                                        &tile_pools,
+                                        deactivated,
+                                    )
                                     .map(|edit| (panel.tile(), edit));
                             }
                             (_, Inspector::Group(panel)) => {
@@ -934,7 +938,7 @@ impl AutomapperApp {
             .rule_sets
             .sets()
             .iter()
-            .any(|(_, project)| project.rule_count() > 0 || !project.groups().is_empty());
+            .any(|(_, project)| !project.rules().is_empty() || !project.groups().is_empty());
         let can_compile = exportable && !self.compiler.is_running();
         let mut export = false;
         let mut compile = false;
@@ -1172,7 +1176,7 @@ impl AutomapperApp {
         }
 
         if let Some(tile) = response.secondary_clicked {
-            self.toggle_removed(ctx, tile);
+            self.toggle_deactivated(ctx, tile);
         }
     }
 
@@ -1246,7 +1250,7 @@ impl AutomapperApp {
         self.select_group(0);
     }
 
-    fn toggle_removed(&mut self, ctx: &Context, tile: usize) {
+    fn toggle_deactivated(&mut self, ctx: &Context, tile: usize) {
         let Workspace::Ready(loaded) = &self.workspace else {
             return;
         };
@@ -1257,16 +1261,13 @@ impl AutomapperApp {
         }
 
         match state {
-            TileState::Removed => {
-                self.rule_sets.active_mut().restore(tile);
-                self.status.info(ctx, format!("Tile {tile} restored"));
+            TileState::Deactivated(_) => {
+                self.rule_sets.active_mut().reactivate(tile);
+                self.status.info(ctx, format!("Tile {tile} reactivated"));
             }
             _ => {
-                self.rule_sets.active_mut().remove(tile);
-                if self.inspector.tile() == Some(tile) {
-                    self.inspector = Inspector::Empty;
-                }
-                self.status.info(ctx, format!("Tile {tile} removed"));
+                self.rule_sets.active_mut().deactivate(tile);
+                self.status.info(ctx, format!("Tile {tile} deactivated"));
             }
         }
     }
@@ -1546,7 +1547,11 @@ fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
     match tile_state(tileset, project, tile) {
         TileState::Locked => format!("Tile {tile} · locked"),
         TileState::Grouped => format!("Tile {tile} · in a group"),
-        TileState::Removed => format!("Tile {tile} · removed"),
+        TileState::Deactivated(None) => format!("Tile {tile} · deactivated"),
+        TileState::Deactivated(Some(rule)) => format!(
+            "Tile {tile} · {} · deactivated",
+            format_neighborhood(rule.neighborhood)
+        ),
         TileState::Unconfigured => format!("Tile {tile}"),
         TileState::Configured(rule) => {
             let neighborhood = format_neighborhood(rule.neighborhood);
@@ -1556,6 +1561,15 @@ fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
             }
         }
     }
+}
+
+fn describe_counts(project: &Project) -> String {
+    let tiles = match project.deactivated_rule_count() {
+        0 => format!("{} tiles", project.rule_count()),
+        deactivated => format!("{} tiles ({deactivated} deactivated)", project.rule_count()),
+    };
+
+    format!("{tiles}, {} groups configured", project.groups().len())
 }
 
 fn format_neighborhood(neighborhood: Neighborhood) -> String {
@@ -1634,17 +1648,23 @@ fn render_source(rule_sets: &RuleSets, image_stem: &str) -> Result<String, Expor
     let tiles: Vec<Vec<(usize, TileRule)>> = rule_sets
         .sets()
         .iter()
-        .map(|(_, project)| project.rules())
+        .map(|(_, project)| project.all_rules())
+        .collect();
+    let deactivated: Vec<Vec<usize>> = rule_sets
+        .sets()
+        .iter()
+        .map(|(_, project)| project.deactivated_tiles())
         .collect();
 
     let sets: Vec<RuleSet> = rule_sets
         .sets()
         .iter()
-        .zip(&tiles)
-        .map(|((name, project), tiles)| RuleSet {
+        .zip(tiles.iter().zip(&deactivated))
+        .map(|((name, project), (tiles, deactivated))| RuleSet {
             image_stem,
             name,
             tiles,
+            deactivated,
             groups: project.groups(),
             chance_mode: project.chance_mode(),
         })
@@ -1657,11 +1677,13 @@ fn render_source(rule_sets: &RuleSets, image_stem: &str) -> Result<String, Expor
 // regardless of errors in other rule sets.
 fn render_active_source(rule_sets: &RuleSets, image_stem: &str) -> Result<String, ExportError> {
     let project = rule_sets.active();
-    let tiles = project.rules();
+    let tiles = project.all_rules();
+    let deactivated = project.deactivated_tiles();
     let rule_set = RuleSet {
         image_stem,
         name: rule_sets.active_name(),
         tiles: &tiles,
+        deactivated: &deactivated,
         groups: project.groups(),
         chance_mode: project.chance_mode(),
     };

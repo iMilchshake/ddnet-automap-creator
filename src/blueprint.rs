@@ -68,7 +68,7 @@ struct BlueprintRuleSet {
     normalize: bool,
     tiles: Vec<BlueprintTile>,
     #[serde(default)]
-    removed: Vec<usize>,
+    deactivated: Vec<usize>,
     #[serde(default)]
     groups: Vec<BlueprintGroup>,
 }
@@ -160,7 +160,7 @@ fn build(blueprint: Blueprint) -> Result<Loaded, BlueprintError> {
             let project = load_project(
                 rule_set.normalize,
                 &rule_set.tiles,
-                &rule_set.removed,
+                &rule_set.deactivated,
                 &rule_set.groups,
             )?;
             Ok((rule_set.name, project))
@@ -176,7 +176,7 @@ fn build(blueprint: Blueprint) -> Result<Loaded, BlueprintError> {
 fn load_project(
     normalize: bool,
     tiles: &[BlueprintTile],
-    removed: &[usize],
+    deactivated: &[usize],
     groups: &[BlueprintGroup],
 ) -> Result<Project, BlueprintError> {
     let mut project = Project::default();
@@ -200,11 +200,17 @@ fn load_project(
         project.set_rule(tile.id, load_tile(tile)?);
     }
 
-    for &tile in removed {
+    for &tile in deactivated {
         if tile >= TILE_COUNT {
             return Err(BlueprintError::TileId(tile));
         }
-        project.remove(tile);
+        if tile == MASK_TILE {
+            return Err(BlueprintError::MaskTile);
+        }
+        if tile == AIR_TILE {
+            return Err(BlueprintError::AirTile);
+        }
+        project.deactivate(tile);
     }
 
     let loaded_groups: Vec<TileGroup> = groups.iter().map(load_group).collect::<Result<_, _>>()?;
@@ -228,8 +234,8 @@ fn store_rule_set(name: &str, project: &Project) -> BlueprintRuleSet {
     BlueprintRuleSet {
         name: name.to_owned(),
         normalize: project.chance_mode() == ChanceMode::Normalize,
-        tiles: project.rules().into_iter().map(store_tile).collect(),
-        removed: project.removed_tiles(),
+        tiles: project.all_rules().into_iter().map(store_tile).collect(),
+        deactivated: project.deactivated_tiles(),
         groups: project.groups().iter().map(store_group).collect(),
     }
 }

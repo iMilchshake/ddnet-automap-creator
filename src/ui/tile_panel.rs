@@ -93,10 +93,13 @@ impl TilePanel {
         tileset: &Tileset,
         texture: &TextureHandle,
         pools: &TilePools,
+        deactivated: bool,
     ) -> Option<TileEdit> {
-        ui.heading(match self.has_rule {
-            true => format!("Tile {}", self.tile),
-            false => format!("Tile {} (no rule yet)", self.tile),
+        ui.heading(match (self.has_rule, deactivated) {
+            (true, false) => format!("Tile {}", self.tile),
+            (false, false) => format!("Tile {} (no rule yet)", self.tile),
+            (true, true) => format!("Tile {} (deactivated)", self.tile),
+            (false, true) => format!("Tile {} (no rule yet, deactivated)", self.tile),
         });
         ui.add_space(HEADING_SPACING);
 
@@ -369,7 +372,10 @@ fn pressed_state(ui: &Ui) -> Option<NeighborState> {
 fn paint_state(ui: &Ui, rect: Rect, state: NeighborState) {
     let painter = ui.painter();
     let default_border = ui.visuals().widgets.inactive.bg_stroke;
-    let mark = Stroke::new((rect.width() * MARK_WIDTH_FRACTION).max(MIN_MARK_WIDTH), MARK_COLOR);
+    let mark = Stroke::new(
+        (rect.width() * MARK_WIDTH_FRACTION).max(MIN_MARK_WIDTH),
+        MARK_COLOR,
+    );
     let border = match state {
         NeighborState::Empty => {
             let cross = rect.shrink(rect.width() * EMPTY_CROSS_INSET_FRACTION);

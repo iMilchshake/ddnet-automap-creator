@@ -1,5 +1,7 @@
+use crate::export::r_source::{RuleSet, render};
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::pool::{self, ChanceMode};
 use crate::model::project::Project;
 use crate::model::tile::{AIR_TILE, Chance, MASK_TILE, TileRule};
 
@@ -17,34 +19,106 @@ fn the_air_tile_is_never_free() {
     assert!(!Project::default().is_free(AIR_TILE));
 }
 
+fn emitted(project: &Project) -> String {
+    render(&[RuleSet {
+        image_stem: "grass_main",
+        name: "Grass_Main",
+        tiles: &project.all_rules(),
+        deactivated: &project.deactivated_tiles(),
+        groups: &[],
+        chance_mode: ChanceMode::Normalize,
+    }])
+    .unwrap()
+}
+
 #[test]
-fn configuring_a_tile_clears_its_removal() {
+fn configuring_a_deactivated_tile_keeps_it_deactivated() {
     let mut project = Project::default();
-    project.remove(7);
+    project.deactivate(7);
     project.set_rule(7, some_rule());
 
-    assert!(!project.is_removed(7));
+    assert!(project.is_deactivated(7));
     assert_eq!(project.rule_count(), 1);
 }
 
 #[test]
-fn removing_a_tile_drops_its_rule() {
+fn deactivating_a_tile_keeps_its_rule() {
     let mut project = Project::default();
     project.set_rule(7, some_rule());
-    project.remove(7);
+    project.deactivate(7);
 
-    assert!(project.rule(7).is_none());
-    assert!(project.is_removed(7));
+    assert_eq!(project.rule(7), Some(&some_rule()));
+    assert!(project.is_deactivated(7));
+    assert_eq!(project.deactivated_rule_count(), 1);
 }
 
 #[test]
-fn restoring_leaves_the_tile_unconfigured() {
+fn reactivating_makes_the_rule_active_again() {
     let mut project = Project::default();
-    project.remove(7);
-    project.restore(7);
+    project.set_rule(7, some_rule());
+    project.deactivate(7);
+    project.reactivate(7);
 
-    assert!(!project.is_removed(7));
+    assert!(!project.is_deactivated(7));
+    assert_eq!(project.rules(), [(7, some_rule())]);
+}
+
+#[test]
+fn clearing_the_rule_of_a_deactivated_tile_keeps_the_mark() {
+    let mut project = Project::default();
+    project.set_rule(7, some_rule());
+    project.deactivate(7);
+    project.clear_rule(7);
+
+    assert!(project.is_deactivated(7));
     assert!(project.rule(7).is_none());
+}
+
+#[test]
+fn deactivated_rules_are_left_out_of_the_active_rules() {
+    let mut project = Project::default();
+    project.set_rule(7, some_rule());
+    project.set_rule(8, some_rule());
+    project.deactivate(7);
+
+    assert_eq!(project.rules(), [(8, some_rule())]);
+    assert_eq!(project.all_rules().len(), 2);
+}
+
+#[test]
+fn a_deactivated_rule_claims_its_tile() {
+    let mut project = Project::default();
+    project.set_rule(7, some_rule());
+    project.deactivate(7);
+
+    assert!(!project.is_free(7));
+}
+
+#[test]
+fn deactivated_rules_are_left_out_of_the_export() {
+    let mut project = Project::default();
+    project.set_rule(7, some_rule());
+    project.set_rule(8, some_rule());
+    project.deactivate(7);
+
+    let source = emitted(&project);
+
+    assert!(source.contains("Insert(8)"));
+    assert!(!source.contains("Insert(7)"));
+}
+
+#[test]
+fn deactivated_rules_are_left_out_of_the_pools() {
+    let mut project = Project::default();
+    project.set_rule(7, some_rule());
+    project.set_rule(8, some_rule());
+    project.deactivate(7);
+
+    let pools = pool::pools(&project.rules());
+
+    assert_eq!(pools.len(), 1);
+    assert_eq!(pools[0].members.len(), 1);
+    assert_eq!(pools[0].members[0].tile, 8);
 }
 
 #[test]

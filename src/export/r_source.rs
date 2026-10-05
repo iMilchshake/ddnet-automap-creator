@@ -42,8 +42,19 @@ pub struct RuleSet<'a> {
     pub image_stem: &'a str,
     pub name: &'a str,
     pub tiles: &'a [(usize, TileRule)],
+    pub deactivated: &'a [usize],
     pub groups: &'a [TileGroup],
     pub chance_mode: ChanceMode,
+}
+
+impl RuleSet<'_> {
+    fn active_tiles(&self) -> Vec<(usize, TileRule)> {
+        self.tiles
+            .iter()
+            .filter(|(tile, _)| !self.deactivated.contains(tile))
+            .copied()
+            .collect()
+    }
 }
 
 pub fn output_file(image_stem: &str) -> String {
@@ -52,7 +63,7 @@ pub fn output_file(image_stem: &str) -> String {
 
 pub fn render(rule_sets: &[RuleSet]) -> Result<String, ExportError> {
     for rule_set in rule_sets {
-        if rule_set.tiles.is_empty() && rule_set.groups.is_empty() {
+        if rule_set.active_tiles().is_empty() && rule_set.groups.is_empty() {
             return Err(ExportError::EmptyRuleSet(rule_set.name.to_owned()));
         }
         if !is_valid_name(rule_set.name) {
@@ -65,7 +76,7 @@ pub fn render(rule_sets: &[RuleSet]) -> Result<String, ExportError> {
             return Err(ExportError::AirTile);
         }
         group::validate_all(rule_set.groups)?;
-        reject_claimed_tiles(rule_set)?;
+        reject_claimed_tiles(rule_set.groups, rule_set.tiles)?;
     }
     if let Some(duplicate) = duplicate_name(rule_sets) {
         return Err(ExportError::DuplicateName(duplicate));
@@ -110,7 +121,7 @@ fn render_rule_set(lines: &mut Vec<String>, index: usize, namespaced: bool, rule
     lines.push(String::new());
 
     lines.extend(
-        pool::pools(rule_set.tiles)
+        pool::pools(&rule_set.active_tiles())
             .iter()
             .flat_map(|pool| insert_lines(pool, rule_set.chance_mode)),
     );
@@ -154,9 +165,12 @@ fn is_valid_name(name: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
 }
 
-fn reject_claimed_tiles(rule_set: &RuleSet) -> Result<(), ExportError> {
-    for group in rule_set.groups {
-        for (tile, _) in rule_set.tiles {
+fn reject_claimed_tiles(
+    groups: &[TileGroup],
+    tiles: &[(usize, TileRule)],
+) -> Result<(), ExportError> {
+    for group in groups {
+        for (tile, _) in tiles {
             if group.covers(*tile) {
                 return Err(ExportError::TileIsConfigured {
                     group: group.name.clone(),

@@ -9,7 +9,7 @@ pub enum TileState {
     Grouped,
     Unconfigured,
     Configured(TileRule),
-    Removed,
+    Deactivated(Option<TileRule>),
 }
 
 impl TileState {
@@ -25,17 +25,15 @@ pub fn tile_state(tileset: &Tileset, project: &Project, tile: usize) -> TileStat
     if project.group_at(tile).is_some() {
         return TileState::Grouped;
     }
-    if let Some(rule) = project.rule(tile) {
-        return TileState::Configured(*rule);
-    }
-
-    if tileset.tiles[tile].kind == TileKind::Locked {
+    let rule = project.rule(tile).copied();
+    if rule.is_none() && tileset.tiles[tile].kind == TileKind::Locked {
         return TileState::Locked;
     }
 
-    match project.is_removed(tile) {
-        true => TileState::Removed,
-        false => TileState::Unconfigured,
+    match (rule, project.is_deactivated(tile)) {
+        (Some(rule), false) => TileState::Configured(rule),
+        (rule, true) => TileState::Deactivated(rule),
+        (None, false) => TileState::Unconfigured,
     }
 }
 
