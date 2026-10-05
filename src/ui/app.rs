@@ -42,7 +42,11 @@ const DROP_HINT_SIZE: f32 = 24.0;
 
 const REMOVE_ICON: &str = "✖";
 const DUPLICATE_ICON: &str = "⎘";
+const GITHUB_ICON: char = egui::special_emojis::GITHUB;
 const CREDIT: &str = env!("CARGO_PKG_NAME");
+const SHORT_CREDIT: &str = "GitHub";
+const AUTHOR_CREDIT: &str = "by iMilchshake";
+const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const ORIGINAL_PROJECT: &str = "https://github.com/AssassinTee/SimpleDDNetAutomapper";
 const RPP: &str = "https://github.com/Aerll/rpp";
 const DM1_SOURCE: &str = "https://github.com/teeworlds/teeworlds-maps";
@@ -673,8 +677,7 @@ impl AutomapperApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let credit = egui::RichText::new(CREDIT).weak();
-                    ui.add(egui::Label::new(credit).truncate());
+                    show_credit(ui);
                 });
             });
         });
@@ -1330,6 +1333,68 @@ fn show_drop_hint(ctx: &Context) {
         FontId::proportional(DROP_HINT_SIZE),
         Color32::WHITE,
     );
+}
+
+#[derive(Clone, Copy)]
+enum CreditForm {
+    Signed,
+    Full,
+    Short,
+    Icon,
+}
+
+impl CreditForm {
+    const WIDEST_FIRST: [Self; 3] = [Self::Signed, Self::Full, Self::Short];
+
+    fn link_text(self) -> String {
+        match self {
+            Self::Signed | Self::Full => format!("{GITHUB_ICON} {CREDIT}"),
+            Self::Short => format!("{GITHUB_ICON} {SHORT_CREDIT}"),
+            Self::Icon => GITHUB_ICON.to_string(),
+        }
+    }
+
+    fn signature(self) -> Option<&'static str> {
+        matches!(self, Self::Signed).then_some(AUTHOR_CREDIT)
+    }
+}
+
+fn text_width(ui: &Ui, text: &str) -> f32 {
+    egui::WidgetText::from(text)
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::FontSelection::Default,
+        )
+        .size()
+        .x
+}
+
+fn credit_width(ui: &Ui, form: CreditForm) -> f32 {
+    let link_width = text_width(ui, &form.link_text());
+    match form.signature() {
+        Some(signature) => link_width + text_width(ui, signature),
+        None => link_width,
+    }
+}
+
+fn choose_credit_form(ui: &Ui) -> CreditForm {
+    CreditForm::WIDEST_FIRST
+        .into_iter()
+        .find(|form| credit_width(ui, *form) <= ui.available_width())
+        .unwrap_or(CreditForm::Icon)
+}
+
+fn show_credit(ui: &mut Ui) {
+    let form = choose_credit_form(ui);
+    if let Some(signature) = form.signature() {
+        ui.label(egui::RichText::new(signature).weak());
+    }
+    let link = ui.hyperlink_to(form.link_text(), REPOSITORY);
+    if matches!(form, CreditForm::Icon) {
+        link.on_hover_text(CREDIT);
+    }
 }
 
 fn show_sentence(ui: &mut Ui, add_words: impl FnOnce(&mut Ui)) {
