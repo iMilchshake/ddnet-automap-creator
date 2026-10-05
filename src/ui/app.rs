@@ -67,6 +67,7 @@ const MASK_WARNING: &str = "is reserved: rpp uses it as a mask to roll tiles tha
 const AIR_WARNING: &str = "is reserved for air: DDNet treats it as empty.";
 const GENERATE_TOOLTIP: &str = "Roll the chances again with the next seed.";
 const PREVIEW_WAITING: &str = "Compiling the rules for the preview…";
+const PREVIEW_NO_RULES: &str = "No preview possible as this rule set has no rules yet. Go configure some in the Tileset tab :)";
 const GROUP_ORDER_NOTE: &str = "applied top to bottom";
 const DROP_HINT: &str = "Drop a tileset image or a blueprint";
 const NO_IMAGE_FOR_BLUEPRINT: &str = "Open a tileset image before loading a blueprint";
@@ -136,6 +137,7 @@ enum PreviewResult {
         automapped: Automapped,
     },
     Failed(String),
+    NoRules,
 }
 
 enum BlueprintDecision {
@@ -605,6 +607,7 @@ impl AutomapperApp {
         self.hovered_tile = None;
         self.preview = PreviewResult::Waiting;
         self.preview_source = None;
+        self.view = View::Tileset;
         self.workspace = Workspace::Ready(LoadedTileset { tileset, texture });
     }
 
@@ -1094,6 +1097,9 @@ impl AutomapperApp {
                 PreviewResult::Failed(error) => {
                     ui.colored_label(ui.visuals().error_fg_color, error);
                 }
+                PreviewResult::NoRules => {
+                    ui.weak(PREVIEW_NO_RULES);
+                }
                 PreviewResult::Ready { automapped, .. } => {
                     ui.vertical_centered(|ui| {
                         preview_view::show(ui, &loaded.tileset, &loaded.texture, automapped);
@@ -1115,7 +1121,10 @@ impl AutomapperApp {
         let source = match render_active_source(&self.rule_sets, &stem) {
             Ok(source) => source,
             Err(error) => {
-                self.preview = PreviewResult::Failed(error.to_string());
+                self.preview = match error {
+                    ExportError::EmptyRuleSet(_) => PreviewResult::NoRules,
+                    _ => PreviewResult::Failed(error.to_string()),
+                };
                 self.preview_source = None;
                 return;
             }
