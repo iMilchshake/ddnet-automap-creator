@@ -24,8 +24,11 @@ const SECTION_SPACING: f32 = 6.0;
 const CORNER_RADIUS: f32 = 2.0;
 const MEMBER_SIZE: f32 = 20.0;
 const OUTLINE_WIDTH: f32 = 2.0;
+const EMPTY_CROSS_INSET_FRACTION: f32 = 0.28;
+const MARK_WIDTH_FRACTION: f32 = 0.05;
+const MIN_MARK_WIDTH: f32 = 1.0;
 
-const EMPTY_FILL: Color32 = Color32::from_gray(28);
+const MARK_COLOR: Color32 = Color32::from_gray(150);
 const FULL_FILL: Color32 = Color32::from_gray(185);
 const ANY_LIGHT: Color32 = Color32::from_gray(96);
 const ANY_DARK: Color32 = Color32::from_gray(64);
@@ -365,22 +368,26 @@ fn pressed_state(ui: &Ui) -> Option<NeighborState> {
 
 fn paint_state(ui: &Ui, rect: Rect, state: NeighborState) {
     let painter = ui.painter();
-    match state {
+    let default_border = ui.visuals().widgets.inactive.bg_stroke;
+    let mark = Stroke::new((rect.width() * MARK_WIDTH_FRACTION).max(MIN_MARK_WIDTH), MARK_COLOR);
+    let border = match state {
         NeighborState::Empty => {
-            painter.rect_filled(rect, CORNER_RADIUS, EMPTY_FILL);
+            let cross = rect.shrink(rect.width() * EMPTY_CROSS_INSET_FRACTION);
+            painter.line_segment([cross.left_top(), cross.right_bottom()], mark);
+            painter.line_segment([cross.right_top(), cross.left_bottom()], mark);
+            default_border
         }
         NeighborState::Full => {
             painter.rect_filled(rect, CORNER_RADIUS, FULL_FILL);
+            default_border
         }
-        NeighborState::Any => paint_checker(painter, rect, ANY_LIGHT, ANY_DARK),
-    }
+        NeighborState::Any => {
+            paint_checker(painter, rect, ANY_LIGHT, ANY_DARK);
+            mark
+        }
+    };
 
-    painter.rect_stroke(
-        rect,
-        CORNER_RADIUS,
-        ui.visuals().widgets.inactive.bg_stroke,
-        StrokeKind::Inside,
-    );
+    painter.rect_stroke(rect, CORNER_RADIUS, border, StrokeKind::Inside);
 }
 
 fn show_tile_preview(
