@@ -1,13 +1,20 @@
 use egui::emath::GuiRounding as _;
 use egui::epaint::Vertex;
-use egui::{Color32, Mesh, Pos2, Rect, Sense, TextureHandle, Vec2, pos2};
+use egui::{
+    Align2, Color32, FontId, Mesh, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, Vec2, pos2,
+};
 
 use crate::model::transform::Transform;
-use crate::preview::Automapped;
+use crate::preview::{Automapped, PreviewCell};
 use crate::tileset::{TileSlice, Tileset};
 
 const MIN_CELL_SIZE: f32 = 4.0;
 const BACKGROUND: Color32 = Color32::from_gray(40);
+const UNMATCHED_COLOR: Color32 = Color32::RED;
+const UNMATCHED_STROKE_WIDTH: f32 = 1.0;
+const UNMATCHED_MARK: &str = "?";
+const UNMATCHED_MARK_SCALE: f32 = 0.7;
+const MIN_MARK_CELL_SIZE: f32 = 10.0;
 
 pub fn show(
     ui: &mut egui::Ui,
@@ -31,22 +38,43 @@ pub fn show(
     painter.rect_filled(rect, 0.0, BACKGROUND);
 
     let mut mesh = Mesh::with_texture(texture.id());
+    let mut unmatched = Vec::new();
     for row in 0..automapped.height {
         for column in 0..automapped.width {
-            let Some(placed) = automapped.tile(column, row) else {
-                continue;
-            };
-            let Some(slice) = tileset.tiles.get(placed.index) else {
-                continue;
-            };
-
             let min = rect.min + Vec2::new(column as f32, row as f32) * cell_size;
             let cell = Rect::from_min_size(min, Vec2::splat(cell_size));
-            add_tile(&mut mesh, cell, slice, placed.transform);
+
+            match automapped.cell(column, row) {
+                PreviewCell::Air => {}
+                PreviewCell::Unmatched => unmatched.push(cell),
+                PreviewCell::Placed(placed) => {
+                    if let Some(slice) = tileset.tiles.get(placed.index) {
+                        add_tile(&mut mesh, cell, slice, placed.transform);
+                    }
+                }
+            }
         }
     }
 
     painter.add(egui::Shape::mesh(mesh));
+    for cell in unmatched {
+        paint_unmatched(&painter, cell);
+    }
+}
+
+fn paint_unmatched(painter: &egui::Painter, cell: Rect) {
+    let stroke = Stroke::new(UNMATCHED_STROKE_WIDTH, UNMATCHED_COLOR);
+    painter.rect_stroke(cell, 0.0, stroke, StrokeKind::Inside);
+
+    if cell.width() >= MIN_MARK_CELL_SIZE {
+        painter.text(
+            cell.center(),
+            Align2::CENTER_CENTER,
+            UNMATCHED_MARK,
+            FontId::proportional(cell.width() * UNMATCHED_MARK_SCALE),
+            UNMATCHED_COLOR,
+        );
+    }
 }
 
 fn whole_pixel_cell_size(available: Vec2, automapped: &Automapped, pixels_per_point: f32) -> f32 {

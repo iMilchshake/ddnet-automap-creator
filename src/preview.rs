@@ -3,12 +3,14 @@ use twmap::automapper::Automapper;
 use twmap::ndarray::Array2;
 use twmap::{GameLayer, Tile, TileFlags, TwMap};
 
+use crate::model::project::Project;
+use crate::model::tile::{AIR_TILE, MASK_TILE};
 use crate::model::transform::Transform;
 
 const DM1: &[u8] = include_bytes!("../assets/dm1.map");
 const GAME_LAYER_HOOKABLE: u8 = 1;
 const GAME_LAYER_UNHOOKABLE: u8 = 3;
-const PAINTED_TILE: u8 = 1;
+pub(crate) const FALLBACK_UNMATCHED_MARKER: u8 = 1;
 const SOLID: char = '#';
 
 const SHAPES: [&str; 17] = [
@@ -107,12 +109,12 @@ impl Sample {
         }
     }
 
-    pub fn tiles(self) -> Result<Array2<Tile>, PreviewError> {
+    pub fn tiles(self, solid_id: u8) -> Result<Array2<Tile>, PreviewError> {
         match self {
-            Sample::Shapes => Ok(drawn_tiles(&SHAPES)),
-            Sample::DeBruijnTorus => Ok(drawn_tiles(&DE_BRUIJN_TORUS)),
-            Sample::Minimal => Ok(drawn_tiles(&MINIMAL)),
-            Sample::Dm1 => game_layer_tiles(DM1),
+            Sample::Shapes => Ok(drawn_tiles(&SHAPES, solid_id)),
+            Sample::DeBruijnTorus => Ok(drawn_tiles(&DE_BRUIJN_TORUS, solid_id)),
+            Sample::Minimal => Ok(drawn_tiles(&MINIMAL, solid_id)),
+            Sample::Dm1 => game_layer_tiles(DM1, solid_id),
         }
     }
 }
@@ -123,20 +125,42 @@ pub struct PlacedTile {
     pub transform: Transform,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewCell {
+    Air,
+    Placed(PlacedTile),
+    Unmatched,
+}
+
+/// if this marker remains, no rule was applied. We use this to visualize tiles with neighborhoods with no matching rules.
+pub fn unmatched_marker(project: &Project) -> u8 {
+    let active: Vec<usize> = project.rules().iter().map(|(tile, _)| *tile).collect();
+
+    (AIR_TILE + 1..MASK_TILE)
+        .find(|tile| !active.contains(tile) && project.group_at(*tile).is_none())
+        .and_then(|tile| u8::try_from(tile).ok())
+        .unwrap_or(FALLBACK_UNMATCHED_MARKER)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Automapped {
     pub width: usize,
     pub height: usize,
-    tiles: Vec<Option<PlacedTile>>,
+    cells: Vec<PreviewCell>,
 }
 
 impl Automapped {
-    pub fn tile(&self, column: usize, row: usize) -> Option<PlacedTile> {
-        self.tiles[row * self.width + column]
+    pub fn cell(&self, column: usize, row: usize) -> PreviewCell {
+        self.cells[row * self.width + column]
     }
 }
 
-pub fn automap(rules: &str, sample: Sample, seed: u32) -> Result<Automapped, PreviewError> {
+pub fn automap(
+    rules: &str,
+    sample: Sample,
+    seed: u32,
+    unmatched_marker: u8,
+) -> Result<Automapped, PreviewError> {
     // rpp rounds a chance slightly above 100% to `Random 1`, which is equivalent to having no Random.
     // Its technically not wrong syntax, but also nonsensical as it could just be dropped.
     // DDNet reads this without any problems, but twmap refuses it. So as a hotfix we drop it before parsing.
@@ -149,25 +173,25 @@ pub fn automap(rules: &str, sample: Sample, seed: u32) -> Result<Automapped, Pre
         .map_err(|error| PreviewError::Syntax(error.to_string()))?;
     let rule_set = automapper.configs.first().ok_or(PreviewError::NoRuleSet)?;
 
-    let mut tiles = sample.tiles()?;
+    let mut tiles = sample.tiles(unmatched_marker)?;
     rule_set.run(seed, &mut tiles);
 
-    Ok(collect(&tiles))
+    Ok(collect(&tiles, unmatched_marker))
 }
 
-fn drawn_tiles(rows: &[&str]) -> Array2<Tile> {
+fn drawn_tiles(rows: &[&str], solid_id: u8) -> Array2<Tile> {
     let height = rows.len();
     let width = rows[0].len();
 
     Array2::from_shape_fn((height, width), |(row, column)| {
         match rows[row].as_bytes()[column] == SOLID as u8 {
-            true => solid_tile(),
+            true => solid_tile(solid_id),
             false => Tile::default(),
         }
     })
 }
 
-fn game_layer_tiles(map: &[u8]) -> Result<Array2<Tile>, PreviewError> {
+fn game_layer_tiles(map: &[u8], solid_id: u8) -> Result<Array2<Tile>, PreviewError> {
     let mut map = TwMap::parse(map).map_err(|error| PreviewError::SampleMap(error.to_string()))?;
     map.load()
         .map_err(|error| PreviewError::SampleMap(error.to_string()))?;
@@ -176,31 +200,37 @@ fn game_layer_tiles(map: &[u8]) -> Result<Array2<Tile>, PreviewError> {
         .ok_or(PreviewError::NoGameLayer)?;
 
     Ok(game.tiles.unwrap_ref().map(|tile| match tile.id {
-        GAME_LAYER_HOOKABLE | GAME_LAYER_UNHOOKABLE => solid_tile(),
+        GAME_LAYER_HOOKABLE | GAME_LAYER_UNHOOKABLE => solid_tile(solid_id),
         _ => Tile::default(),
     }))
 }
 
-fn solid_tile() -> Tile {
-    Tile::new(PAINTED_TILE, TileFlags::empty())
+fn solid_tile(id: u8) -> Tile {
+    Tile::new(id, TileFlags::empty())
 }
 
-fn collect(tiles: &Array2<Tile>) -> Automapped {
+fn collect(tiles: &Array2<Tile>, unmatched_marker: u8) -> Automapped {
     let (height, width) = tiles.dim();
 
     Automapped {
         width,
         height,
-        tiles: tiles.iter().map(|tile| placed(*tile)).collect(),
+        cells: tiles
+            .iter()
+            .map(|tile| cell(*tile, unmatched_marker))
+            .collect(),
     }
 }
 
-fn placed(tile: Tile) -> Option<PlacedTile> {
+fn cell(tile: Tile, unmatched_marker: u8) -> PreviewCell {
     if tile.id == 0 {
-        return None;
+        return PreviewCell::Air;
+    }
+    if tile.id == unmatched_marker {
+        return PreviewCell::Unmatched;
     }
 
-    Some(PlacedTile {
+    PreviewCell::Placed(PlacedTile {
         index: usize::from(tile.id),
         transform: Transform {
             x_flip: tile.flags.contains(TileFlags::FLIP_X),

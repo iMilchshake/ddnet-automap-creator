@@ -127,13 +127,14 @@ enum View {
 enum CompileTarget {
     Rules,
     Bundle(PendingBundle),
-    Preview,
+    Preview(u8),
 }
 
 enum PreviewResult {
     Waiting,
     Ready {
         rules: String,
+        unmatched_marker: u8,
         automapped: Automapped,
     },
     Failed(String),
@@ -540,10 +541,15 @@ impl AutomapperApp {
         };
 
         match (target, result) {
-            (CompileTarget::Preview, Ok(Compiled { rules, .. })) => {
-                self.preview = preview_result(rules, self.preview_sample, self.preview_seed);
+            (CompileTarget::Preview(unmatched_marker), Ok(Compiled { rules, .. })) => {
+                self.preview = preview_result(
+                    rules,
+                    self.preview_sample,
+                    self.preview_seed,
+                    unmatched_marker,
+                );
             }
-            (CompileTarget::Preview, Err(error)) => {
+            (CompileTarget::Preview(_), Err(error)) => {
                 self.preview = PreviewResult::Failed(error.to_string());
             }
             (CompileTarget::Rules, Ok(Compiled { file_name, rules })) => {
@@ -1069,22 +1075,37 @@ impl AutomapperApp {
     }
 
     fn regenerate_preview(&mut self) {
-        let PreviewResult::Ready { rules, .. } = &self.preview else {
+        let PreviewResult::Ready {
+            rules,
+            unmatched_marker,
+            ..
+        } = &self.preview
+        else {
             return;
         };
 
         self.preview_seed += 1;
-        self.preview = preview_result(rules.clone(), self.preview_sample, self.preview_seed);
+        self.preview = preview_result(
+            rules.clone(),
+            self.preview_sample,
+            self.preview_seed,
+            *unmatched_marker,
+        );
     }
 
     fn switch_sample(&mut self, sample: Sample) {
         self.preview_sample = sample;
 
-        let PreviewResult::Ready { rules, .. } = &self.preview else {
+        let PreviewResult::Ready {
+            rules,
+            unmatched_marker,
+            ..
+        } = &self.preview
+        else {
             self.preview_source = None;
             return;
         };
-        self.preview = preview_result(rules.clone(), sample, self.preview_seed);
+        self.preview = preview_result(rules.clone(), sample, self.preview_seed, *unmatched_marker);
     }
 
     fn show_preview(&mut self, ui: &mut Ui) {
@@ -1143,7 +1164,8 @@ impl AutomapperApp {
         }
 
         self.preview_source = Some(source.clone());
-        self.start_compile(source, &stem, CompileTarget::Preview);
+        let unmatched_marker = preview::unmatched_marker(self.rule_sets.active());
+        self.start_compile(source, &stem, CompileTarget::Preview(unmatched_marker));
     }
 
     fn handle_grid(&mut self, ctx: &Context, response: GridResponse) {
@@ -1637,9 +1659,13 @@ fn describe_group(group: &TileGroup) -> String {
     text
 }
 
-fn preview_result(rules: String, sample: Sample, seed: u32) -> PreviewResult {
-    match preview::automap(&rules, sample, seed) {
-        Ok(automapped) => PreviewResult::Ready { rules, automapped },
+fn preview_result(rules: String, sample: Sample, seed: u32, unmatched_marker: u8) -> PreviewResult {
+    match preview::automap(&rules, sample, seed, unmatched_marker) {
+        Ok(automapped) => PreviewResult::Ready {
+            rules,
+            unmatched_marker,
+            automapped,
+        },
         Err(error) => PreviewResult::Failed(error.to_string()),
     }
 }
