@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use egui::ecolor::Hsva;
 use egui::emath::GuiRounding as _;
-use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, Vec2, pos2};
+use egui::{
+    Color32, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, Vec2, pos2,
+};
 
 use crate::model::group::TileGroup;
 use crate::model::project::Project;
@@ -80,11 +82,8 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
     let cell_size = whole_pixel_cell_size(ui.available_size(), pixels_per_point);
     let grid_size = cell_size * TILESET_SIDE as f32;
 
-    let sense = match view.group_editing {
-        true => Sense::click_and_drag(),
-        false => Sense::click(),
-    };
-    let (allocated, response) = ui.allocate_exact_size(Vec2::splat(grid_size), sense);
+    let (allocated, response) =
+        ui.allocate_exact_size(Vec2::splat(grid_size), Sense::click_and_drag());
     let rect = Rect::from_min_size(
         allocated.min.round_to_pixels(pixels_per_point),
         allocated.size(),
@@ -158,13 +157,26 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         None => response,
     };
 
+    if view.group_editing {
+        return GridResponse {
+            hovered,
+            clicked: hovered.filter(|_| response.clicked()),
+            secondary_clicked: hovered.filter(|_| response.secondary_clicked()),
+            drag_started: pointed.filter(|_| response.drag_started()),
+            drag_released: pointed.filter(|_| response.drag_stopped()),
+        };
+    }
+
     GridResponse {
         hovered,
-        clicked: hovered.filter(|_| response.clicked()),
-        secondary_clicked: hovered.filter(|_| response.secondary_clicked()),
-        drag_started: pointed.filter(|_| response.drag_started()),
-        drag_released: pointed.filter(|_| response.drag_stopped()),
+        clicked: hovered.filter(|_| released_by(&response, PointerButton::Primary)),
+        secondary_clicked: hovered.filter(|_| released_by(&response, PointerButton::Secondary)),
+        ..GridResponse::default()
     }
+}
+
+fn released_by(response: &egui::Response, button: PointerButton) -> bool {
+    response.clicked_by(button) || response.drag_stopped_by(button)
 }
 
 fn describe_group(project: &Project, tile: usize) -> Option<String> {
