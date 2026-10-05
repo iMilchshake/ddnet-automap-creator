@@ -29,15 +29,10 @@ fn rpp_names_are_unique() {
 }
 
 #[test]
-fn cycling_a_state_three_times_returns_to_the_start() {
-    for state in [
-        NeighborState::Empty,
-        NeighborState::Full,
-        NeighborState::Any,
-    ] {
-        assert_eq!(state.next().next().next(), state);
-        assert_eq!(state.next().previous(), state);
-    }
+fn toggling_solid_moves_empty_to_full_and_swaps_full_with_any() {
+    assert_eq!(NeighborState::Empty.toggled_solid(), NeighborState::Full);
+    assert_eq!(NeighborState::Full.toggled_solid(), NeighborState::Any);
+    assert_eq!(NeighborState::Any.toggled_solid(), NeighborState::Full);
 }
 
 #[test]

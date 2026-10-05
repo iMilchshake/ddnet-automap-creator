@@ -15,19 +15,10 @@ pub enum NeighborState {
 }
 
 impl NeighborState {
-    pub fn next(self) -> Self {
+    pub fn toggled_solid(self) -> Self {
         match self {
-            Self::Empty => Self::Full,
+            Self::Empty | Self::Any => Self::Full,
             Self::Full => Self::Any,
-            Self::Any => Self::Empty,
-        }
-    }
-
-    pub fn previous(self) -> Self {
-        match self {
-            Self::Empty => Self::Any,
-            Self::Full => Self::Empty,
-            Self::Any => Self::Full,
         }
     }
 }

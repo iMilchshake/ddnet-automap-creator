@@ -1,4 +1,6 @@
-use egui::{Color32, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui, Vec2};
+use egui::{
+    Color32, PointerButton, Rect, Response, Sense, Stroke, StrokeKind, TextureHandle, Ui, Vec2,
+};
 
 use crate::model::neighbor::{NeighborState, Neighborhood, neighbor_index_at};
 use crate::model::pool::{ChanceMode, Pool};
@@ -30,7 +32,7 @@ const ANY_DARK: Color32 = Color32::from_gray(64);
 const PREVIEW_LIGHT: Color32 = Color32::from_gray(64);
 const PREVIEW_DARK: Color32 = Color32::from_gray(48);
 
-const CELL_TOOLTIP: &str = "Left-click for the next state, right-click for the previous one. \
+const CELL_TOOLTIP: &str = "Left-click toggles full and any, right-click sets empty. \
                             Or press 1 (empty), 2 (full), 3 (any) while hovering.";
 const CHANCE_TOOLTIP: &str = "Tiles declaring the same neighborhood split it between them by \
                               their chances. With Normalize chances off, a total below 100 % \
@@ -256,7 +258,7 @@ impl TilePanel {
     }
 
     fn show_state_cell(&mut self, ui: &mut Ui, index: usize, size: f32) -> bool {
-        let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+        let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click_and_drag());
         paint_state(ui, rect, self.neighborhood.state(index));
 
         let mut state = self.neighborhood.state(index);
@@ -273,11 +275,11 @@ impl TilePanel {
             }
         }
 
-        if response.clicked() {
-            state = state.next();
+        if released_on(ui, &response, rect, PointerButton::Primary) {
+            state = state.toggled_solid();
         }
-        if response.secondary_clicked() {
-            state = state.previous();
+        if released_on(ui, &response, rect, PointerButton::Secondary) {
+            state = NeighborState::Empty;
         }
 
         response.on_hover_text(CELL_TOOLTIP);
@@ -334,6 +336,17 @@ fn cell_size(ui: &Ui) -> f32 {
     ((ui.available_width() - 2.0 * CELL_GAP) / 3.0)
         .floor()
         .clamp(MIN_CELL_SIZE, MAX_CELL_SIZE)
+}
+
+fn released_on(ui: &Ui, response: &Response, rect: Rect, button: PointerButton) -> bool {
+    let released_inside = response.drag_stopped_by(button)
+        && ui.input(|input| {
+            input
+                .pointer
+                .latest_pos()
+                .is_some_and(|pos| rect.contains(pos))
+        });
+    response.clicked_by(button) || released_inside
 }
 
 fn pressed_state(ui: &Ui) -> Option<NeighborState> {
