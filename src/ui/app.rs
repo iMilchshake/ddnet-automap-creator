@@ -1547,7 +1547,7 @@ fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
         TileState::Locked => format!("Tile {tile} · locked"),
         TileState::Grouped => format!("Tile {tile} · in a group"),
         TileState::Removed => format!("Tile {tile} · removed"),
-        TileState::Guessed(_) => format!("Tile {tile}"),
+        TileState::Unconfigured => format!("Tile {tile}"),
         TileState::Configured(rule) => {
             let neighborhood = format_neighborhood(rule.neighborhood);
             match rule.chance.is_full() {

@@ -382,7 +382,9 @@ fn paint_checkerboard(painter: &egui::Painter, cell: Rect, index: usize) {
 fn tile_scrim(state: TileState) -> Option<Color32> {
     match state {
         TileState::Configured(_) | TileState::Grouped => None,
-        TileState::Locked | TileState::Guessed(_) => Some(Color32::from_black_alpha(UNUSED_SCRIM)),
+        TileState::Locked | TileState::Unconfigured => {
+            Some(Color32::from_black_alpha(UNUSED_SCRIM))
+        }
         TileState::Removed => Some(Color32::from_black_alpha(REMOVED_SCRIM)),
     }
 }
@@ -408,7 +410,7 @@ fn paint_badge(
     );
 
     match state {
-        TileState::Locked | TileState::Grouped | TileState::Guessed(_) => {}
+        TileState::Locked | TileState::Grouped | TileState::Unconfigured => {}
         TileState::Removed => paint_cross(painter, mark),
         TileState::Configured(_) => {
             if let Some(share) = share

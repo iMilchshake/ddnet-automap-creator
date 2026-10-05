@@ -1,7 +1,6 @@
 use image::{GenericImageView, RgbaImage};
 use thiserror::Error;
 
-use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
 use crate::model::tile::{TILE_COUNT, TILESET_SIDE};
 
 #[derive(Debug, Error)]
@@ -16,7 +15,7 @@ pub enum TilesetError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileKind {
     Locked,
-    Guess(Neighborhood),
+    Open,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -93,30 +92,11 @@ fn classify_tile(rgba: &RgbaImage, origin: [u32; 2], tile_size: [u32; 2]) -> Til
         return TileKind::Locked;
     }
 
-    TileKind::Guess(guess_neighborhood(rgba, origin, tile_size))
+    TileKind::Open
 }
 
 fn is_fully_transparent(rgba: &RgbaImage, origin: [u32; 2], tile_size: [u32; 2]) -> bool {
     rgba.view(origin[0], origin[1], tile_size[0], tile_size[1])
         .pixels()
         .all(|(_x, _y, pixel)| pixel.0[3] == 0)
-}
-
-fn guess_neighborhood(rgba: &RgbaImage, origin: [u32; 2], tile_size: [u32; 2]) -> Neighborhood {
-    let sample_x = [0, tile_size[0] / 2, tile_size[0] - 1];
-    let sample_y = [0, tile_size[1] / 2, tile_size[1] - 1];
-
-    let mut neighborhood = Neighborhood::default();
-    for (index, neighbor) in NEIGHBORS.iter().enumerate() {
-        let x = origin[0] + sample_x[(neighbor.dx + 1) as usize];
-        let y = origin[1] + sample_y[(neighbor.dy + 1) as usize];
-
-        let state = match rgba.get_pixel(x, y).0[3] {
-            0 => NeighborState::Empty,
-            _ => NeighborState::Full,
-        };
-        neighborhood.set_state(index, state);
-    }
-
-    neighborhood
 }

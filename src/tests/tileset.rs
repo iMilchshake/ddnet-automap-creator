@@ -1,6 +1,5 @@
 use image::{Rgba, RgbaImage};
 
-use crate::model::neighbor::NeighborState;
 use crate::model::tile::TILE_COUNT;
 use crate::tileset::{TileKind, decode_tileset, file_stem};
 
@@ -72,25 +71,7 @@ fn fully_transparent_tiles_are_locked() {
     let tileset = decode_tileset(&encode(image), "sparse").unwrap();
 
     assert_eq!(tileset.tiles[0].kind, TileKind::Locked);
-    assert!(matches!(tileset.tiles[17].kind, TileKind::Guess(_)));
-}
-
-#[test]
-fn the_guess_follows_the_alpha_at_each_sample_point() {
-    // 3×3 pixel tiles, so the sample points are the 8 pixels around the centre.
-    let mut image = RgbaImage::from_pixel(48, 48, Rgba([255, 255, 255, 255]));
-    for x in 0..3 {
-        image.put_pixel(x, 0, Rgba([0, 0, 0, 0]));
-    }
-
-    let tileset = decode_tileset(&encode(image), "guess").unwrap();
-
-    let TileKind::Guess(neighborhood) = tileset.tiles[0].kind else {
-        panic!("tile 0 should not be locked");
-    };
-    let states = neighborhood.states();
-    assert_eq!(&states[0..3], &[NeighborState::Empty; 3]);
-    assert_eq!(&states[3..8], &[NeighborState::Full; 5]);
+    assert_eq!(tileset.tiles[17].kind, TileKind::Open);
 }
 
 #[test]

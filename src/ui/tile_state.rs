@@ -1,4 +1,4 @@
-use crate::model::neighbor::Neighborhood;
+use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::project::Project;
 use crate::model::tile::{AIR_TILE, MASK_TILE, TileRule};
 use crate::tileset::{TileKind, Tileset};
@@ -7,7 +7,7 @@ use crate::tileset::{TileKind, Tileset};
 pub enum TileState {
     Locked,
     Grouped,
-    Guessed(Neighborhood),
+    Unconfigured,
     Configured(TileRule),
     Removed,
 }
@@ -29,13 +29,13 @@ pub fn tile_state(tileset: &Tileset, project: &Project, tile: usize) -> TileStat
         return TileState::Configured(*rule);
     }
 
-    let TileKind::Guess(guess) = tileset.tiles[tile].kind else {
+    if tileset.tiles[tile].kind == TileKind::Locked {
         return TileState::Locked;
-    };
+    }
 
     match project.is_removed(tile) {
         true => TileState::Removed,
-        false => TileState::Guessed(guess),
+        false => TileState::Unconfigured,
     }
 }
 
@@ -45,7 +45,7 @@ pub fn seed_rule(tileset: &Tileset, project: &Project, tile: usize) -> TileRule 
     }
 
     match tileset.tiles[tile].kind {
-        TileKind::Guess(guess) => TileRule::new(guess),
+        TileKind::Open => TileRule::new(Neighborhood::uniform(NeighborState::Any)),
         TileKind::Locked => TileRule::new(Neighborhood::default()),
     }
 }
