@@ -72,7 +72,9 @@ impl GroupPanel {
 
         ui.horizontal(|ui| {
             ui.label("Name");
-            changed |= ui.text_edit_singleline(&mut self.name).changed();
+            changed |= ui
+                .add(egui::TextEdit::singleline(&mut self.name).desired_width(f32::INFINITY))
+                .changed();
         });
 
         ui.horizontal(|ui| {

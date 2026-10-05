@@ -799,22 +799,27 @@ impl AutomapperApp {
                     show_rule_set_tabs(ui, &self.rule_sets, &mut rule_set_command);
                     ui.horizontal(|ui| {
                         ui.label("Name");
-                        ui.text_edit_singleline(self.rule_sets.active_name_mut());
-                        if ui
-                            .button(DUPLICATE_ICON)
-                            .on_hover_text("Duplicate this rule set")
-                            .clicked()
-                        {
-                            rule_set_command = Some(RuleSetCommand::Duplicate);
-                        }
-                        let can_remove = self.rule_sets.len() > 1;
-                        if ui
-                            .add_enabled(can_remove, egui::Button::new(REMOVE_ICON))
-                            .on_hover_text("Remove this rule set")
-                            .clicked()
-                        {
-                            rule_set_command = Some(RuleSetCommand::Remove);
-                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let can_remove = self.rule_sets.len() > 1;
+                            if ui
+                                .add_enabled(can_remove, egui::Button::new(REMOVE_ICON))
+                                .on_hover_text("Remove this rule set")
+                                .clicked()
+                            {
+                                rule_set_command = Some(RuleSetCommand::Remove);
+                            }
+                            if ui
+                                .button(DUPLICATE_ICON)
+                                .on_hover_text("Duplicate this rule set")
+                                .clicked()
+                            {
+                                rule_set_command = Some(RuleSetCommand::Duplicate);
+                            }
+                            ui.add_sized(
+                                ui.available_size(),
+                                egui::TextEdit::singleline(self.rule_sets.active_name_mut()),
+                            );
+                        });
                     });
                     ui.label(format!(
                         "{} tiles, {} groups configured",
