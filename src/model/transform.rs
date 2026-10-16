@@ -31,6 +31,7 @@ const ENUMERATION: [Transform; 8] = [
 
 impl Transform {
     pub const IDENTITY: Self = transform(false, false, false);
+    pub const ALL: [Self; 8] = ENUMERATION;
 
     pub fn suffix(self) -> String {
         let mut suffix = String::new();
@@ -95,12 +96,78 @@ impl Transform {
     }
 }
 
-pub fn variants(mods: TileMods) -> Vec<Transform> {
-    let subgroup = subgroup(mods);
-    ENUMERATION
-        .into_iter()
-        .filter(|transform| subgroup.contains(transform))
-        .collect()
+const PRESETS: [TileMods; 6] = [
+    TileMods::new(false, false, false),
+    TileMods::new(true, false, false),
+    TileMods::new(false, true, false),
+    TileMods::new(false, false, true),
+    TileMods::new(true, true, false),
+    TileMods::new(true, false, true),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Orientations(u8);
+
+impl Orientations {
+    pub fn preset(self) -> Option<TileMods> {
+        PRESETS
+            .into_iter()
+            .find(|mods| Self::generated(*mods) == self)
+    }
+
+    pub fn generated(mods: TileMods) -> Self {
+        subgroup(mods).into_iter().collect()
+    }
+
+    pub fn resolved(custom: Option<Self>, mods: TileMods) -> Self {
+        custom.unwrap_or_else(|| Self::generated(mods))
+    }
+
+    pub fn contains(self, transform: Transform) -> bool {
+        self.0 & bit(transform) != 0
+    }
+
+    pub fn with(self, transform: Transform) -> Self {
+        Self(self.0 | bit(transform))
+    }
+
+    pub fn without(self, transform: Transform) -> Self {
+        Self(self.0 & !bit(transform))
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn len(self) -> usize {
+        self.0.count_ones() as usize
+    }
+
+    pub fn transforms(self) -> Vec<Transform> {
+        ENUMERATION
+            .into_iter()
+            .filter(|transform| self.contains(*transform))
+            .collect()
+    }
+}
+
+impl FromIterator<Transform> for Orientations {
+    fn from_iter<Transforms: IntoIterator<Item = Transform>>(transforms: Transforms) -> Self {
+        Self(
+            transforms
+                .into_iter()
+                .fold(0, |bits, transform| bits | bit(transform)),
+        )
+    }
+}
+
+fn bit(transform: Transform) -> u8 {
+    let position = ENUMERATION
+        .iter()
+        .position(|candidate| *candidate == transform)
+        .expect("every transform is enumerated");
+
+    1 << position
 }
 
 fn subgroup(mods: TileMods) -> Vec<Transform> {

@@ -351,18 +351,17 @@ impl AutomapperApp {
             }
         };
 
-        let other_image = parsed.image.filter(|wanted| wanted != stem);
-        match other_image {
-            Some(wanted_image) => {
-                self.pending_blueprint = Some(PendingBlueprint {
-                    file_name: picked.name,
-                    wanted_image,
-                    rule_sets: parsed.rule_sets,
-                    action,
-                });
-            }
-            None => self.apply_blueprint(ctx, action, &picked.name, parsed.rule_sets),
+        if parsed.image != stem {
+            self.pending_blueprint = Some(PendingBlueprint {
+                file_name: picked.name,
+                wanted_image: parsed.image,
+                rule_sets: parsed.rule_sets,
+                action,
+            });
+            return;
         }
+
+        self.apply_blueprint(ctx, action, &picked.name, parsed.rule_sets);
     }
 
     fn apply_blueprint(
@@ -1020,11 +1019,11 @@ impl AutomapperApp {
         let Some(tile) = self.inspector.tile() else {
             return Vec::new();
         };
-        let Some(as_drawn) = pool::pools_of(pools, tile).first().copied() else {
+        let Some(primary) = pool::pools_of(pools, tile).first().copied() else {
             return Vec::new();
         };
 
-        as_drawn
+        primary
             .members
             .iter()
             .map(|member| member.tile)

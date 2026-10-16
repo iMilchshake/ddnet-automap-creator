@@ -8,11 +8,18 @@ use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{AIR_TILE, Chance, InvalidChance, TILE_COUNT, TileMods, TileRule};
+use crate::model::transform::{Orientations, Transform};
 
 const VERSION: u32 = 1;
 
+// for serialization of orientations
+const IDENTITY_LETTER: char = 'N';
+const X_FLIP_LETTER: char = 'V';
+const Y_FLIP_LETTER: char = 'H';
+const ROTATE_LETTER: char = 'R';
+
 /// Wide enough to keep one tile on one line; the default 120 breaks them up.
-const MAX_LINE: u32 = 140;
+const MAX_LINE: u32 = 150;
 
 #[derive(Debug, Error)]
 pub enum BlueprintError {
@@ -34,6 +41,12 @@ pub enum BlueprintError {
     #[error("`{0}` is not a neighbor state, expected 0 (empty), 1 (full) or 2 (any)")]
     NeighborCode(u8),
 
+    #[error("tile {tile}: `{name}` is not an orientation name")]
+    OrientationName { tile: usize, name: String },
+
+    #[error("tile {0} needs at least one orientation")]
+    NoOrientations(usize),
+
     #[error(transparent)]
     Chance(#[from] InvalidChance),
 
@@ -50,8 +63,7 @@ pub enum BlueprintError {
 #[derive(Debug, Serialize, Deserialize)]
 struct Blueprint {
     version: u32,
-    image: Option<String>,
-    #[serde(default)]
+    image: String,
     active: usize,
     rule_sets: Vec<BlueprintRuleSet>,
 }
@@ -59,12 +71,9 @@ struct Blueprint {
 #[derive(Debug, Serialize, Deserialize)]
 struct BlueprintRuleSet {
     name: String,
-    #[serde(default = "default_normalize")]
     normalize: bool,
     tiles: Vec<BlueprintTile>,
-    #[serde(default)]
     deactivated: Vec<usize>,
-    #[serde(default)]
     groups: Vec<BlueprintGroup>,
 }
 
@@ -73,14 +82,7 @@ pub struct BlueprintTile {
     pub id: usize,
     pub con: [u8; NEIGHBOR_COUNT],
     pub chance: f32,
-    pub mods: BlueprintMods,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BlueprintMods {
-    pub x_flip: bool,
-    pub y_flip: bool,
-    pub rot: bool,
+    pub orientations: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -93,10 +95,6 @@ pub struct BlueprintGroup {
     pub chance: f32,
 }
 
-fn default_normalize() -> bool {
-    true
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BlueprintMode {
@@ -106,13 +104,13 @@ pub enum BlueprintMode {
 
 pub struct Loaded {
     pub rule_sets: RuleSets,
-    pub image: Option<String>,
+    pub image: String,
 }
 
 pub fn to_json(rule_sets: &RuleSets, image: &str) -> Result<String, BlueprintError> {
     let blueprint = Blueprint {
         version: VERSION,
-        image: Some(image.to_owned()),
+        image: image.to_owned(),
         active: rule_sets.active_index(),
         rule_sets: rule_sets
             .sets()
@@ -152,12 +150,7 @@ fn build(blueprint: Blueprint) -> Result<Loaded, BlueprintError> {
         .rule_sets
         .into_iter()
         .map(|rule_set| {
-            let project = load_project(
-                rule_set.normalize,
-                &rule_set.tiles,
-                &rule_set.deactivated,
-                &rule_set.groups,
-            )?;
+            let project = load_project(&rule_set)?;
             Ok((rule_set.name, project))
         })
         .collect::<Result<_, BlueprintError>>()?;
@@ -168,18 +161,13 @@ fn build(blueprint: Blueprint) -> Result<Loaded, BlueprintError> {
     })
 }
 
-fn load_project(
-    normalize: bool,
-    tiles: &[BlueprintTile],
-    deactivated: &[usize],
-    groups: &[BlueprintGroup],
-) -> Result<Project, BlueprintError> {
+fn load_project(rule_set: &BlueprintRuleSet) -> Result<Project, BlueprintError> {
     let mut project = Project::default();
-    project.set_chance_mode(match normalize {
+    project.set_chance_mode(match rule_set.normalize {
         true => ChanceMode::Normalize,
         false => ChanceMode::Exact,
     });
-    for tile in tiles {
+    for tile in &rule_set.tiles {
         if tile.id >= TILE_COUNT {
             return Err(BlueprintError::TileId(tile.id));
         }
@@ -192,7 +180,7 @@ fn load_project(
         project.set_rule(tile.id, load_tile(tile)?);
     }
 
-    for &tile in deactivated {
+    for &tile in &rule_set.deactivated {
         if tile >= TILE_COUNT {
             return Err(BlueprintError::TileId(tile));
         }
@@ -202,7 +190,11 @@ fn load_project(
         project.deactivate(tile);
     }
 
-    let loaded_groups: Vec<TileGroup> = groups.iter().map(load_group).collect::<Result<_, _>>()?;
+    let loaded_groups: Vec<TileGroup> = rule_set
+        .groups
+        .iter()
+        .map(load_group)
+        .collect::<Result<_, _>>()?;
     group::validate_all(&loaded_groups)?;
     for group in loaded_groups {
         for tile in group.footprint() {
@@ -235,15 +227,52 @@ fn store_tile((id, rule): (usize, TileRule)) -> BlueprintTile {
         *slot = store_state(*state);
     }
 
+    let orientations = rule.orientations().transforms();
+
     BlueprintTile {
         id,
         con,
         chance: rule.chance.percent(),
-        mods: BlueprintMods {
-            x_flip: rule.mods.can_x_flip,
-            y_flip: rule.mods.can_y_flip,
-            rot: rule.mods.can_rotate,
-        },
+        orientations: orientations.into_iter().map(orientation_name).collect(),
+    }
+}
+
+fn orientation_name(transform: Transform) -> String {
+    let letters: String = [
+        (transform.x_flip, X_FLIP_LETTER),
+        (transform.y_flip, Y_FLIP_LETTER),
+        (transform.rot, ROTATE_LETTER),
+    ]
+    .into_iter()
+    .filter(|(applied, _)| *applied)
+    .map(|(_, letter)| letter)
+    .collect();
+
+    match letters.is_empty() {
+        true => IDENTITY_LETTER.to_string(),
+        false => letters,
+    }
+}
+
+fn load_orientation(tile: usize, name: &str) -> Result<Transform, BlueprintError> {
+    Transform::ALL
+        .into_iter()
+        .find(|transform| orientation_name(*transform) == name)
+        .ok_or_else(|| BlueprintError::OrientationName {
+            tile,
+            name: name.to_owned(),
+        })
+}
+
+fn load_orientations(tile: usize, names: &[String]) -> Result<Orientations, BlueprintError> {
+    let orientations: Orientations = names
+        .iter()
+        .map(|name| load_orientation(tile, name))
+        .collect::<Result<_, _>>()?;
+
+    match orientations.is_empty() {
+        true => Err(BlueprintError::NoOrientations(tile)),
+        false => Ok(orientations),
     }
 }
 
@@ -253,13 +282,16 @@ fn load_tile(tile: &BlueprintTile) -> Result<TileRule, BlueprintError> {
         neighborhood.set_state(index, load_state(code)?);
     }
 
+    let orientations = load_orientations(tile.id, &tile.orientations)?;
+    let (mods, custom) = match orientations.preset() {
+        Some(mods) => (mods, None),
+        None => (TileMods::default(), Some(orientations)),
+    };
+
     Ok(TileRule {
         neighborhood,
-        mods: TileMods {
-            can_x_flip: tile.mods.x_flip,
-            can_y_flip: tile.mods.y_flip,
-            can_rotate: tile.mods.rot,
-        },
+        mods,
+        custom,
         chance: Chance::new(tile.chance)?,
     })
 }

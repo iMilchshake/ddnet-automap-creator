@@ -34,11 +34,10 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 - rules on empty cells 
 - undo and redo for tile and group edits
 - autosave the project (in browser storage)
-- use an empty tileset tile as mask, not always 255
+- discard stale preview compiles after loading images
 
 ## Further Ideas
 
-- toggle single rotations/flips per tile, e.g. no upward edge
 - .map export (via ddnet-rs / twmap ?)
 - (live) .r source preview -> could be used as an interactive tool to learn r++?
 - DDNet install integration (native only) -> we could use twstorage

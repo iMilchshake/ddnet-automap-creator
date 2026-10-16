@@ -1,15 +1,21 @@
 use crate::model::neighbor::{NeighborState, Neighborhood};
-use crate::model::pool::{ChanceMode, Pool, base_shares, pools, pools_of};
+use crate::model::pool::{ChanceMode, Pool, Variant, base_shares, pools, pools_of};
 use crate::model::tile::{Chance, TileRule};
-use crate::tests::support::{index_of, mods};
+use crate::tests::support::{half_turn, index_of, mods};
 
 const TOLERANCE: f32 = 0.001;
 
 fn anywhere(percent: f32) -> TileRule {
     TileRule {
-        neighborhood: Neighborhood::uniform(NeighborState::Any),
-        mods: mods(false, false, false),
         chance: Chance::new(percent).unwrap(),
+        ..TileRule::new(Neighborhood::uniform(NeighborState::Any))
+    }
+}
+
+fn half_turn_only() -> TileRule {
+    TileRule {
+        custom: Some(half_turn()),
+        ..TileRule::new(only("left"))
     }
 }
 
@@ -75,9 +81,8 @@ fn exact_chances_above_100_are_scaled_down() {
 #[test]
 fn a_transformed_variant_pools_with_the_tile_it_matches() {
     let flippable = TileRule {
-        neighborhood: only("left"),
         mods: mods(true, false, false),
-        chance: Chance::FULL,
+        ..TileRule::new(only("left"))
     };
     let plain = TileRule::new(only("right"));
 
@@ -98,9 +103,8 @@ fn a_transformed_variant_pools_with_the_tile_it_matches() {
 #[test]
 fn base_shares_follow_the_untransformed_variant() {
     let flippable = TileRule {
-        neighborhood: only("left"),
         mods: mods(true, false, false),
-        chance: Chance::FULL,
+        ..TileRule::new(only("left"))
     };
     let plain = TileRule::new(only("right"));
 
@@ -112,10 +116,26 @@ fn base_shares_follow_the_untransformed_variant() {
 
 fn rotating(rotate: bool) -> TileRule {
     TileRule {
-        neighborhood: only("left"),
         mods: mods(false, false, rotate),
-        chance: Chance::FULL,
+        ..TileRule::new(only("left"))
     }
+}
+
+#[test]
+fn a_half_turn_only_rule_expands_to_the_turned_neighborhood() {
+    let pools = pools(&[(3, half_turn_only())]);
+    let members: Vec<&Variant> = pools.iter().flat_map(|pool| &pool.members).collect();
+
+    assert_eq!(members.len(), 1);
+    assert_eq!(members[0].transform.suffix(), "VH");
+    assert_eq!(members[0].neighborhood, only("right"));
+}
+
+#[test]
+fn a_tile_without_the_identity_still_gets_a_share() {
+    let shares = base_shares(&pools(&[(3, half_turn_only())]), ChanceMode::Normalize);
+
+    assert_close(&[shares[&3]], &[100.0]);
 }
 
 #[test]

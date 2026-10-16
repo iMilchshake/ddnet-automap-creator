@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use crate::model::neighbor::Neighborhood;
+use crate::model::transform::Orientations;
 
 pub const TILESET_SIDE: usize = 16;
 pub const TILE_COUNT: usize = TILESET_SIDE * TILESET_SIDE;
@@ -51,10 +52,21 @@ pub struct TileMods {
     pub can_rotate: bool,
 }
 
+impl TileMods {
+    pub const fn new(can_x_flip: bool, can_y_flip: bool, can_rotate: bool) -> Self {
+        Self {
+            can_x_flip,
+            can_y_flip,
+            can_rotate,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TileRule {
     pub neighborhood: Neighborhood,
     pub mods: TileMods,
+    pub custom: Option<Orientations>,
     pub chance: Chance,
 }
 
@@ -63,7 +75,12 @@ impl TileRule {
         Self {
             neighborhood,
             mods: TileMods::default(),
+            custom: None,
             chance: Chance::FULL,
         }
+    }
+
+    pub fn orientations(&self) -> Orientations {
+        Orientations::resolved(self.custom, self.mods)
     }
 }

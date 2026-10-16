@@ -1,4 +1,22 @@
-use crate::model::tile::Chance;
+use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::tile::{Chance, TileRule};
+use crate::model::transform::Orientations;
+use crate::tests::support::{half_turn, mods};
+
+#[test]
+fn a_rule_places_its_preset_unless_custom_is_set() {
+    let rule = TileRule {
+        mods: mods(true, false, true),
+        ..TileRule::new(Neighborhood::uniform(NeighborState::Any))
+    };
+    let custom = TileRule {
+        custom: Some(half_turn()),
+        ..rule
+    };
+
+    assert_eq!(rule.orientations(), Orientations::generated(rule.mods));
+    assert_eq!(custom.orientations(), half_turn());
+}
 
 #[test]
 fn chance_rejects_values_outside_its_range() {

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::tile::{Chance, TileRule};
-use crate::model::transform::{self, Transform};
+use crate::model::transform::Transform;
 
 const ALL_CELLS: f32 = 100.0;
 
@@ -20,6 +20,7 @@ pub enum ChanceMode {
 pub struct Variant {
     pub tile: usize,
     pub transform: Transform,
+    pub primary: bool,
     pub neighborhood: Neighborhood,
     pub chance: Chance,
 }
@@ -65,9 +66,8 @@ impl Pool {
         self.members.iter().any(|member| member.tile == tile)
     }
 
-    pub fn places_as_drawn(&self, tile: usize) -> bool {
-        self.member_of(tile)
-            .is_some_and(|member| member.transform == Transform::IDENTITY)
+    pub fn places_primary(&self, tile: usize) -> bool {
+        self.member_of(tile).is_some_and(|member| member.primary)
     }
 
     pub fn member_of(&self, tile: usize) -> Option<&Variant> {
@@ -83,18 +83,18 @@ impl Pool {
 
 pub fn pools_of(pools: &[Pool], tile: usize) -> Vec<&Pool> {
     let mut joined: Vec<&Pool> = pools.iter().filter(|pool| pool.contains(tile)).collect();
-    joined.sort_by_key(|pool| !pool.places_as_drawn(tile));
+    joined.sort_by_key(|pool| !pool.places_primary(tile));
 
     joined
 }
 
-/// What each configured tile places where its own, untransformed neighborhood
-/// matches.
+/// What each configured tile places where its own, first-orientation
+/// neighborhood matches.
 pub fn base_shares(pools: &[Pool], mode: ChanceMode) -> BTreeMap<usize, f32> {
     let mut shares = BTreeMap::new();
     for pool in pools {
         for (member, share) in pool.members.iter().zip(pool.shares(mode)) {
-            if member.transform == Transform::IDENTITY {
+            if member.primary {
                 shares.insert(member.tile, share);
             }
         }
@@ -129,16 +129,18 @@ fn expand(tiles: &[(usize, TileRule)]) -> Vec<Variant> {
 
     for &(tile, rule) in tiles {
         let mut seen = Vec::new();
-        for transform in transform::variants(rule.mods) {
+        for transform in rule.orientations().transforms() {
             let neighborhood = transform.apply(&rule.neighborhood);
             if seen.contains(&neighborhood) {
                 continue;
             }
+            let primary = seen.is_empty();
             seen.push(neighborhood);
 
             variants.push(Variant {
                 tile,
                 transform,
+                primary,
                 neighborhood,
                 chance: rule.chance,
             });

@@ -5,7 +5,7 @@ use egui::{
 use crate::model::neighbor::{NeighborState, Neighborhood, neighbor_index_at};
 use crate::model::pool::{ChanceMode, Pool};
 use crate::model::tile::{Chance, TileMods, TileRule};
-use crate::model::transform::Transform;
+use crate::model::transform::{Orientations, Transform};
 use crate::tileset::Tileset;
 use crate::ui::{grid, preview};
 
@@ -23,6 +23,11 @@ const LEGEND_GAP: f32 = 4.0;
 const SECTION_SPACING: f32 = 6.0;
 const CORNER_RADIUS: f32 = 2.0;
 const MEMBER_SIZE: f32 = 20.0;
+const ORIENTATION_SIZE: f32 = 32.0;
+const ORIENTATION_COLUMNS: usize = 4;
+const CROSS_WIDTH: f32 = 1.5;
+const CROSS_INSET_FRACTION: f32 = 0.2;
+const CROSS_ALPHA: u8 = 70;
 const OUTLINE_WIDTH: f32 = 2.0;
 const EMPTY_CROSS_INSET_FRACTION: f32 = 0.28;
 const MARK_WIDTH_FRACTION: f32 = 0.05;
@@ -34,6 +39,9 @@ const ANY_LIGHT: Color32 = Color32::from_gray(96);
 const ANY_DARK: Color32 = Color32::from_gray(64);
 const PREVIEW_LIGHT: Color32 = Color32::from_gray(64);
 const PREVIEW_DARK: Color32 = Color32::from_gray(48);
+const DISABLED_DARKEN: Color32 = Color32::from_black_alpha(72);
+const CROSS_COLOR: Color32 =
+    Color32::from_rgba_premultiplied(CROSS_ALPHA, CROSS_ALPHA, CROSS_ALPHA, CROSS_ALPHA);
 
 const CELL_TOOLTIP: &str = "Left-click toggles full and any, right-click sets empty. \
                             Or press 1 (empty), 2 (full), 3 (any) while hovering.";
@@ -43,6 +51,7 @@ const CHANCE_TOOLTIP: &str = "Tiles declaring the same neighborhood split it bet
 const POOL_TOOLTIP: &str = "A pool holds all tiles with the exact neighborhood, considering \
                             rotations and flips.";
 const UNCHANGED: &str = "unchanged";
+const LAST_ORIENTATION: &str = "At least one orientation is required";
 
 pub struct TilePools<'a> {
     pub pools: Vec<&'a Pool>,
@@ -53,7 +62,7 @@ struct PoolView<'a> {
     tileset: &'a Tileset,
     texture: &'a TextureHandle,
     mode: ChanceMode,
-    as_drawn_share: String,
+    primary_share: String,
 }
 
 pub enum TileEdit {
@@ -65,6 +74,7 @@ pub struct TilePanel {
     tile: usize,
     neighborhood: Neighborhood,
     mods: TileMods,
+    custom: Option<Orientations>,
     /// A plain percentage while editing; only a valid one becomes a `Chance`.
     chance_percent: f32,
     has_rule: bool,
@@ -77,6 +87,7 @@ impl TilePanel {
             tile,
             neighborhood: rule.neighborhood,
             mods: rule.mods,
+            custom: rule.custom,
             chance_percent: rule.chance.percent(),
             has_rule,
             error: None,
@@ -108,7 +119,7 @@ impl TilePanel {
         show_legend(ui);
 
         ui.add_space(SECTION_SPACING);
-        let edit = self.show_options(ui, changed);
+        let edit = self.show_options(ui, tileset, texture, changed);
 
         if let Some(error) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, error);
@@ -116,6 +127,7 @@ impl TilePanel {
 
         if !pools.pools.is_empty() {
             ui.add_space(SECTION_SPACING);
+            ui.strong("Pools");
             self.show_pools(ui, tileset, texture, pools);
         }
 
@@ -133,7 +145,7 @@ impl TilePanel {
             tileset,
             texture,
             mode: pools.mode,
-            as_drawn_share: self.share_label(pools.pools[0], pools.mode),
+            primary_share: self.share_label(pools.pools[0], pools.mode),
         };
         for (index, pool) in pools.pools.iter().enumerate() {
             self.show_pool(ui, &view, pool, index == 0);
@@ -145,12 +157,8 @@ impl TilePanel {
             .member_of(self.tile)
             .map_or(Transform::IDENTITY, |member| member.transform);
         let share = self.share_label(pool, view.mode);
-        let title = format!(
-            "Pool {} · {} tiles · {share}",
-            transform_name(transform),
-            pool.members.len()
-        );
-        let title = match share == view.as_drawn_share {
+        let title = format!("{}: {share}", transform_name(transform));
+        let title = match share == view.primary_share {
             true => egui::RichText::new(title),
             false => egui::RichText::new(title).color(ui.visuals().warn_fg_color),
         };
@@ -224,6 +232,7 @@ impl TilePanel {
                 Some(TileEdit::Apply(TileRule {
                     neighborhood: self.neighborhood,
                     mods: self.mods,
+                    custom: self.custom,
                     chance,
                 }))
             }
@@ -298,15 +307,125 @@ impl TilePanel {
         true
     }
 
-    fn show_options(&mut self, ui: &mut Ui, neighborhood_changed: bool) -> Option<TileEdit> {
+    fn orientations(&self) -> Orientations {
+        Orientations::resolved(self.custom, self.mods)
+    }
+
+    fn show_transform_flags(&mut self, ui: &mut Ui) -> bool {
+        let mut changed = false;
+
+        ui.add_enabled_ui(self.custom.is_none(), |ui| {
+            ui.horizontal(|ui| {
+                changed |= show_preset_flags(ui, &mut self.mods);
+            });
+        });
+        changed |= self.show_custom_toggle(ui);
+
+        changed
+    }
+
+    fn show_custom_toggle(&mut self, ui: &mut Ui) -> bool {
+        let mut custom = self.custom.is_some();
+        if !ui.checkbox(&mut custom, "Custom").changed() {
+            return false;
+        }
+
+        self.custom = custom.then(|| Orientations::generated(self.mods));
+        true
+    }
+
+    fn show_orientations(
+        &mut self,
+        ui: &mut Ui,
+        tileset: &Tileset,
+        texture: &TextureHandle,
+    ) -> bool {
+        let mut changed = false;
+
+        let frame = orientation_frame(ui, self.custom.is_some());
+        egui::CollapsingHeader::new("Orientations")
+            .default_open(false)
+            .show(ui, |ui| {
+                frame.show(ui, |ui| {
+                    egui::Grid::new("orientations").show(ui, |ui| {
+                        for row in Transform::ALL.chunks(ORIENTATION_COLUMNS) {
+                            for &transform in row {
+                                changed |= self.show_orientation(ui, tileset, texture, transform);
+                            }
+                            ui.end_row();
+                        }
+                    });
+                });
+            });
+
+        changed
+    }
+
+    fn show_orientation(
+        &mut self,
+        ui: &mut Ui,
+        tileset: &Tileset,
+        texture: &TextureHandle,
+        transform: Transform,
+    ) -> bool {
+        let orientations = self.orientations();
+        let enabled = orientations.contains(transform);
+        let locked = self.custom.is_some() && enabled && orientations.len() == 1;
+
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::splat(ORIENTATION_SIZE), Sense::click());
+        paint_checker(ui.painter(), rect, PREVIEW_LIGHT, PREVIEW_DARK);
+        preview::paint_turned(
+            ui.painter(),
+            rect,
+            texture,
+            &tileset.tiles[self.tile],
+            transform,
+        );
+        if !enabled {
+            ui.painter().rect_filled(rect, 0.0, DISABLED_DARKEN);
+            paint_cross(ui.painter(), rect);
+        }
+        if self.custom.is_some() && response.hovered() {
+            paint_hover_outline(ui, rect);
+        }
+
+        let enable = response.clicked_by(PointerButton::Primary);
+        let disable = response.clicked_by(PointerButton::Secondary) && !locked;
+        let response = match self.custom {
+            Some(_) => response.on_hover_cursor(egui::CursorIcon::PointingHand),
+            None => response,
+        };
+        response.on_hover_text(match locked {
+            true => LAST_ORIENTATION,
+            false => transform_name(transform),
+        });
+
+        let Some(custom) = self.custom else {
+            return false;
+        };
+        let updated = match (enable, disable) {
+            (true, _) => custom.with(transform),
+            (_, true) => custom.without(transform),
+            _ => return false,
+        };
+        self.custom = Some(updated);
+
+        updated != custom
+    }
+
+    fn show_options(
+        &mut self,
+        ui: &mut Ui,
+        tileset: &Tileset,
+        texture: &TextureHandle,
+        neighborhood_changed: bool,
+    ) -> Option<TileEdit> {
         let mut changed = neighborhood_changed;
 
-        ui.label("Also place these transforms:");
-        ui.horizontal_wrapped(|ui| {
-            changed |= ui.checkbox(&mut self.mods.can_x_flip, "X-Flip").changed();
-            changed |= ui.checkbox(&mut self.mods.can_y_flip, "Y-Flip").changed();
-            changed |= ui.checkbox(&mut self.mods.can_rotate, "Rotate").changed();
-        });
+        ui.label("Place these transforms:");
+        changed |= self.show_transform_flags(ui);
+        changed |= self.show_orientations(ui, tileset, texture);
 
         ui.add_space(HEADING_SPACING);
 
@@ -326,6 +445,45 @@ impl TilePanel {
     }
 }
 
+fn show_preset_flags(ui: &mut Ui, mods: &mut TileMods) -> bool {
+    let mut changed = ui.checkbox(&mut mods.can_rotate, "Rotate").changed();
+
+    if mods.can_rotate {
+        let mut flip = mods.can_x_flip || mods.can_y_flip;
+        if ui.checkbox(&mut flip, "Flip").changed() {
+            mods.can_x_flip = flip;
+            mods.can_y_flip = false;
+            changed = true;
+        }
+    } else {
+        changed |= ui.checkbox(&mut mods.can_x_flip, "X-Flip").changed();
+        changed |= ui.checkbox(&mut mods.can_y_flip, "Y-Flip").changed();
+    }
+
+    changed
+}
+
+fn orientation_frame(ui: &Ui, editable: bool) -> egui::Frame {
+    let frame = egui::Frame::group(ui.style());
+    match editable {
+        true => frame.fill(ui.visuals().extreme_bg_color),
+        false => frame.stroke(Stroke::new(frame.stroke.width, Color32::TRANSPARENT)),
+    }
+}
+
+fn paint_hover_outline(ui: &Ui, rect: Rect) {
+    let stroke = ui.visuals().widgets.hovered.bg_stroke;
+    ui.painter()
+        .rect_stroke(rect, 0.0, stroke, StrokeKind::Inside);
+}
+
+fn paint_cross(painter: &egui::Painter, rect: Rect) {
+    let rect = rect.shrink(rect.width() * CROSS_INSET_FRACTION);
+    let stroke = Stroke::new(CROSS_WIDTH, CROSS_COLOR);
+    painter.line_segment([rect.left_top(), rect.right_bottom()], stroke);
+    painter.line_segment([rect.right_top(), rect.left_bottom()], stroke);
+}
+
 fn transform_name(transform: Transform) -> &'static str {
     match (transform.x_flip, transform.y_flip, transform.rot) {
         (false, false, false) => "as drawn",
@@ -334,7 +492,8 @@ fn transform_name(transform: Transform) -> &'static str {
         (true, true, true) => "rotated 270°",
         (true, false, false) => "mirrored left-right",
         (false, true, false) => "mirrored top-bottom",
-        (true, false, true) | (false, true, true) => "mirrored diagonally",
+        (true, false, true) => "mirrored along the anti diagonal",
+        (false, true, true) => "mirrored along the main diagonal",
     }
 }
 

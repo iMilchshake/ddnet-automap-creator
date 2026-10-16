@@ -7,9 +7,9 @@ use crate::tests::support::{index_of, mods, outer_corner};
 
 fn rule(neighborhood: Neighborhood, percent: f32, can_rotate: bool) -> TileRule {
     TileRule {
-        neighborhood,
         mods: mods(false, false, can_rotate),
         chance: Chance::new(percent).unwrap(),
+        ..TileRule::new(neighborhood)
     }
 }
 

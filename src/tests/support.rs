@@ -1,5 +1,6 @@
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
 use crate::model::tile::TileMods;
+use crate::model::transform::{Orientations, Transform};
 
 pub fn index_of(rpp_name: &str) -> usize {
     NEIGHBORS
@@ -18,11 +19,17 @@ pub fn named(neighborhood: &Neighborhood, state: NeighborState) -> Vec<&'static 
 }
 
 pub fn mods(can_x_flip: bool, can_y_flip: bool, can_rotate: bool) -> TileMods {
-    TileMods {
-        can_x_flip,
-        can_y_flip,
-        can_rotate,
-    }
+    TileMods::new(can_x_flip, can_y_flip, can_rotate)
+}
+
+pub fn half_turn() -> Orientations {
+    [Transform {
+        x_flip: true,
+        y_flip: true,
+        rot: false,
+    }]
+    .into_iter()
+    .collect()
 }
 
 /// Solid to the right and below, open above and to the left.
