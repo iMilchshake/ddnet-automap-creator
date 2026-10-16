@@ -26,8 +26,7 @@ const DEACTIVATED_OUTLINE: Color32 = Color32::from_gray(100);
 const SELECTED_OUTLINE: Color32 = Color32::from_rgb(255, 214, 102);
 const POOL_MATE_OUTLINE: Color32 = Color32::from_rgb(102, 204, 255);
 
-const UNUSED_SCRIM: u8 = 150;
-const DEACTIVATED_SCRIM: u8 = 215;
+const DEACTIVATED_DARKEN_ALPHA: u8 = 50;
 
 const OUTLINE_WIDTH: f32 = 2.0;
 const SELECTED_OUTLINE_WIDTH: f32 = 3.0;
@@ -108,8 +107,8 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
             paint_tile(&painter, cell, view.texture, tile);
         }
 
-        if let Some(scrim) = tile_scrim(state) {
-            painter.rect_filled(cell, 0.0, scrim);
+        if let Some(darkening) = tile_darkening(state) {
+            painter.rect_filled(cell, 0.0, darkening);
         }
 
         if let Some(color) = outline_color(state) {
@@ -399,13 +398,13 @@ fn paint_checkerboard(painter: &egui::Painter, cell: Rect, index: usize) {
     painter.rect_filled(cell, 0.0, color);
 }
 
-fn tile_scrim(state: TileState) -> Option<Color32> {
+fn tile_darkening(state: TileState) -> Option<Color32> {
     match state {
-        TileState::Configured(_) | TileState::Grouped => None,
-        TileState::Locked | TileState::Unconfigured => {
-            Some(Color32::from_black_alpha(UNUSED_SCRIM))
-        }
-        TileState::Deactivated(_) => Some(Color32::from_black_alpha(DEACTIVATED_SCRIM)),
+        TileState::Deactivated(_) => Some(Color32::from_black_alpha(DEACTIVATED_DARKEN_ALPHA)),
+        TileState::Configured(_)
+        | TileState::Grouped
+        | TileState::Locked
+        | TileState::Unconfigured => None,
     }
 }
 
