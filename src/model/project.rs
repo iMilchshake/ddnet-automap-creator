@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::group::TileGroup;
 use crate::model::pool::ChanceMode;
-use crate::model::tile::{AIR_TILE, MASK_TILE, TileRule};
+use crate::model::tile::{AIR_TILE, TileRule, highest_free_tile};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Project {
@@ -116,10 +116,11 @@ impl Project {
     }
 
     pub fn is_free(&self, tile: usize) -> bool {
-        tile != MASK_TILE
-            && tile != AIR_TILE
-            && self.rule(tile).is_none()
-            && self.group_at(tile).is_none()
+        is_free_tile(tile, self.rule(tile).is_some(), &self.groups)
+    }
+
+    pub fn mask_tile(&self) -> Option<usize> {
+        highest_free_tile(|tile| self.is_free(tile))
     }
 
     pub fn group_at(&self, tile: usize) -> Option<usize> {
@@ -132,4 +133,8 @@ impl Project {
             .find(|name| self.groups.iter().all(|group| group.name != *name))
             .expect("the candidate names never run out")
     }
+}
+
+pub fn is_free_tile(tile: usize, has_rule: bool, groups: &[TileGroup]) -> bool {
+    tile != AIR_TILE && !has_rule && groups.iter().all(|group| !group.covers(tile))
 }

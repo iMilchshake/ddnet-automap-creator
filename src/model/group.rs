@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::model::tile::{AIR_TILE, Chance, MASK_TILE, TILESET_SIDE};
+use crate::model::tile::{AIR_TILE, Chance, TILESET_SIDE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupMode {
@@ -28,9 +28,6 @@ pub enum GroupError {
 
     #[error("a group cannot cover tile {AIR_TILE}, which is reserved for air")]
     CoversAirTile,
-
-    #[error("a group cannot cover tile {MASK_TILE}, which rpp reserves as its mask")]
-    CoversMask,
 
     #[error("a {width}×{height} group at tile {top_left} runs off the tileset")]
     OutOfBounds {
@@ -96,9 +93,6 @@ impl TileGroup {
         }
         if self.covers(AIR_TILE) {
             return Err(GroupError::CoversAirTile);
-        }
-        if self.covers(MASK_TILE) {
-            return Err(GroupError::CoversMask);
         }
         if self.column() + self.width > TILESET_SIDE || self.row() + self.height > TILESET_SIDE {
             return Err(GroupError::OutOfBounds {

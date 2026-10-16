@@ -1,5 +1,5 @@
 use crate::model::group::{GroupError, GroupMode, TileGroup, validate_all};
-use crate::model::tile::{Chance, MASK_TILE};
+use crate::model::tile::{Chance, TILE_COUNT};
 
 fn group(name: &str, top_left: usize, width: usize, height: usize) -> TileGroup {
     TileGroup {
@@ -13,11 +13,11 @@ fn group(name: &str, top_left: usize, width: usize, height: usize) -> TileGroup 
 }
 
 #[test]
-fn a_group_over_the_mask_tile_is_refused() {
-    let corner = group("a", MASK_TILE - 17, 2, 2);
+fn a_group_may_cover_the_last_tile() {
+    let corner = group("a", TILE_COUNT - 18, 2, 2);
 
-    assert!(corner.covers(MASK_TILE));
-    assert!(matches!(corner.validate(), Err(GroupError::CoversMask)));
+    assert!(corner.covers(TILE_COUNT - 1));
+    assert_eq!(corner.validate(), Ok(()));
 }
 
 #[test]

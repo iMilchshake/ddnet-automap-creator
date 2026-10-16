@@ -3,7 +3,8 @@ use thiserror::Error;
 use crate::model::group::{self, GroupError, GroupMode, TileGroup};
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode, Pool};
-use crate::model::tile::{AIR_TILE, Chance, MASK_TILE, TileRule};
+use crate::model::project::is_free_tile;
+use crate::model::tile::{AIR_TILE, Chance, TileRule, highest_free_tile};
 use crate::model::transform::Transform;
 
 /// Group names live under a prefix of our own. rpp keywords and base.r globals
@@ -28,8 +29,8 @@ pub enum ExportError {
     #[error("group `{group}` covers tile {tile}, which is also configured on its own")]
     TileIsConfigured { group: String, tile: usize },
 
-    #[error("tile {MASK_TILE} is reserved as rpp's mask and cannot hold a rule")]
-    MaskTile,
+    #[error("no free tile left for rpp's mask in rule set `{0}`, unconfigure one")]
+    NoMaskTile(String),
 
     #[error("tile {AIR_TILE} is reserved for air and cannot hold a rule")]
     AirTile,
@@ -55,6 +56,30 @@ impl RuleSet<'_> {
             .copied()
             .collect()
     }
+
+    fn mask_tile(&self) -> Option<usize> {
+        highest_free_tile(|tile| {
+            let has_rule = self.tiles.iter().any(|(used, _)| *used == tile);
+            is_free_tile(tile, has_rule, self.groups)
+        })
+    }
+
+    fn needs_mask(&self) -> bool {
+        pool::pools(&self.active_tiles())
+            .iter()
+            .any(|pool| pool.members.len() > 1)
+    }
+
+    fn mask_line(&self) -> Result<Option<String>, ExportError> {
+        if !self.needs_mask() {
+            return Ok(None);
+        }
+
+        match self.mask_tile() {
+            Some(tile) => Ok(Some(format!("{MASK} = {tile};"))),
+            None => Err(ExportError::NoMaskTile(self.name.to_owned())),
+        }
+    }
 }
 
 pub fn output_file(image_stem: &str) -> String {
@@ -68,9 +93,6 @@ pub fn render(rule_sets: &[RuleSet]) -> Result<String, ExportError> {
         }
         if !is_valid_name(rule_set.name) {
             return Err(ExportError::Name(rule_set.name.to_owned()));
-        }
-        if rule_set.tiles.iter().any(|(tile, _)| *tile == MASK_TILE) {
-            return Err(ExportError::MaskTile);
         }
         if rule_set.tiles.iter().any(|(tile, _)| *tile == AIR_TILE) {
             return Err(ExportError::AirTile);
@@ -99,13 +121,20 @@ pub fn render(rule_sets: &[RuleSet]) -> Result<String, ExportError> {
     ];
 
     for (index, rule_set) in rule_sets.iter().enumerate() {
-        render_rule_set(&mut lines, index, namespaced, rule_set);
+        render_rule_set(&mut lines, index, namespaced, rule_set)?;
     }
 
     Ok(lines.join("\n"))
 }
 
-fn render_rule_set(lines: &mut Vec<String>, index: usize, namespaced: bool, rule_set: &RuleSet) {
+fn render_rule_set(
+    lines: &mut Vec<String>,
+    index: usize,
+    namespaced: bool,
+    rule_set: &RuleSet,
+) -> Result<(), ExportError> {
+    let mask_line = rule_set.mask_line()?;
+
     if !rule_set.groups.is_empty() {
         lines.extend(
             rule_set
@@ -117,6 +146,7 @@ fn render_rule_set(lines: &mut Vec<String>, index: usize, namespaced: bool, rule
     }
 
     lines.push(format!("AutoMapper(\"{}\");", rule_set.name));
+    lines.extend(mask_line);
     lines.push("NewRun();".to_owned());
     lines.push(String::new());
 
@@ -144,6 +174,8 @@ fn render_rule_set(lines: &mut Vec<String>, index: usize, namespaced: bool, rule
     }
 
     lines.push(String::new());
+
+    Ok(())
 }
 
 // Checks whether rules with colliding names exist.

@@ -4,7 +4,7 @@ use twmap::ndarray::Array2;
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::project::Project;
-use crate::model::tile::{Chance, MASK_TILE, TileRule};
+use crate::model::tile::{Chance, TILE_COUNT, TileRule};
 use crate::model::transform::Transform;
 use crate::preview::{
     Automapped, FALLBACK_UNMATCHED_MARKER, PlacedTile, PreviewCell, PreviewError, Sample, automap,
@@ -219,11 +219,14 @@ fn the_unmatched_marker_ignores_deactivated_rules() {
 }
 
 #[test]
-fn the_unmatched_marker_falls_back_when_every_tile_is_used() {
+fn the_unmatched_marker_falls_back_when_only_the_mask_is_free() {
     let mut project = Project::default();
-    for tile in 1..MASK_TILE {
+    for tile in 1..TILE_COUNT - 1 {
         project.set_rule(tile, some_rule());
     }
 
-    assert_eq!(unmatched_marker(&project), FALLBACK_UNMATCHED_MARKER);
+    let marker = unmatched_marker(&project);
+
+    assert_eq!(marker, FALLBACK_UNMATCHED_MARKER);
+    assert_ne!(Some(usize::from(marker)), project.mask_tile());
 }

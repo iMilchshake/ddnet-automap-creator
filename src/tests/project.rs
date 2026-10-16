@@ -3,15 +3,55 @@ use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode};
 use crate::model::project::Project;
-use crate::model::tile::{AIR_TILE, Chance, MASK_TILE, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileRule};
 
 fn some_rule() -> TileRule {
     TileRule::new(Neighborhood::uniform(NeighborState::Full))
 }
 
 #[test]
-fn the_mask_tile_is_never_free() {
-    assert!(!Project::default().is_free(MASK_TILE));
+fn the_last_tile_is_free_like_any_other() {
+    assert!(Project::default().is_free(TILE_COUNT - 1));
+}
+
+#[test]
+fn the_mask_is_the_highest_free_tile() {
+    assert_eq!(Project::default().mask_tile(), Some(TILE_COUNT - 1));
+}
+
+#[test]
+fn the_mask_skips_tiles_with_a_rule_even_when_deactivated() {
+    let mut project = Project::default();
+    project.set_rule(TILE_COUNT - 1, some_rule());
+    project.set_rule(TILE_COUNT - 2, some_rule());
+    project.deactivate(TILE_COUNT - 2);
+
+    assert_eq!(project.mask_tile(), Some(TILE_COUNT - 3));
+}
+
+#[test]
+fn the_mask_skips_tiles_inside_a_group() {
+    let mut project = Project::default();
+    project.add_group(TileGroup {
+        name: "bones".to_owned(),
+        top_left: TILE_COUNT - 18,
+        width: 2,
+        height: 2,
+        mode: GroupMode::Fill,
+        chance: Chance::FULL,
+    });
+
+    assert_eq!(project.mask_tile(), Some(TILE_COUNT - 3));
+}
+
+#[test]
+fn there_is_no_mask_when_every_tile_is_used() {
+    let mut project = Project::default();
+    for tile in 1..TILE_COUNT {
+        project.set_rule(tile, some_rule());
+    }
+
+    assert_eq!(project.mask_tile(), None);
 }
 
 #[test]

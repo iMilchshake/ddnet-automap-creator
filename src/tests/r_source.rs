@@ -2,7 +2,7 @@ use crate::export::r_source::{ExportError, RuleSet, render};
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
-use crate::model::tile::{AIR_TILE, Chance, MASK_TILE, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileRule};
 use crate::tests::support::{index_of, mods, outer_corner};
 
 fn rule(neighborhood: Neighborhood, percent: f32, can_rotate: bool) -> TileRule {
@@ -68,6 +68,7 @@ fn a_rotated_corner_and_a_weighted_pool_match_the_reference_output() {
 
     let source = emit(&tiles);
 
+    assert!(source.contains("AutoMapper(\"Grass_Main\");\ng:mask = 255;\nNewRun();"));
     assert_eq!(
         body(&source),
         [
@@ -232,10 +233,59 @@ fn pool_chances_below_100_are_scaled_so_every_mask_is_replaced() {
 }
 
 #[test]
-fn a_rule_on_the_mask_tile_is_refused() {
-    let error = emit_with_groups(&[(MASK_TILE, anywhere(100.0))], &[]).unwrap_err();
+fn a_pool_declares_the_highest_free_tile_as_mask() {
+    let tiles = [(5, anywhere(30.0)), (6, anywhere(30.0))];
 
-    assert!(matches!(error, ExportError::MaskTile));
+    assert!(emit(&tiles).contains("AutoMapper(\"Grass_Main\");\ng:mask = 255;\nNewRun();"));
+}
+
+#[test]
+fn the_mask_moves_below_a_rule_on_tile_255() {
+    let tiles = [
+        (5, anywhere(30.0)),
+        (6, anywhere(30.0)),
+        (255, rule(outer_corner(), 100.0, false)),
+    ];
+
+    assert!(emit(&tiles).contains("g:mask = 254;"));
+}
+
+#[test]
+fn the_mask_moves_below_a_group_on_tile_255() {
+    let tiles = [(5, anywhere(30.0)), (6, anywhere(30.0))];
+    let groups = [tile_group("bones", 238, GroupMode::Fill, 100.0)];
+
+    let source = emit_with_groups(&tiles, &groups).unwrap();
+
+    assert!(source.contains("g:mask = 253;"));
+}
+
+#[test]
+fn a_pool_without_any_free_tile_is_refused() {
+    let tiles: Vec<(usize, TileRule)> = (1..TILE_COUNT)
+        .map(|tile| (tile, anywhere(100.0)))
+        .collect();
+
+    let error = emit_with_groups(&tiles, &[]).unwrap_err();
+
+    assert!(matches!(error, ExportError::NoMaskTile(name) if name == "Grass_Main"));
+}
+
+#[test]
+fn no_free_tile_is_fine_while_no_pool_needs_a_mask() {
+    let tiles: Vec<(usize, TileRule)> = (1..TILE_COUNT)
+        .map(|tile| (tile, anywhere(100.0)))
+        .collect();
+    let deactivated: Vec<usize> = (2..TILE_COUNT).collect();
+
+    let source = emit_deactivated(&tiles, &deactivated, &[]).unwrap();
+
+    assert!(!source.contains("g:mask"));
+}
+
+#[test]
+fn single_tile_pools_declare_no_mask() {
+    assert!(!emit(&[(5, anywhere(100.0))]).contains("g:mask"));
 }
 
 #[test]

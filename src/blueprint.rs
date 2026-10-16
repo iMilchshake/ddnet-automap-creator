@@ -7,9 +7,7 @@ use crate::model::neighbor::{NEIGHBOR_COUNT, NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{
-    AIR_TILE, Chance, InvalidChance, MASK_TILE, TILE_COUNT, TileMods, TileRule,
-};
+use crate::model::tile::{AIR_TILE, Chance, InvalidChance, TILE_COUNT, TileMods, TileRule};
 
 const VERSION: u32 = 1;
 
@@ -29,9 +27,6 @@ pub enum BlueprintError {
 
     #[error("tile {0} appears more than once")]
     DuplicateTile(usize),
-
-    #[error("tile {MASK_TILE} is reserved as rpp's mask and cannot hold a rule")]
-    MaskTile,
 
     #[error("tile {AIR_TILE} is reserved for air and cannot hold a rule")]
     AirTile,
@@ -188,9 +183,6 @@ fn load_project(
         if tile.id >= TILE_COUNT {
             return Err(BlueprintError::TileId(tile.id));
         }
-        if tile.id == MASK_TILE {
-            return Err(BlueprintError::MaskTile);
-        }
         if tile.id == AIR_TILE {
             return Err(BlueprintError::AirTile);
         }
@@ -203,9 +195,6 @@ fn load_project(
     for &tile in deactivated {
         if tile >= TILE_COUNT {
             return Err(BlueprintError::TileId(tile));
-        }
-        if tile == MASK_TILE {
-            return Err(BlueprintError::MaskTile);
         }
         if tile == AIR_TILE {
             return Err(BlueprintError::AirTile);

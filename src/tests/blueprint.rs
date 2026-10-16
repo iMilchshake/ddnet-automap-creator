@@ -4,7 +4,7 @@ use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{AIR_TILE, Chance, MASK_TILE, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileRule};
 use crate::tests::support::{mods, outer_corner};
 
 const IMAGE: &str = "grass_main";
@@ -163,12 +163,13 @@ fn a_tile_outside_the_tileset_is_refused() {
 }
 
 #[test]
-fn a_rule_on_the_mask_tile_is_refused() {
+fn a_rule_on_the_last_tile_is_accepted() {
     let json = one_tile(&format!(
-        r#"{{"id": {MASK_TILE}, "con": [0,0,0,0,0,0,0,0], "chance": 100.0,
-            "mods": {{"x_flip": false, "y_flip": false, "rot": false}}}}"#
+        r#"{{"id": {}, "con": [0,0,0,0,0,0,0,0], "chance": 100.0,
+            "mods": {{"x_flip": false, "y_flip": false, "rot": false}}}}"#,
+        TILE_COUNT - 1
     ));
-    assert!(matches!(load(&json).unwrap_err(), BlueprintError::MaskTile));
+    assert!(load(&json).unwrap().rule(TILE_COUNT - 1).is_some());
 }
 
 #[test]
@@ -185,14 +186,6 @@ fn deactivating(tile: usize) -> String {
         r#"{{"version": 1, "image": "grass_main",
             "rule_sets": [{{"name": "Grass Main", "tiles": [], "deactivated": [{tile}]}}]}}"#
     )
-}
-
-#[test]
-fn deactivating_the_mask_tile_is_refused() {
-    assert!(matches!(
-        load(&deactivating(MASK_TILE)).unwrap_err(),
-        BlueprintError::MaskTile
-    ));
 }
 
 #[test]
