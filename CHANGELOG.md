@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-16
+
 ### Added
 
 - Custom orientation picker: serves both as a visualization and custom selection for tile for all possible orientations combining flips and rotations. Updated blueprint format accordingly.
