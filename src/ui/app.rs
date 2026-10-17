@@ -62,6 +62,14 @@ const PREVIEW_TOOLTIP: &str = "Tileset edits the rules, Preview shows them appli
 const NORMALIZE_TOOLTIP: &str = "ON: chances are re-normalized to always add up to 100%\n\
                                  OFF: allows tiles to remain unchanged if summed chance is below \
                                  100%";
+const ZOOM_TOOLTIP: &str = "Shortcuts: Ctrl + and Ctrl - to zoom, Ctrl 0 to reset.";
+const PERCENT: f32 = 100.0;
+const KEYBINDS: [(&str, &str); 4] = [
+    ("Ctrl O", "Open image"),
+    ("1 / 2 / 3", "Set hovered neighbor to Empty / Full / Any"),
+    ("Ctrl + / Ctrl -", "Zoom"),
+    ("Ctrl 0", "Reset zoom"),
+];
 const AIR_WARNING: &str = "is reserved for air: DDNet treats it as empty.";
 const GENERATE_TOOLTIP: &str = "Roll the chances again with the next seed.";
 const PREVIEW_WAITING: &str = "Compiling the rules for the preview…";
@@ -669,7 +677,11 @@ impl AutomapperApp {
                     self.export_open = true;
                 }
 
-                ui.menu_button("Options", |ui| self.show_options(ui));
+                let options_config = egui::containers::menu::MenuConfig::new()
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+                egui::containers::menu::MenuButton::new("Options")
+                    .config(options_config)
+                    .ui(ui, |ui| self.show_options(ui));
 
                 if ui.button("Help").clicked() {
                     self.help_open = true;
@@ -718,6 +730,10 @@ impl AutomapperApp {
                     true => ChanceMode::Normalize,
                     false => ChanceMode::Exact,
                 });
+        }
+
+        if ui.ctx().options(|options| options.zoom_with_keyboard) {
+            show_zoom(ui);
         }
     }
 
@@ -1305,6 +1321,9 @@ impl AutomapperApp {
             ui.colored_label(ui.visuals().warn_fg_color, "TODO: <add tutorial here>");
 
             ui.add_space(8.0);
+            show_keybinds(ui);
+
+            ui.add_space(8.0);
             show_acknowledgements(ui);
 
             ui.separator();
@@ -1319,6 +1338,35 @@ impl AutomapperApp {
     }
 }
 
+fn show_zoom(ui: &mut Ui) {
+    let ctx = ui.ctx().clone();
+
+    egui::containers::Sides::new().show(
+        ui,
+        |ui| {
+            ui.label("Zoom").on_hover_text(ZOOM_TOOLTIP);
+        },
+        |ui| {
+            if zoom_button(ui, "+") {
+                egui::gui_zoom::zoom_in(&ctx);
+            }
+            ui.label(format!("{:.0}%", ctx.zoom_factor() * PERCENT))
+                .on_hover_text(ZOOM_TOOLTIP);
+            if zoom_button(ui, "-") {
+                egui::gui_zoom::zoom_out(&ctx);
+            }
+        },
+    );
+}
+
+fn zoom_button(ui: &mut Ui, text: &str) -> bool {
+    let button = egui::Button::new(text)
+        .frame(true)
+        .frame_when_inactive(true);
+
+    ui.add(button).on_hover_text(ZOOM_TOOLTIP).clicked()
+}
+
 fn blueprint_text<'a>(
     workspace: &'a Workspace,
     picked: &'a PickedFile,
@@ -1330,6 +1378,17 @@ fn blueprint_text<'a>(
     std::str::from_utf8(&picked.bytes)
         .map(|text| (text, loaded.tileset.stem.as_str()))
         .map_err(|_| format!("{} is not text", picked.name))
+}
+
+fn show_keybinds(ui: &mut Ui) {
+    ui.strong("Keybinds");
+    egui::Grid::new("keybinds").show(ui, |ui| {
+        for (keys, action) in KEYBINDS {
+            ui.label(keys);
+            ui.label(action);
+            ui.end_row();
+        }
+    });
 }
 
 fn show_acknowledgements(ui: &mut Ui) {

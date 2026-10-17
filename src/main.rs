@@ -76,7 +76,11 @@ fn main() {
             .start(
                 canvas,
                 eframe::WebOptions::default(),
-                Box::new(|cc| Ok(Box::new(ui::AutomapperApp::new(&cc.egui_ctx, None, None)))),
+                Box::new(|cc| {
+                    cc.egui_ctx
+                        .options_mut(|options| options.zoom_with_keyboard = false); // zoom is already handled by web, so we disable native zoom
+                    Ok(Box::new(ui::AutomapperApp::new(&cc.egui_ctx, None, None)))
+                }),
             )
             .await
             .expect("failed to start eframe");
