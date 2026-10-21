@@ -1180,6 +1180,7 @@ impl AutomapperApp {
             return;
         };
 
+        let mut clicked = None;
         match &self.preview {
             PreviewResult::Waiting => {
                 ui.horizontal(|ui| {
@@ -1195,9 +1196,13 @@ impl AutomapperApp {
             }
             PreviewResult::Ready { automapped, .. } => {
                 ui.vertical_centered(|ui| {
-                    preview_view::show(ui, &loaded.tileset, &loaded.texture, automapped);
+                    clicked = preview_view::show(ui, &loaded.tileset, &loaded.texture, automapped);
                 });
             }
+        }
+
+        if let Some(tile) = clicked {
+            self.select_rule_of(tile);
         }
     }
 
@@ -1233,9 +1238,9 @@ impl AutomapperApp {
     fn handle_grid(&mut self, ctx: &Context, response: GridResponse) {
         self.hovered_tile = response.hovered;
 
-        let Workspace::Ready(loaded) = &self.workspace else {
+        if !matches!(self.workspace, Workspace::Ready(_)) {
             return;
-        };
+        }
 
         if self.define_groups {
             self.handle_group_grid(ctx, response);
@@ -1247,16 +1252,39 @@ impl AutomapperApp {
                 .warning(ctx, format!("Tile {AIR_TILE} {AIR_WARNING}"));
         }
 
-        if let Some(tile) = response.clicked
-            && tile_state(&loaded.tileset, self.rule_sets.active(), tile).is_editable()
-        {
-            let rule = seed_rule(&loaded.tileset, self.rule_sets.active(), tile);
-            let has_rule = self.rule_sets.active().rule(tile).is_some();
-            self.inspector = Inspector::Tile(TilePanel::new(tile, rule, has_rule));
+        if let Some(tile) = response.clicked {
+            self.select_tile(tile);
         }
 
         if let Some(tile) = response.secondary_clicked {
             self.toggle_deactivated(ctx, tile);
+        }
+    }
+
+    fn select_tile(&mut self, tile: usize) {
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
+        };
+        if !tile_state(&loaded.tileset, self.rule_sets.active(), tile).is_editable() {
+            return;
+        }
+
+        let rule = seed_rule(&loaded.tileset, self.rule_sets.active(), tile);
+        let has_rule = self.rule_sets.active().rule(tile).is_some();
+        self.inspector = Inspector::Tile(TilePanel::new(tile, rule, has_rule));
+    }
+
+    fn select_rule_of(&mut self, tile: usize) {
+        self.drag_anchor = None;
+        match self.rule_sets.active().group_at(tile) {
+            Some(index) => {
+                self.define_groups = true;
+                self.select_group(index);
+            }
+            None => {
+                self.define_groups = false;
+                self.select_tile(tile);
+            }
         }
     }
 

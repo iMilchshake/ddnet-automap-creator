@@ -1,7 +1,8 @@
 use egui::emath::GuiRounding as _;
 use egui::epaint::Vertex;
 use egui::{
-    Align2, Color32, FontId, Mesh, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, Vec2, pos2,
+    Align2, Color32, CursorIcon, FontId, Mesh, PointerButton, Pos2, Rect, Sense, Stroke,
+    StrokeKind, TextureHandle, Vec2, pos2,
 };
 
 use crate::model::transform::Transform;
@@ -12,6 +13,7 @@ const MIN_CELL_SIZE: f32 = 4.0;
 const BACKGROUND: Color32 = Color32::from_gray(40);
 const UNMATCHED_COLOR: Color32 = Color32::RED;
 const UNMATCHED_STROKE_WIDTH: f32 = 1.0;
+const HOVER_STROKE_WIDTH: f32 = 2.0;
 const UNMATCHED_MARK: &str = "?";
 const UNMATCHED_MARK_SCALE: f32 = 0.7;
 const MIN_MARK_CELL_SIZE: f32 = 10.0;
@@ -21,7 +23,7 @@ pub fn show(
     tileset: &Tileset,
     texture: &TextureHandle,
     automapped: &Automapped,
-) {
+) -> Option<usize> {
     let pixels_per_point = ui.ctx().pixels_per_point();
     let cell_size = whole_pixel_cell_size(ui.available_size(), automapped, pixels_per_point);
     let size = Vec2::new(
@@ -29,7 +31,7 @@ pub fn show(
         cell_size * automapped.height as f32,
     );
 
-    let (allocated, _response) = ui.allocate_exact_size(size, Sense::hover());
+    let (allocated, response) = ui.allocate_exact_size(size, Sense::click());
     let rect = Rect::from_min_size(
         allocated.min.round_to_pixels(pixels_per_point),
         allocated.size(),
@@ -41,8 +43,7 @@ pub fn show(
     let mut unmatched = Vec::new();
     for row in 0..automapped.height {
         for column in 0..automapped.width {
-            let min = rect.min + Vec2::new(column as f32, row as f32) * cell_size;
-            let cell = Rect::from_min_size(min, Vec2::splat(cell_size));
+            let cell = cell_rect(rect, cell_size, column, row);
 
             match automapped.cell(column, row) {
                 PreviewCell::Air => {}
@@ -60,6 +61,44 @@ pub fn show(
     for cell in unmatched {
         paint_unmatched(&painter, cell);
     }
+
+    let (column, row) = response
+        .hover_pos()
+        .and_then(|pos| cell_at(pos, rect, cell_size, automapped))?;
+    let PreviewCell::Placed(placed) = automapped.cell(column, row) else {
+        return None;
+    };
+
+    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    painter.rect_stroke(
+        cell_rect(rect, cell_size, column, row),
+        0.0,
+        Stroke::new(HOVER_STROKE_WIDTH, ui.visuals().selection.stroke.color),
+        StrokeKind::Inside,
+    );
+
+    response
+        .clicked_by(PointerButton::Primary)
+        .then_some(placed.index)
+}
+
+fn cell_rect(rect: Rect, cell_size: f32, column: usize, row: usize) -> Rect {
+    let min = rect.min + Vec2::new(column as f32, row as f32) * cell_size;
+    Rect::from_min_size(min, Vec2::splat(cell_size))
+}
+
+fn cell_at(
+    pos: Pos2,
+    rect: Rect,
+    cell_size: f32,
+    automapped: &Automapped,
+) -> Option<(usize, usize)> {
+    let offset = pos - rect.min;
+    let column = (offset.x / cell_size) as usize;
+    let row = (offset.y / cell_size) as usize;
+
+    (offset.x >= 0.0 && offset.y >= 0.0 && column < automapped.width && row < automapped.height)
+        .then_some((column, row))
 }
 
 fn paint_unmatched(painter: &egui::Painter, cell: Rect) {
