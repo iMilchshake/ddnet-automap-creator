@@ -1,5 +1,7 @@
+use egui::containers::panel::PanelState;
 use egui::{
-    Align2, Color32, Context, FontId, Id, LayerId, Order, TextureHandle, TextureOptions, Ui, Vec2,
+    Align2, Color32, Context, FontId, Id, LayerId, Order, Rect, TextureHandle, TextureOptions, Ui,
+    Vec2,
 };
 
 use crate::blueprint;
@@ -27,6 +29,9 @@ use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 const SIDE_PANEL_WIDTH: f32 = 260.0;
 const MIN_SIDE_PANEL_WIDTH: f32 = 220.0;
 const MAX_SIDE_PANEL_WIDTH: f32 = 520.0;
+const MIN_SPLIT_PANEL_WIDTH: f32 = 200.0;
+const DEFAULT_SPLIT_RATIO: f32 = 0.5;
+const SPLIT_PANEL_ID: &str = "tileset";
 const HELP_WIDTH: f32 = 360.0;
 const MERGE_WIDTH: f32 = 360.0;
 const EXPORT_WIDTH: f32 = 320.0;
@@ -58,7 +63,7 @@ const SELECTION_TOOLTIP: &str = "What a click on the tileset acts on. With group
 const SHARED_NAME_HINT: &str = "Another rule set has this name";
 const EMPTY_INSPECTOR: &str = "Pick a tile or a group to edit it here.";
 const PREVIEW_TOOLTIP: &str = "Tileset edits the rules, Preview shows them applied to a sample \
-                               map the way DDNet's automapper would.";
+                               map the way DDNet's automapper would, Split shows both.";
 const NORMALIZE_TOOLTIP: &str = "ON: chances are re-normalized to always add up to 100%\n\
                                  OFF: allows tiles to remain unchanged if summed chance is below \
                                  100%";
@@ -128,6 +133,7 @@ impl Inspector {
 enum View {
     Tileset,
     Preview,
+    Split,
 }
 
 enum CompileTarget {
@@ -222,6 +228,7 @@ pub struct AutomapperApp {
     compile_target: Option<CompileTarget>,
     status: StatusLine,
     view: View,
+    split_ratio: f32,
     preview: PreviewResult,
     preview_source: Option<String>,
     preview_seed: u32,
@@ -247,6 +254,7 @@ impl Default for AutomapperApp {
             compile_target: None,
             status: StatusLine::default(),
             view: View::Tileset,
+            split_ratio: DEFAULT_SPLIT_RATIO,
             preview: PreviewResult::Waiting,
             preview_source: None,
             preview_seed: FIRST_PREVIEW_SEED,
@@ -286,10 +294,7 @@ impl eframe::App for AutomapperApp {
         self.show_menu_bar(ui, &ctx);
         self.show_status_bar(ui);
         self.show_side_panel(ui);
-        match self.view {
-            View::Tileset => self.show_tileset(ui, &ctx),
-            View::Preview => self.show_preview(ui),
-        }
+        self.show_view(ui, &ctx);
         self.show_export(&ctx);
         self.show_help(&ctx);
         self.show_blueprint_confirmation(&ctx);
@@ -302,6 +307,49 @@ impl eframe::App for AutomapperApp {
 }
 
 impl AutomapperApp {
+    fn show_view(&mut self, ui: &mut Ui, ctx: &Context) {
+        match self.view {
+            View::Tileset => {
+                egui::CentralPanel::default().show(ui, |ui| self.show_tileset(ui, ctx));
+            }
+            View::Preview => {
+                self.hovered_tile = None;
+                egui::CentralPanel::default().show(ui, |ui| self.show_preview(ui));
+            }
+            View::Split => {
+                self.show_tileset_panel(ui, ctx);
+                egui::CentralPanel::default().show(ui, |ui| self.show_preview(ui));
+            }
+        }
+    }
+
+    fn show_tileset_panel(&mut self, ui: &mut Ui, ctx: &Context) {
+        let available = ui.available_rect_before_wrap();
+        let panel_id = Id::new(SPLIT_PANEL_ID);
+        let wanted_width = self.split_ratio * available.width();
+        let max_width = available.width() - MIN_SPLIT_PANEL_WIDTH;
+        let state = PanelState {
+            outer_rect: Rect::from_min_size(
+                available.min,
+                Vec2::new(wanted_width, available.height()),
+            ),
+        };
+        ctx.data_mut(|data| data.insert_persisted(panel_id, state));
+
+        let panel = egui::Panel::left(panel_id)
+            .resizable(true)
+            .min_size(MIN_SPLIT_PANEL_WIDTH)
+            .max_size(max_width)
+            .show(ui, |ui| self.show_tileset(ui, ctx));
+        let width = panel.response.rect.width();
+        let clamped_by_window = (width <= MIN_SPLIT_PANEL_WIDTH
+            && wanted_width < MIN_SPLIT_PANEL_WIDTH)
+            || (width >= max_width && wanted_width > max_width);
+        if available.width() > 0.0 && !clamped_by_window {
+            self.split_ratio = width / available.width();
+        }
+    }
+
     fn receive_files(&mut self, ctx: &Context) {
         let mut dropped = ctx.input(|input| input.raw.dropped_files.clone());
         dropped.sort_by_key(|file| BLUEPRINT.matches(&file.path().to_string_lossy()));
@@ -693,6 +741,11 @@ impl AutomapperApp {
                 match self.view {
                     View::Tileset => self.show_selection_picker(ui),
                     View::Preview => self.show_preview_controls(ui),
+                    View::Split => {
+                        self.show_selection_picker(ui);
+                        ui.separator();
+                        self.show_preview_controls(ui);
+                    }
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -712,6 +765,7 @@ impl AutomapperApp {
         ui.add_enabled_ui(has_image, |ui| {
             ui.selectable_value(&mut self.view, View::Tileset, "Tileset");
             ui.selectable_value(&mut self.view, View::Preview, "Preview");
+            ui.selectable_value(&mut self.view, View::Split, "Split");
         })
         .response
         .on_hover_text(PREVIEW_TOOLTIP);
@@ -1052,37 +1106,35 @@ impl AutomapperApp {
         let shares = pool::base_shares(&pools, self.rule_sets.active().chance_mode());
         let pool_mates = self.pool_mates(&pools);
 
-        let response = egui::CentralPanel::default()
-            .show(ui, |ui| match &self.workspace {
-                Workspace::NoImage => {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(ui.available_height() * 0.4);
-                        if ui.button("Select Image").clicked() {
-                            self.picker.open(TILESET_IMAGE);
-                        }
-                    });
-                    GridResponse::default()
-                }
-                Workspace::Ready(loaded) => {
-                    ui.vertical_centered(|ui| {
-                        grid::show(
-                            ui,
-                            GridView {
-                                tileset: &loaded.tileset,
-                                project: self.rule_sets.active(),
-                                shares: &shares,
-                                texture: &loaded.texture,
-                                group_editing: self.define_groups,
-                                drag_anchor: self.drag_anchor,
-                                selected: self.inspector.tile(),
-                                pool_mates: &pool_mates,
-                            },
-                        )
-                    })
-                    .inner
-                }
-            })
-            .inner;
+        let response = match &self.workspace {
+            Workspace::NoImage => {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(ui.available_height() * 0.4);
+                    if ui.button("Select Image").clicked() {
+                        self.picker.open(TILESET_IMAGE);
+                    }
+                });
+                GridResponse::default()
+            }
+            Workspace::Ready(loaded) => {
+                ui.vertical_centered(|ui| {
+                    grid::show(
+                        ui,
+                        GridView {
+                            tileset: &loaded.tileset,
+                            project: self.rule_sets.active(),
+                            shares: &shares,
+                            texture: &loaded.texture,
+                            group_editing: self.define_groups,
+                            drag_anchor: self.drag_anchor,
+                            selected: self.inspector.tile(),
+                            pool_mates: &pool_mates,
+                        },
+                    )
+                })
+                .inner
+            }
+        };
 
         self.handle_grid(ctx, response);
     }
@@ -1122,34 +1174,31 @@ impl AutomapperApp {
     }
 
     fn show_preview(&mut self, ui: &mut Ui) {
-        self.hovered_tile = None;
         self.refresh_preview();
 
-        egui::CentralPanel::default().show(ui, |ui| {
-            let Workspace::Ready(loaded) = &self.workspace else {
-                return;
-            };
+        let Workspace::Ready(loaded) = &self.workspace else {
+            return;
+        };
 
-            match &self.preview {
-                PreviewResult::Waiting => {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.weak(PREVIEW_WAITING);
-                    });
-                }
-                PreviewResult::Failed(error) => {
-                    ui.colored_label(ui.visuals().error_fg_color, error);
-                }
-                PreviewResult::NoRules => {
-                    ui.weak(PREVIEW_NO_RULES);
-                }
-                PreviewResult::Ready { automapped, .. } => {
-                    ui.vertical_centered(|ui| {
-                        preview_view::show(ui, &loaded.tileset, &loaded.texture, automapped);
-                    });
-                }
+        match &self.preview {
+            PreviewResult::Waiting => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.weak(PREVIEW_WAITING);
+                });
             }
-        });
+            PreviewResult::Failed(error) => {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+            }
+            PreviewResult::NoRules => {
+                ui.weak(PREVIEW_NO_RULES);
+            }
+            PreviewResult::Ready { automapped, .. } => {
+                ui.vertical_centered(|ui| {
+                    preview_view::show(ui, &loaded.tileset, &loaded.texture, automapped);
+                });
+            }
+        }
     }
 
     fn refresh_preview(&mut self) {
