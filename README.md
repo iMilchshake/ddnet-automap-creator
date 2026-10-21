@@ -1,4 +1,10 @@
-# ddnet-automap-creator
+<p align="center">
+  <img src="assets/ddnet-automap-creator.ico" height="96" alt="">
+</p>
+
+<h1 align="center">ddnet-automap-creator</h1>
+
+## About
 
 Visual editor to easily create DDNet automappers. 
 The goal of this tool is to help _normal_ users (without coding skills) to create complete automappers for _most_ tilesets.

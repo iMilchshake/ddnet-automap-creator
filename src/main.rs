@@ -34,6 +34,21 @@ fn read_file(path: &str) -> Result<file_picker::PickedFile, file_picker::PickErr
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+const ICON: &[u8] = include_bytes!("../assets/ddnet-automap-creator.ico");
+
+#[cfg(not(target_arch = "wasm32"))]
+fn app_icon() -> egui::IconData {
+    let rgba = image::load_from_memory_with_format(ICON, image::ImageFormat::Ico)
+        .expect("bundled icon is a valid ico")
+        .into_rgba8();
+    egui::IconData {
+        width: rgba.width(),
+        height: rgba.height(),
+        rgba: rgba.into_raw(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     use clap::Parser as _;
 
@@ -41,7 +56,9 @@ fn main() -> eframe::Result {
     env_logger::init();
 
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 800.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1100.0, 800.0])
+            .with_icon(app_icon()),
         ..Default::default()
     };
 

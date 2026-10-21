@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- App icon for the desktop window and the web favicon.
+
 ## [0.2.0] - 2026-10-21
 
 ### Added
