@@ -2,11 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::group::TileGroup;
 use crate::model::pool::ChanceMode;
-use crate::model::tile::{AIR_TILE, TileRule, highest_free_tile};
+use crate::model::tile::{AIR_TILE, TileRule, highest_free_tile, referenced_tiles};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Project {
-    rules: BTreeMap<usize, TileRule>,
+    rules: BTreeMap<usize, Vec<TileRule>>,
     deactivated: BTreeSet<usize>,
     groups: Vec<TileGroup>,
     chance_mode: ChanceMode,
@@ -21,20 +21,51 @@ impl Project {
         self.chance_mode = mode;
     }
 
-    pub fn rule(&self, tile: usize) -> Option<&TileRule> {
-        self.rules.get(&tile)
+    pub fn rules_of(&self, tile: usize) -> &[TileRule] {
+        self.rules.get(&tile).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn has_rules(&self, tile: usize) -> bool {
+        self.rules.contains_key(&tile)
+    }
+
+    pub fn configured_tiles(&self) -> impl Iterator<Item = (usize, &[TileRule])> {
+        self.rules
+            .iter()
+            .map(|(&tile, rules)| (tile, rules.as_slice()))
     }
 
     pub fn is_deactivated(&self, tile: usize) -> bool {
         self.deactivated.contains(&tile)
     }
 
-    pub fn set_rule(&mut self, tile: usize, rule: TileRule) {
-        self.rules.insert(tile, rule);
+    pub fn add_rule(&mut self, tile: usize, rule: TileRule) -> usize {
+        let rules = self.rules.entry(tile).or_default();
+        rules.push(rule);
+
+        rules.len() - 1
     }
 
-    pub fn clear_rule(&mut self, tile: usize) {
-        self.rules.remove(&tile);
+    pub fn replace_rule(&mut self, tile: usize, index: usize, rule: TileRule) {
+        if let Some(slot) = self
+            .rules
+            .get_mut(&tile)
+            .and_then(|rules| rules.get_mut(index))
+        {
+            *slot = rule;
+        }
+    }
+
+    pub fn remove_rule(&mut self, tile: usize, index: usize) {
+        let Some(rules) = self.rules.get_mut(&tile) else {
+            return;
+        };
+        if index < rules.len() {
+            rules.remove(index);
+        }
+        if rules.is_empty() {
+            self.rules.remove(&tile);
+        }
     }
 
     pub fn deactivate(&mut self, tile: usize) {
@@ -50,14 +81,15 @@ impl Project {
     }
 
     pub fn rule_count(&self) -> usize {
-        self.rules.len()
+        self.rules.values().map(Vec::len).sum()
     }
 
     pub fn deactivated_rule_count(&self) -> usize {
         self.rules
-            .keys()
-            .filter(|tile| self.deactivated.contains(tile))
-            .count()
+            .iter()
+            .filter(|(tile, _)| self.deactivated.contains(tile))
+            .map(|(_, rules)| rules.len())
+            .sum()
     }
 
     pub fn rules(&self) -> Vec<(usize, TileRule)> {
@@ -70,7 +102,7 @@ impl Project {
     pub fn all_rules(&self) -> Vec<(usize, TileRule)> {
         self.rules
             .iter()
-            .map(|(&tile, &rule)| (tile, rule))
+            .flat_map(|(&tile, rules)| rules.iter().map(move |&rule| (tile, rule)))
             .collect()
     }
 
@@ -116,11 +148,12 @@ impl Project {
     }
 
     pub fn is_free(&self, tile: usize) -> bool {
-        is_free_tile(tile, self.rule(tile).is_some(), &self.groups)
+        is_free_tile(tile, self.has_rules(tile), &self.groups)
     }
 
     pub fn mask_tile(&self) -> Option<usize> {
-        highest_free_tile(|tile| self.is_free(tile))
+        let referenced = referenced_tiles(&self.all_rules());
+        highest_free_tile(|tile| self.is_free(tile) && !referenced.contains(&tile))
     }
 
     pub fn group_at(&self, tile: usize) -> Option<usize> {

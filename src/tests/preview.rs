@@ -196,7 +196,7 @@ fn the_unmatched_marker_is_the_first_tile_nothing_claims() {
 #[test]
 fn the_unmatched_marker_skips_active_rules_and_group_footprints() {
     let mut project = Project::default();
-    project.set_rule(1, some_rule());
+    project.add_rule(1, some_rule());
     project.add_group(TileGroup {
         name: "bones".to_owned(),
         top_left: 2,
@@ -210,9 +210,19 @@ fn the_unmatched_marker_skips_active_rules_and_group_footprints() {
 }
 
 #[test]
+fn the_unmatched_marker_skips_tiles_a_neighbor_refers_to() {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
+    neighborhood.set_state(0, NeighborState::Is(1));
+    let mut project = Project::default();
+    project.add_rule(5, TileRule::new(neighborhood));
+
+    assert_eq!(unmatched_marker(&project), 2);
+}
+
+#[test]
 fn the_unmatched_marker_ignores_deactivated_rules() {
     let mut project = Project::default();
-    project.set_rule(1, some_rule());
+    project.add_rule(1, some_rule());
     project.deactivate(1);
 
     assert_eq!(unmatched_marker(&project), 1);
@@ -222,7 +232,7 @@ fn the_unmatched_marker_ignores_deactivated_rules() {
 fn the_unmatched_marker_falls_back_when_only_the_mask_is_free() {
     let mut project = Project::default();
     for tile in 1..TILE_COUNT - 1 {
-        project.set_rule(tile, some_rule());
+        project.add_rule(tile, some_rule());
     }
 
     let marker = unmatched_marker(&project);

@@ -1,9 +1,9 @@
-use crate::export::r_source::{ExportError, RuleSet, render};
+use crate::export::r_source::{ExportError, RuleSet, last_wins_odds, render};
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileRule};
-use crate::tests::support::{index_of, mods, outer_corner};
+use crate::tests::support::{HALF_TURN, index_of, mods, outer_corner};
 
 fn rule(neighborhood: Neighborhood, percent: f32, can_rotate: bool) -> TileRule {
     TileRule {
@@ -78,6 +78,21 @@ fn a_rotated_corner_and_a_weighted_pool_match_the_reference_output() {
             "Insert(32.VHR).If(IndexAt([0, 0]).IsFullAt(top, topRight, right).IsEmptyAt(left, bottom));",
             "Insert(g:mask).If(IndexAt([0, 0]).IsFullAt(topLeft, top, topRight, left, right, bottomLeft, bottom, bottomRight));",
             "Insert(1, 2, 3, 66, 67).Chance(100, 5, 1, 1, 1).If(IndexAt([0, 0]).Is(g:mask));",
+        ]
+    );
+}
+
+#[test]
+fn a_rule_drawn_as_a_half_turn_emits_that_turn_with_the_drawn_neighborhood() {
+    let drawn_rule = TileRule {
+        drawn: HALF_TURN,
+        ..TileRule::new(outer_corner())
+    };
+
+    assert_eq!(
+        body(&emit(&[(32, drawn_rule)])),
+        [
+            "Insert(32.VH).If(IndexAt([0, 0]).IsFullAt(right, bottom, bottomRight).IsEmptyAt(top, left));"
         ]
     );
 }
@@ -314,6 +329,31 @@ fn less_specific_rules_come_first() {
     assert!(lines[1].starts_with("Insert(9)"));
 }
 
+fn empty_at(names: &[&str]) -> Neighborhood {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
+    for name in names {
+        neighborhood.set_state(index_of(name), NeighborState::Empty);
+    }
+
+    neighborhood
+}
+
+#[test]
+fn several_rules_of_one_tile_are_emitted_by_specificity() {
+    let tiles = [
+        (5, rule(empty_at(&["top", "bottom"]), 100.0, false)),
+        (5, rule(empty_at(&["bottom"]), 100.0, false)),
+    ];
+
+    assert_eq!(
+        body(&emit(&tiles)),
+        [
+            "Insert(5).If(IndexAt([0, 0]).IsEmptyAt(bottom));",
+            "Insert(5).If(IndexAt([0, 0]).IsEmptyAt(top, bottom));",
+        ]
+    );
+}
+
 #[test]
 fn a_symmetric_neighborhood_keeps_only_the_first_of_its_duplicates() {
     let tiles = [(
@@ -446,6 +486,29 @@ fn groups_add_a_closing_fill_objects_run() {
 }
 
 #[test]
+fn groups_alone_start_their_run_right_after_the_automapper_line() {
+    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let source = emit_with_groups(&[], &groups).unwrap();
+
+    assert!(
+        source.contains("AutoMapper(\"Grass_Main\");\nNewRun();\nOverrideLayer();\nInsertObject(")
+    );
+}
+
+#[test]
+fn runs_are_separated_by_one_blank_line() {
+    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let tiles = [
+        (1, anywhere(100.0)),
+        (2, rule(tile_specific(), 100.0, false)),
+    ];
+
+    let source = emit_with_groups(&tiles, &groups).unwrap();
+
+    assert_eq!(source.matches("\n\nNewRun();\n").count(), 3);
+}
+
+#[test]
 fn a_rule_set_without_groups_never_mentions_objects() {
     let tiles = [(1, rule(Neighborhood::default(), 100.0, false))];
     let source = emit(&tiles);
@@ -540,6 +603,182 @@ fn a_single_rule_set_keeps_unnamespaced_object_names() {
     let source = render(&[rule_set("SetA", &tiles, &groups)]).unwrap();
 
     assert!(source.contains("object o:bones = Rect(64, 81);"));
+}
+
+fn tile_specific() -> Neighborhood {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
+    neighborhood.set_state(index_of("top"), NeighborState::Is(17));
+    neighborhood.set_state(index_of("right"), NeighborState::Is(18));
+    neighborhood.set_state(index_of("bottom"), NeighborState::Empty);
+
+    neighborhood
+}
+
+#[test]
+fn tile_specific_pools_get_their_own_copy_run_after_the_plain_inserts() {
+    let tiles = [
+        (1, anywhere(100.0)),
+        (2, rule(tile_specific(), 100.0, true)),
+        (3, rule(tile_specific(), 100.0, false)),
+    ];
+
+    let source = emit(&tiles);
+
+    assert_eq!(body(&source), ["Insert(1);"]);
+    assert!(!source.contains("g:mask"));
+    assert!(!source.contains("OverrideLayer"));
+    assert!(
+        source.ends_with(
+            "Insert(1);\n\
+             \n\
+             NewRun();\n\
+             util:NewRule(); util:InsertIndex(2);\n\
+             util:NewPosRule([0, -1]); util:Is(17);\n\
+             util:NewPosRule([1, 0]); util:Is(18);\n\
+             util:NewPosRule([0, 1]); util:IsEmpty();\n\
+             util:NewRule(); util:InsertIndex(3); util:Chance(2);\n\
+             util:NewPosRule([0, -1]); util:Is(17);\n\
+             util:NewPosRule([1, 0]); util:Is(18);\n\
+             util:NewPosRule([0, 1]); util:IsEmpty();\n\
+             util:NewRule(); util:InsertIndex(2.R);\n\
+             util:NewPosRule([-1, 0]); util:IsEmpty();\n\
+             util:NewPosRule([1, 0]); util:Is(17);\n\
+             util:NewPosRule([0, 1]); util:Is(18);\n\
+             util:NewRule(); util:InsertIndex(2.VH);\n\
+             util:NewPosRule([0, -1]); util:IsEmpty();\n\
+             util:NewPosRule([-1, 0]); util:Is(18);\n\
+             util:NewPosRule([0, 1]); util:Is(17);\n\
+             util:NewRule(); util:InsertIndex(2.VHR);\n\
+             util:NewPosRule([0, -1]); util:Is(18);\n\
+             util:NewPosRule([-1, 0]); util:Is(17);\n\
+             util:NewPosRule([1, 0]); util:IsEmpty();\n"
+        ),
+        "{source}"
+    );
+}
+
+#[test]
+fn a_rolled_regular_pool_is_followed_by_the_tile_specific_run() {
+    let tiles = [
+        (5, anywhere(30.0)),
+        (6, anywhere(30.0)),
+        (7, rule(tile_specific(), 100.0, false)),
+    ];
+
+    let source = emit(&tiles);
+
+    assert!(
+        source.ends_with(
+            "Insert(g:mask);\n\
+             Insert(5, 6).Roll().If(IndexAt([0, 0]).Is(g:mask));\n\
+             \n\
+             NewRun();\n\
+             util:NewRule(); util:InsertIndex(7);\n\
+             util:NewPosRule([0, -1]); util:Is(17);\n\
+             util:NewPosRule([1, 0]); util:Is(18);\n\
+             util:NewPosRule([0, 1]); util:IsEmpty();\n"
+        ),
+        "{source}"
+    );
+}
+
+#[test]
+fn only_tile_specific_rules_start_with_the_copy_run() {
+    let source = emit(&[(2, rule(tile_specific(), 100.0, false))]);
+
+    assert!(source.contains("AutoMapper(\"Grass_Main\");\nNewRun();\nutil:NewRule();"));
+    assert_eq!(source.matches("NewRun();").count(), 1);
+}
+
+#[test]
+fn rule_sets_without_tile_specific_neighbors_get_no_extra_run() {
+    let source = emit(&[(1, anywhere(100.0))]);
+
+    assert_eq!(source.matches("NewRun();").count(), 1);
+    assert!(!source.contains("util:"));
+}
+
+#[test]
+fn the_copy_run_sits_before_the_group_runs() {
+    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let tiles = [(2, rule(tile_specific(), 100.0, false))];
+
+    let source = emit_with_groups(&tiles, &groups).unwrap();
+
+    assert!(source.find("util:NewRule()") < source.find("InsertObject"));
+    assert!(source.contains("util:InsertIndex(2);\n"));
+}
+
+#[test]
+fn the_last_member_keeps_its_share_and_earlier_ones_compensate() {
+    assert_eq!(
+        last_wins_odds(&[30.0, 20.0, 50.0], true),
+        [None, Some(2.5), Some(2.0)]
+    );
+}
+
+#[test]
+fn shares_below_100_leave_the_rest_unchanged() {
+    assert_eq!(
+        last_wins_odds(&[20.0, 10.0], false),
+        [Some(4.5), Some(10.0)]
+    );
+}
+
+#[test]
+fn a_lone_partial_share_keeps_its_chance() {
+    assert_eq!(last_wins_odds(&[30.0], false), [Some(100.0 / 30.0)]);
+}
+
+#[test]
+fn a_lone_full_share_needs_no_chance() {
+    assert_eq!(last_wins_odds(&[100.0], true), [None]);
+}
+
+#[test]
+fn an_exact_pool_above_100_is_scaled_before_the_copy_run() {
+    let tiles = [
+        (2, rule(tile_specific(), 100.0, false)),
+        (3, rule(tile_specific(), 100.0, false)),
+    ];
+
+    let source = emit_exact(&tiles);
+
+    assert!(source.contains("util:InsertIndex(2);\n"));
+    assert!(source.contains("util:InsertIndex(3); util:Chance(2);\n"));
+}
+
+const SUMMING_TO_100: [f32; 4] = [33.3, 33.3, 33.3, 0.1];
+
+#[test]
+fn an_exact_pool_summing_to_100_with_float_noise_still_covers_every_cell() {
+    let specific: Vec<(usize, TileRule)> = SUMMING_TO_100
+        .iter()
+        .enumerate()
+        .map(|(index, percent)| (index + 1, rule(tile_specific(), *percent, false)))
+        .collect();
+    let plain: Vec<(usize, TileRule)> = SUMMING_TO_100
+        .iter()
+        .enumerate()
+        .map(|(index, percent)| (index + 1, anywhere(*percent)))
+        .collect();
+
+    assert!(emit_exact(&specific).contains("util:InsertIndex(1);\n"));
+    assert!(emit_exact(&plain).contains("Insert(g:mask);\n"));
+}
+
+#[test]
+fn the_mask_skips_tiles_a_neighbor_refers_to() {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
+    neighborhood.set_state(index_of("top"), NeighborState::Is(255));
+    neighborhood.set_state(index_of("bottom"), NeighborState::Is(254));
+    let tiles = [
+        (5, anywhere(30.0)),
+        (6, anywhere(30.0)),
+        (7, rule(neighborhood, 100.0, false)),
+    ];
+
+    assert!(emit(&tiles).contains("g:mask = 253;"));
 }
 
 #[test]

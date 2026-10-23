@@ -2,9 +2,9 @@ use thiserror::Error;
 
 use crate::model::group::{self, GroupError, GroupMode, TileGroup};
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
-use crate::model::pool::{self, ChanceMode, Pool};
+use crate::model::pool::{self, ChanceMode, Pool, Variant};
 use crate::model::project::is_free_tile;
-use crate::model::tile::{AIR_TILE, Chance, TileRule, highest_free_tile};
+use crate::model::tile::{AIR_TILE, Chance, TileRule, highest_free_tile, referenced_tiles};
 use crate::model::transform::Transform;
 
 /// Group names live under a prefix of our own. rpp keywords and base.r globals
@@ -58,16 +58,17 @@ impl RuleSet<'_> {
     }
 
     fn mask_tile(&self) -> Option<usize> {
+        let referenced = referenced_tiles(self.tiles);
         highest_free_tile(|tile| {
             let has_rule = self.tiles.iter().any(|(used, _)| *used == tile);
-            is_free_tile(tile, has_rule, self.groups)
+            is_free_tile(tile, has_rule, self.groups) && !referenced.contains(&tile)
         })
     }
 
     fn needs_mask(&self) -> bool {
         pool::pools(&self.active_tiles())
             .iter()
-            .any(|pool| pool.members.len() > 1)
+            .any(|pool| !pool.neighborhood.is_tile_specific() && pool.members.len() > 1)
     }
 
     fn mask_line(&self) -> Result<Option<String>, ExportError> {
@@ -147,35 +148,48 @@ fn render_rule_set(
 
     lines.push(format!("AutoMapper(\"{}\");", rule_set.name));
     lines.extend(mask_line);
-    lines.push("NewRun();".to_owned());
-    lines.push(String::new());
 
-    lines.extend(
-        pool::pools(&rule_set.active_tiles())
+    let pools = pool::pools(&rule_set.active_tiles());
+    let (specific, plain): (Vec<&Pool>, Vec<&Pool>) = pools
+        .iter()
+        .partition(|pool| pool.neighborhood.is_tile_specific());
+
+    let mut runs: Vec<Vec<String>> = Vec::new();
+    if !plain.is_empty() {
+        let inserts = plain
             .iter()
-            .flat_map(|pool| insert_lines(pool, rule_set.chance_mode)),
-    );
-
+            .flat_map(|pool| insert_lines(pool, rule_set.chance_mode));
+        runs.push(new_run(false, inserts));
+    }
+    if !specific.is_empty() {
+        let rules = specific
+            .iter()
+            .flat_map(|pool| tile_specific_lines(pool, rule_set.chance_mode));
+        runs.push(new_run(false, rules));
+    }
     if !rule_set.groups.is_empty() {
-        lines.push(String::new());
-        lines.push("NewRun();".to_owned());
-        lines.push("OverrideLayer();".to_owned());
-        lines.extend(
-            rule_set
-                .groups
-                .iter()
-                .map(|group| insert_object_block(index, namespaced, group, rule_set.groups)),
-        );
-
-        lines.push(String::new());
-        lines.push("NewRun();".to_owned());
-        lines.push("OverrideLayer();".to_owned());
-        lines.push("Run().FillObjects();".to_owned());
+        let objects = rule_set
+            .groups
+            .iter()
+            .map(|group| insert_object_block(index, namespaced, group, rule_set.groups));
+        runs.push(new_run(true, objects));
+        runs.push(new_run(true, ["Run().FillObjects();".to_owned()]));
     }
 
+    lines.extend(runs.join(&String::new()));
     lines.push(String::new());
 
     Ok(())
+}
+
+fn new_run(overriding: bool, body: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut run = vec!["NewRun();".to_owned()];
+    if overriding {
+        run.push("OverrideLayer();".to_owned());
+    }
+    run.extend(body);
+
+    run
 }
 
 // Checks whether rules with colliding names exist.
@@ -366,4 +380,70 @@ fn names_with(neighborhood: &Neighborhood, state: NeighborState) -> Vec<&'static
         .filter(|(index, _)| neighborhood.state(*index) == state)
         .map(|(_, neighbor)| neighbor.rpp_name)
         .collect()
+}
+
+pub fn last_wins_odds(shares: &[f32], covers_all: bool) -> Vec<Option<f32>> {
+    let full = Chance::FULL.percent();
+
+    let mut odds: Vec<Option<f32>> = shares
+        .iter()
+        .rev()
+        .scan(0.0, |later, share| {
+            let one_out_of = (full - *later) / share;
+            *later += share;
+
+            Some(Some(one_out_of))
+        })
+        .collect();
+    odds.reverse();
+
+    if covers_all && let Some(first) = odds.first_mut() {
+        *first = None;
+    }
+
+    odds
+}
+
+fn tile_specific_lines(pool: &Pool, mode: ChanceMode) -> Vec<String> {
+    let covers_all = pool.coverage(mode) >= Chance::FULL.percent();
+    let odds = last_wins_odds(&pool.shares(mode), covers_all);
+
+    pool.members
+        .iter()
+        .zip(odds)
+        .flat_map(|(member, odds)| index_rule_lines(member, odds))
+        .collect()
+}
+
+fn index_rule_lines(member: &Variant, odds: Option<f32>) -> Vec<String> {
+    let chance = odds
+        .map(|odds| format!(" util:Chance({odds});"))
+        .unwrap_or_default();
+    let head = format!(
+        "util:NewRule(); util:InsertIndex({});{chance}",
+        index_name(member.tile, member.transform)
+    );
+
+    let tests = NEIGHBORS
+        .iter()
+        .enumerate()
+        .filter_map(|(index, neighbor)| {
+            let test = neighbor_test(member.neighborhood.state(index))?;
+
+            Some(format!(
+                "util:NewPosRule([{}, {}]); {test}",
+                neighbor.dx, neighbor.dy
+            ))
+        });
+
+    std::iter::once(head).chain(tests).collect()
+}
+
+fn neighbor_test(state: NeighborState) -> Option<String> {
+    match state {
+        NeighborState::Any => None,
+        NeighborState::Full => Some("util:IsFull();".to_owned()),
+        NeighborState::Empty => Some("util:IsEmpty();".to_owned()),
+        NeighborState::Is(tile) => Some(format!("util:Is({tile});")),
+    }
 }

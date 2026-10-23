@@ -18,7 +18,7 @@ const X_FLIP_LETTER: char = 'V';
 const Y_FLIP_LETTER: char = 'H';
 const ROTATE_LETTER: char = 'R';
 
-/// Wide enough to keep one tile on one line; the default 120 breaks them up.
+/// Wide enough to keep one rule on one line; the default 120 breaks them up.
 const MAX_LINE: u32 = 150;
 
 #[derive(Debug, Error)]
@@ -41,8 +41,14 @@ pub enum BlueprintError {
     #[error("`{0}` is not a neighbor state, expected 0 (empty), 1 (full) or 2 (any)")]
     NeighborCode(u8),
 
+    #[error("tile {AIR_TILE} is reserved for air and cannot be listed as a neighbor tile")]
+    AirNeighborTile,
+
     #[error("tile {tile}: `{name}` is not an orientation name")]
     OrientationName { tile: usize, name: String },
+
+    #[error("tile {0} needs at least one rule")]
+    NoRules(usize),
 
     #[error("tile {0} needs at least one orientation")]
     NoOrientations(usize),
@@ -80,9 +86,23 @@ struct BlueprintRuleSet {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlueprintTile {
     pub id: usize,
-    pub con: [u8; NEIGHBOR_COUNT],
+    pub rules: Vec<BlueprintRule>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BlueprintRule {
+    pub con: [BlueprintState; NEIGHBOR_COUNT],
     pub chance: f32,
     pub orientations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawn: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BlueprintState {
+    Code(u8),
+    Is { is: usize },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -174,10 +194,15 @@ fn load_project(rule_set: &BlueprintRuleSet) -> Result<Project, BlueprintError> 
         if tile.id == AIR_TILE {
             return Err(BlueprintError::AirTile);
         }
-        if project.rule(tile.id).is_some() {
+        if project.has_rules(tile.id) {
             return Err(BlueprintError::DuplicateTile(tile.id));
         }
-        project.set_rule(tile.id, load_tile(tile)?);
+        if tile.rules.is_empty() {
+            return Err(BlueprintError::NoRules(tile.id));
+        }
+        for rule in &tile.rules {
+            project.add_rule(tile.id, load_rule(tile.id, rule)?);
+        }
     }
 
     for &tile in &rule_set.deactivated {
@@ -198,7 +223,7 @@ fn load_project(rule_set: &BlueprintRuleSet) -> Result<Project, BlueprintError> 
     group::validate_all(&loaded_groups)?;
     for group in loaded_groups {
         for tile in group.footprint() {
-            if project.rule(tile).is_some() {
+            if project.has_rules(tile) {
                 return Err(BlueprintError::Claimed {
                     group: group.name.clone(),
                     tile,
@@ -215,25 +240,27 @@ fn store_rule_set(name: &str, project: &Project) -> BlueprintRuleSet {
     BlueprintRuleSet {
         name: name.to_owned(),
         normalize: project.chance_mode() == ChanceMode::Normalize,
-        tiles: project.all_rules().into_iter().map(store_tile).collect(),
+        tiles: project.configured_tiles().map(store_tile).collect(),
         deactivated: project.deactivated_tiles(),
         groups: project.groups().iter().map(store_group).collect(),
     }
 }
 
-fn store_tile((id, rule): (usize, TileRule)) -> BlueprintTile {
-    let mut con = [0; NEIGHBOR_COUNT];
-    for (slot, state) in con.iter_mut().zip(rule.neighborhood.states()) {
-        *slot = store_state(*state);
-    }
-
-    let orientations = rule.orientations().transforms();
-
+fn store_tile((id, rules): (usize, &[TileRule])) -> BlueprintTile {
     BlueprintTile {
         id,
-        con,
+        rules: rules.iter().map(store_rule).collect(),
+    }
+}
+
+fn store_rule(rule: &TileRule) -> BlueprintRule {
+    let orientations = rule.orientations().transforms();
+
+    BlueprintRule {
+        con: rule.neighborhood.states().map(store_state),
         chance: rule.chance.percent(),
         orientations: orientations.into_iter().map(orientation_name).collect(),
+        drawn: (rule.drawn != Transform::IDENTITY).then(|| orientation_name(rule.drawn)),
     }
 }
 
@@ -276,13 +303,17 @@ fn load_orientations(tile: usize, names: &[String]) -> Result<Orientations, Blue
     }
 }
 
-fn load_tile(tile: &BlueprintTile) -> Result<TileRule, BlueprintError> {
+fn load_rule(tile: usize, rule: &BlueprintRule) -> Result<TileRule, BlueprintError> {
     let mut neighborhood = Neighborhood::default();
-    for (index, &code) in tile.con.iter().enumerate() {
-        neighborhood.set_state(index, load_state(code)?);
+    for (index, state) in rule.con.iter().enumerate() {
+        neighborhood.set_state(index, load_state(state)?);
     }
 
-    let orientations = load_orientations(tile.id, &tile.orientations)?;
+    let orientations = load_orientations(tile, &rule.orientations)?;
+    let drawn = match &rule.drawn {
+        Some(name) => load_orientation(tile, name)?,
+        None => Transform::IDENTITY,
+    };
     let (mods, custom) = match orientations.preset() {
         Some(mods) => (mods, None),
         None => (TileMods::default(), Some(orientations)),
@@ -292,7 +323,8 @@ fn load_tile(tile: &BlueprintTile) -> Result<TileRule, BlueprintError> {
         neighborhood,
         mods,
         custom,
-        chance: Chance::new(tile.chance)?,
+        drawn,
+        chance: Chance::new(rule.chance)?,
     })
 }
 
@@ -324,19 +356,23 @@ fn load_group(group: &BlueprintGroup) -> Result<TileGroup, BlueprintError> {
     })
 }
 
-fn store_state(state: NeighborState) -> u8 {
+fn store_state(state: NeighborState) -> BlueprintState {
     match state {
-        NeighborState::Empty => 0,
-        NeighborState::Full => 1,
-        NeighborState::Any => 2,
+        NeighborState::Empty => BlueprintState::Code(0),
+        NeighborState::Full => BlueprintState::Code(1),
+        NeighborState::Any => BlueprintState::Code(2),
+        NeighborState::Is(tile) => BlueprintState::Is { is: tile },
     }
 }
 
-fn load_state(code: u8) -> Result<NeighborState, BlueprintError> {
-    match code {
-        0 => Ok(NeighborState::Empty),
-        1 => Ok(NeighborState::Full),
-        2 => Ok(NeighborState::Any),
-        _ => Err(BlueprintError::NeighborCode(code)),
+fn load_state(state: &BlueprintState) -> Result<NeighborState, BlueprintError> {
+    match state {
+        BlueprintState::Code(0) => Ok(NeighborState::Empty),
+        BlueprintState::Code(1) => Ok(NeighborState::Full),
+        BlueprintState::Code(2) => Ok(NeighborState::Any),
+        BlueprintState::Code(code) => Err(BlueprintError::NeighborCode(*code)),
+        BlueprintState::Is { is } if *is >= TILE_COUNT => Err(BlueprintError::TileId(*is)),
+        BlueprintState::Is { is } if *is == AIR_TILE => Err(BlueprintError::AirNeighborTile),
+        BlueprintState::Is { is } => Ok(NeighborState::Is(*is)),
     }
 }

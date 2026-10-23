@@ -4,7 +4,7 @@ use twmap::ndarray::Array2;
 use twmap::{GameLayer, Tile, TileFlags, TwMap};
 
 use crate::model::project::Project;
-use crate::model::tile::{AIR_TILE, TILE_COUNT};
+use crate::model::tile::{AIR_TILE, TILE_COUNT, referenced_tiles};
 use crate::model::transform::Transform;
 
 const DM1: &[u8] = include_bytes!("../assets/dm1.map");
@@ -134,12 +134,17 @@ pub enum PreviewCell {
 
 /// if this marker remains, no rule was applied. We use this to visualize tiles with neighborhoods with no matching rules.
 pub fn unmatched_marker(project: &Project) -> u8 {
-    let active: Vec<usize> = project.rules().iter().map(|(tile, _)| *tile).collect();
+    let rules = project.rules();
+    let active: Vec<usize> = rules.iter().map(|(tile, _)| *tile).collect();
+    let referenced = referenced_tiles(&rules);
     let mask = project.mask_tile();
 
     (AIR_TILE + 1..TILE_COUNT)
         .find(|tile| {
-            !active.contains(tile) && project.group_at(*tile).is_none() && Some(*tile) != mask
+            !active.contains(tile)
+                && !referenced.contains(tile)
+                && project.group_at(*tile).is_none()
+                && Some(*tile) != mask
         })
         .and_then(|tile| u8::try_from(tile).ok())
         .unwrap_or(FALLBACK_UNMATCHED_MARKER)

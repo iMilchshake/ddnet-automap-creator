@@ -5,8 +5,8 @@ use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileMods, TileRule};
-use crate::model::transform::Orientations;
-use crate::tests::support::{half_turn, mods, outer_corner};
+use crate::model::transform::{Orientations, Transform};
+use crate::tests::support::{half_turn, index_of, mods, outer_corner};
 
 const IMAGE: &str = "grass_main";
 
@@ -24,7 +24,7 @@ fn group(name: &str, top_left: usize, mode: GroupMode, percent: f32) -> TileGrou
 fn furnished() -> Project {
     let mut project = Project::default();
 
-    project.set_rule(
+    project.add_rule(
         1,
         TileRule {
             mods: mods(true, false, true),
@@ -32,14 +32,14 @@ fn furnished() -> Project {
             ..TileRule::new(outer_corner())
         },
     );
-    project.set_rule(
+    project.add_rule(
         32,
         TileRule {
             custom: Some(half_turn()),
             ..TileRule::new(Neighborhood::uniform(NeighborState::Full))
         },
     );
-    project.set_rule(
+    project.add_rule(
         200,
         TileRule::new(Neighborhood::uniform(NeighborState::Any)),
     );
@@ -67,26 +67,83 @@ fn a_furnished_project_survives_a_round_trip_unchanged() {
     assert_eq!(round_trip(&project), project);
 }
 
-const TILE_HEAD: &str = r#"{"id": 5, "con": [0,0,0,0,0,0,0,0], "chance": 100.0"#;
+const RULE_HEAD: &str = r#"{"con": [0,0,0,0,0,0,0,0], "chance": 100.0"#;
+const PLAIN_RULE: &str = r#"{"con": [0,0,0,0,0,0,0,0], "chance": 100.0, "orientations": ["N"]}"#;
 
 fn written(project: Project) -> String {
     let rule_sets = RuleSets::from_parts(vec![("Grass Main".to_owned(), project)], 0);
     blueprint::to_json(&rule_sets, IMAGE).unwrap()
 }
 
+fn tile_of(id: usize, rules: &str) -> String {
+    format!(r#"{{"id": {id}, "rules": [{rules}]}}"#)
+}
+
+fn plain_tile(id: usize) -> String {
+    tile_of(id, PLAIN_RULE)
+}
+
 fn tile_with(orientations: &str) -> String {
-    one_tile(&format!(r#"{TILE_HEAD}, "orientations": {orientations}}}"#))
+    one_tile(&tile_of(
+        5,
+        &format!(r#"{RULE_HEAD}, "orientations": {orientations}}}"#),
+    ))
 }
 
 fn loaded_rule(orientations: &str) -> TileRule {
     let project = load(&tile_with(orientations)).unwrap();
-    *project.rule(5).unwrap()
+    project.rules_of(5)[0]
+}
+
+fn drawn_rule(drawn: Transform) -> Project {
+    let mut project = Project::default();
+    project.add_rule(
+        5,
+        TileRule {
+            drawn,
+            ..TileRule::new(outer_corner())
+        },
+    );
+
+    project
+}
+
+#[test]
+fn a_drawn_orientation_survives_a_round_trip() {
+    let project = drawn_rule(Transform {
+        x_flip: true,
+        y_flip: false,
+        rot: true,
+    });
+
+    assert_eq!(round_trip(&project), project);
+    assert!(written(project).contains(r#""drawn": "VR""#));
+}
+
+#[test]
+fn the_identity_is_not_written_as_drawn() {
+    assert!(!written(drawn_rule(Transform::IDENTITY)).contains("drawn"));
+}
+
+#[test]
+fn a_missing_drawn_orientation_loads_as_the_identity() {
+    assert_eq!(loaded_rule(r#"["N"]"#).drawn, Transform::IDENTITY);
+}
+
+#[test]
+fn an_unknown_drawn_orientation_is_rejected() {
+    let rule = format!(r#"{RULE_HEAD}, "orientations": ["N"], "drawn": "Q"}}"#);
+
+    assert!(matches!(
+        load(&one_tile(&tile_of(5, &rule))),
+        Err(BlueprintError::OrientationName { tile: 5, .. })
+    ));
 }
 
 #[test]
 fn a_preset_is_written_as_its_orientation_list() {
     let mut project = Project::default();
-    project.set_rule(
+    project.add_rule(
         5,
         TileRule {
             mods: mods(false, false, true),
@@ -105,7 +162,7 @@ fn a_preset_is_written_as_its_orientation_list() {
 #[test]
 fn a_custom_set_equal_to_a_preset_comes_back_as_that_preset() {
     let mut project = Project::default();
-    project.set_rule(
+    project.add_rule(
         5,
         TileRule {
             custom: Some(Orientations::generated(mods(true, false, false))),
@@ -114,16 +171,16 @@ fn a_custom_set_equal_to_a_preset_comes_back_as_that_preset() {
     );
 
     let loaded = round_trip(&project);
-    let rule = loaded.rule(5).unwrap();
+    let rule = loaded.rules_of(5)[0];
 
     assert_eq!(rule.mods, mods(true, false, false));
     assert_eq!(rule.custom, None);
 }
 
 #[test]
-fn the_longest_tile_stays_on_one_line() {
+fn the_longest_rule_stays_on_one_line() {
     let mut project = Project::default();
-    project.set_rule(
+    project.add_rule(
         TILE_COUNT - 2,
         TileRule {
             mods: mods(true, false, true),
@@ -131,15 +188,47 @@ fn the_longest_tile_stays_on_one_line() {
             ..TileRule::new(outer_corner())
         },
     );
-    project.set_rule(TILE_COUNT - 1, TileRule::new(outer_corner()));
+    project.add_rule(TILE_COUNT - 1, TileRule::new(outer_corner()));
 
     let text = written(project);
 
     assert!(
         text.lines()
-            .any(|line| line.contains("\"id\": 254") && line.contains("\"HR\"")),
+            .any(|line| line.contains("\"con\"") && line.contains("\"HR\"")),
         "{text}"
     );
+}
+
+#[test]
+fn a_tile_with_two_rules_survives_a_round_trip() {
+    let mut project = Project::default();
+    project.add_rule(
+        5,
+        TileRule {
+            mods: mods(false, false, true),
+            chance: Chance::new(40.0).unwrap(),
+            ..TileRule::new(outer_corner())
+        },
+    );
+    project.add_rule(
+        5,
+        TileRule {
+            custom: Some(half_turn()),
+            ..TileRule::new(Neighborhood::uniform(NeighborState::Full))
+        },
+    );
+
+    assert_eq!(round_trip(&project), project);
+}
+
+#[test]
+fn a_tile_without_rules_is_refused() {
+    let json = one_tile(&tile_of(5, ""));
+
+    assert!(matches!(
+        load(&json).unwrap_err(),
+        BlueprintError::NoRules(5)
+    ));
 }
 
 #[test]
@@ -178,7 +267,7 @@ fn an_unknown_or_empty_orientation_list_is_refused() {
 
 #[test]
 fn a_tile_without_orientations_is_refused() {
-    let json = one_tile(&format!("{TILE_HEAD}}}"));
+    let json = one_tile(&tile_of(5, &format!("{RULE_HEAD}}}")));
 
     assert!(matches!(load(&json).unwrap_err(), BlueprintError::Json(_)));
 }
@@ -255,9 +344,9 @@ fn a_blueprint_with_no_rule_sets_is_refused() {
 #[test]
 fn a_blueprint_round_trips_several_rule_sets() {
     let mut set_a = Project::default();
-    set_a.set_rule(1, TileRule::new(Neighborhood::uniform(NeighborState::Full)));
+    set_a.add_rule(1, TileRule::new(Neighborhood::uniform(NeighborState::Full)));
     let mut set_b = Project::default();
-    set_b.set_rule(2, TileRule::new(Neighborhood::uniform(NeighborState::Any)));
+    set_b.add_rule(2, TileRule::new(Neighborhood::uniform(NeighborState::Any)));
 
     let rule_sets = RuleSets::from_parts(
         vec![("Grass".to_owned(), set_a), ("Doodads".to_owned(), set_b)],
@@ -270,14 +359,12 @@ fn a_blueprint_round_trips_several_rule_sets() {
     assert_eq!(loaded.active_index(), 1);
     assert_eq!(loaded.name(0), Some("Grass"));
     assert_eq!(loaded.name(1), Some("Doodads"));
-    assert_eq!(loaded.active().rule(2), rule_sets.active().rule(2));
+    assert_eq!(loaded.active().rules_of(2), rule_sets.active().rules_of(2));
 }
 
 #[test]
 fn a_tile_outside_the_tileset_is_refused() {
-    let json = one_tile(
-        r#"{"id": 256, "con": [0,0,0,0,0,0,0,0], "chance": 100.0, "orientations": ["N"]}"#,
-    );
+    let json = one_tile(&plain_tile(256));
     assert!(matches!(
         load(&json).unwrap_err(),
         BlueprintError::TileId(256)
@@ -286,18 +373,13 @@ fn a_tile_outside_the_tileset_is_refused() {
 
 #[test]
 fn a_rule_on_the_last_tile_is_accepted() {
-    let json = one_tile(&format!(
-        r#"{{"id": {}, "con": [0,0,0,0,0,0,0,0], "chance": 100.0, "orientations": ["N"]}}"#,
-        TILE_COUNT - 1
-    ));
-    assert!(load(&json).unwrap().rule(TILE_COUNT - 1).is_some());
+    let json = one_tile(&plain_tile(TILE_COUNT - 1));
+    assert!(load(&json).unwrap().has_rules(TILE_COUNT - 1));
 }
 
 #[test]
 fn a_rule_on_the_air_tile_is_refused() {
-    let json = one_tile(&format!(
-        r#"{{"id": {AIR_TILE}, "con": [0,0,0,0,0,0,0,0], "chance": 100.0, "orientations": ["N"]}}"#
-    ));
+    let json = one_tile(&plain_tile(AIR_TILE));
     assert!(matches!(load(&json).unwrap_err(), BlueprintError::AirTile));
 }
 
@@ -323,7 +405,7 @@ fn the_chance_mode_survives_a_round_trip() {
 
 #[test]
 fn a_repeated_tile_is_refused() {
-    let tile = r#"{"id": 5, "con": [0,0,0,0,0,0,0,0], "chance": 100.0, "orientations": ["N"]}"#;
+    let tile = plain_tile(5);
     let json = one_tile(&format!("{tile}, {tile}"));
     assert!(matches!(
         load(&json).unwrap_err(),
@@ -333,8 +415,10 @@ fn a_repeated_tile_is_refused() {
 
 #[test]
 fn an_unknown_neighbor_code_is_refused() {
-    let json =
-        one_tile(r#"{"id": 5, "con": [0,1,2,3,0,0,0,0], "chance": 100.0, "orientations": ["N"]}"#);
+    let json = one_tile(&tile_of(
+        5,
+        r#"{"con": [0,1,2,3,0,0,0,0], "chance": 100.0, "orientations": ["N"]}"#,
+    ));
     assert!(matches!(
         load(&json).unwrap_err(),
         BlueprintError::NeighborCode(3)
@@ -343,8 +427,10 @@ fn an_unknown_neighbor_code_is_refused() {
 
 #[test]
 fn a_chance_outside_its_range_is_refused() {
-    let json =
-        one_tile(r#"{"id": 5, "con": [0,0,0,0,0,0,0,0], "chance": 0.0, "orientations": ["N"]}"#);
+    let json = one_tile(&tile_of(
+        5,
+        r#"{"con": [0,0,0,0,0,0,0,0], "chance": 0.0, "orientations": ["N"]}"#,
+    ));
     assert!(matches!(
         load(&json).unwrap_err(),
         BlueprintError::Chance(_)
@@ -378,7 +464,7 @@ fn two_groups_sharing_a_name_are_refused() {
 #[test]
 fn a_group_over_a_configured_tile_is_refused() {
     let json = document(
-        r#"{"id": 65, "con": [0,0,0,0,0,0,0,0], "chance": 100.0, "orientations": ["N"]}"#,
+        &plain_tile(65),
         "",
         r#"{"name": "bones", "top_left": 64, "width": 2, "height": 2,
             "mode": "fill", "chance": 100.0}"#,
@@ -396,9 +482,9 @@ fn deactivated_tiles_survive_with_their_rules() {
 
     assert_eq!(project.deactivated_tiles(), [7, 9, 32]);
     assert!(project.is_deactivated(7));
-    assert!(project.rule(7).is_none());
+    assert!(!project.has_rules(7));
     assert!(project.is_deactivated(32));
-    assert_eq!(project.rule(32), original.rule(32));
+    assert_eq!(project.rules_of(32), original.rules_of(32));
     assert!(!project.is_deactivated(1));
 }
 
@@ -414,21 +500,65 @@ fn a_neighborhood_is_stored_in_index_order() {
 
 #[test]
 fn a_neighborhood_is_read_back_in_index_order() {
-    let json =
-        one_tile(r#"{"id": 5, "con": [2,0,2,0,1,2,1,1], "chance": 100.0, "orientations": ["N"]}"#);
-    let project = load(&json).unwrap();
+    let project = load(&with_con("[2,0,2,0,1,2,1,1]")).unwrap();
 
-    assert_eq!(project.rule(5).unwrap().neighborhood, outer_corner());
+    assert_eq!(project.rules_of(5)[0].neighborhood, outer_corner());
+}
+
+fn with_con(con: &str) -> String {
+    one_tile(&tile_of(
+        5,
+        &format!(r#"{{"con": {con}, "chance": 100.0, "orientations": ["N"]}}"#),
+    ))
+}
+
+#[test]
+fn a_tile_requirement_survives_a_round_trip() {
+    let mut neighborhood = outer_corner();
+    neighborhood.set_state(index_of("topLeft"), NeighborState::Is(17));
+    let mut project = Project::default();
+    project.add_rule(5, TileRule::new(neighborhood));
+
+    let text = written(project.clone());
+
+    assert!(text.contains(r#"{ "is": 17 }"#), "{text}");
+    assert_eq!(round_trip(&project), project);
+}
+
+#[test]
+fn a_tile_requirement_loads_from_its_object_form() {
+    let project = load(&with_con(r#"[{"is": 17}, 0, 2, 0, 1, 2, 1, 1]"#)).unwrap();
+    let neighborhood = project.rules_of(5)[0].neighborhood;
+
+    assert_eq!(neighborhood.state(0), NeighborState::Is(17));
+    assert_eq!(neighborhood.state(4), NeighborState::Full);
+}
+
+#[test]
+fn the_air_tile_as_a_neighbor_tile_is_refused() {
+    let json = with_con(r#"[{"is": 0}, 0, 0, 0, 0, 0, 0, 0]"#);
+
+    assert!(matches!(
+        load(&json).unwrap_err(),
+        BlueprintError::AirNeighborTile
+    ));
+}
+
+#[test]
+fn a_neighbor_tile_outside_the_tileset_is_refused() {
+    let json = with_con(r#"[{"is": 256}, 0, 0, 0, 0, 0, 0, 0]"#);
+
+    assert!(matches!(
+        load(&json).unwrap_err(),
+        BlueprintError::TileId(256)
+    ));
 }
 
 #[test]
 fn a_con_of_the_wrong_length_is_refused() {
     for con in ["[2,0,2,0,1,2,1]", "[2,0,2,0,1,2,1,1,1]"] {
-        let json = one_tile(&format!(
-            r#"{{"id": 5, "con": {con}, "chance": 100.0, "orientations": ["N"]}}"#
-        ));
         assert!(
-            matches!(load(&json).unwrap_err(), BlueprintError::Json(_)),
+            matches!(load(&with_con(con)).unwrap_err(), BlueprintError::Json(_)),
             "{con}"
         );
     }

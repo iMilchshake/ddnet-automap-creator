@@ -29,9 +29,21 @@ const ENUMERATION: [Transform; 8] = [
     transform(false, true, true),
 ];
 
+const BASIS: [(i32, i32); 2] = [(1, 0), (0, 1)];
+
 impl Transform {
     pub const IDENTITY: Self = transform(false, false, false);
     pub const ALL: [Self; 8] = ENUMERATION;
+    pub const ROTATE_CLOCKWISE: Self = transform(false, false, true);
+    pub const FLIP_HORIZONTALLY: Self = transform(true, false, false);
+    pub const FLIP_VERTICALLY: Self = transform(false, true, false);
+
+    pub fn inverse(self) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|candidate| self.after(*candidate) == Self::IDENTITY)
+            .expect("every transform has an inverse")
+    }
 
     pub fn suffix(self) -> String {
         let mut suffix = String::new();
@@ -57,6 +69,18 @@ impl Transform {
         }
 
         moved
+    }
+
+    pub fn after(self, first: Self) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|candidate| {
+                BASIS.into_iter().all(|(dx, dy)| {
+                    let (first_dx, first_dy) = first.move_offset(dx, dy);
+                    candidate.move_offset(dx, dy) == self.move_offset(first_dx, first_dy)
+                })
+            })
+            .expect("the transforms are closed under composition")
     }
 
     fn move_offset(self, dx: i32, dy: i32) -> (i32, i32) {

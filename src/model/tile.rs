@@ -1,7 +1,9 @@
+use std::collections::BTreeSet;
+
 use thiserror::Error;
 
 use crate::model::neighbor::Neighborhood;
-use crate::model::transform::Orientations;
+use crate::model::transform::{Orientations, Transform};
 
 pub const TILESET_SIDE: usize = 16;
 pub const TILE_COUNT: usize = TILESET_SIDE * TILESET_SIDE;
@@ -10,6 +12,14 @@ pub const AIR_TILE: usize = 0;
 
 pub fn highest_free_tile(is_free: impl Fn(usize) -> bool) -> Option<usize> {
     (AIR_TILE + 1..TILE_COUNT).rev().find(|&tile| is_free(tile))
+}
+
+pub fn referenced_tiles(tiles: &[(usize, TileRule)]) -> BTreeSet<usize> {
+    tiles
+        .iter()
+        .flat_map(|(_, rule)| rule.neighborhood.states())
+        .filter_map(|state| state.tile())
+        .collect()
 }
 
 #[derive(Debug, Error)]
@@ -67,6 +77,7 @@ pub struct TileRule {
     pub neighborhood: Neighborhood,
     pub mods: TileMods,
     pub custom: Option<Orientations>,
+    pub drawn: Transform,
     pub chance: Chance,
 }
 
@@ -76,11 +87,20 @@ impl TileRule {
             neighborhood,
             mods: TileMods::default(),
             custom: None,
+            drawn: Transform::IDENTITY,
             chance: Chance::FULL,
         }
     }
 
     pub fn orientations(&self) -> Orientations {
         Orientations::resolved(self.custom, self.mods)
+    }
+
+    pub fn turned(self, by: Transform) -> Self {
+        Self {
+            neighborhood: by.apply(&self.neighborhood),
+            drawn: by.after(self.drawn),
+            ..self
+        }
     }
 }

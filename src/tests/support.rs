@@ -1,4 +1,4 @@
-use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
+use crate::model::neighbor::{NEIGHBOR_COUNT, NEIGHBORS, NeighborState, Neighborhood};
 use crate::model::tile::TileMods;
 use crate::model::transform::{Orientations, Transform};
 
@@ -22,14 +22,29 @@ pub fn mods(can_x_flip: bool, can_y_flip: bool, can_rotate: bool) -> TileMods {
     TileMods::new(can_x_flip, can_y_flip, can_rotate)
 }
 
+pub const HALF_TURN: Transform = Transform {
+    x_flip: true,
+    y_flip: true,
+    rot: false,
+};
+
+pub const QUARTER_TURN: Transform = Transform {
+    x_flip: false,
+    y_flip: false,
+    rot: true,
+};
+
 pub fn half_turn() -> Orientations {
-    [Transform {
-        x_flip: true,
-        y_flip: true,
-        rot: false,
-    }]
-    .into_iter()
-    .collect()
+    [HALF_TURN].into_iter().collect()
+}
+
+pub fn all_distinct() -> Neighborhood {
+    let mut neighborhood = Neighborhood::default();
+    for index in 0..NEIGHBOR_COUNT {
+        neighborhood.set_state(index, NeighborState::Is(index + 1));
+    }
+
+    neighborhood
 }
 
 /// Solid to the right and below, open above and to the left.

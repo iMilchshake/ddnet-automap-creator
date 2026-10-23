@@ -1,7 +1,8 @@
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::{ChanceMode, Pool, Variant, base_shares, pools, pools_of};
 use crate::model::tile::{Chance, TileRule};
-use crate::tests::support::{half_turn, index_of, mods};
+use crate::model::transform::{Orientations, Transform};
+use crate::tests::support::{HALF_TURN, QUARTER_TURN, half_turn, index_of, mods};
 
 const TOLERANCE: f32 = 0.001;
 
@@ -46,6 +47,17 @@ fn assert_close(actual: &[f32], expected: &[f32]) {
             "{actual} != {expected}"
         );
     }
+}
+
+#[test]
+fn a_tile_requirement_counts_towards_specificity() {
+    let mut requiring = Neighborhood::uniform(NeighborState::Any);
+    requiring.set_state(index_of("top"), NeighborState::Is(17));
+
+    let pools = pools(&[(1, TileRule::new(requiring)), (3, anywhere(100.0))]);
+
+    let order: Vec<usize> = pools.iter().map(|pool| pool.members[0].tile).collect();
+    assert_eq!(order, [3, 1]);
 }
 
 #[test]
@@ -166,4 +178,142 @@ fn a_turned_pool_can_split_differently_than_the_tiles_own() {
         .collect();
 
     assert_close(&shares, &[33.333_3, 50.0, 50.0, 50.0]);
+}
+
+fn variants(tiles: &[(usize, TileRule)]) -> Vec<Variant> {
+    pools(tiles)
+        .into_iter()
+        .flat_map(|pool| pool.members)
+        .collect()
+}
+
+#[test]
+fn a_rule_drawn_upside_down_places_that_orientation_with_the_drawn_neighborhood() {
+    let drawn_rule = TileRule {
+        drawn: HALF_TURN,
+        ..TileRule::new(only("left"))
+    };
+
+    let variants = variants(&[(3, drawn_rule)]);
+
+    assert_eq!(variants.len(), 1);
+    assert_eq!(variants[0].transform, HALF_TURN);
+    assert_eq!(variants[0].neighborhood, only("left"));
+}
+
+#[test]
+fn rotating_a_rule_drawn_rotated_places_every_rotation_of_the_drawn_neighborhood() {
+    let drawn_rule = TileRule {
+        drawn: QUARTER_TURN,
+        ..rotating(true)
+    };
+
+    let variants = variants(&[(3, drawn_rule)]);
+
+    let mut placed: Vec<Transform> = variants.iter().map(|variant| variant.transform).collect();
+    let mut rotations = Orientations::generated(mods(false, false, true)).transforms();
+    placed.sort_by_key(|transform| transform.suffix());
+    rotations.sort_by_key(|transform| transform.suffix());
+    assert_eq!(placed, rotations);
+
+    for variant in &variants {
+        let relative = rotations
+            .iter()
+            .find(|rotation| rotation.after(QUARTER_TURN) == variant.transform)
+            .unwrap();
+        assert_eq!(variant.neighborhood, relative.apply(&only("left")));
+    }
+}
+
+#[test]
+fn only_the_first_variant_of_a_tiles_first_rule_is_primary() {
+    let variants = variants(&[(3, rotating(true)), (3, TileRule::new(only("topLeft")))]);
+
+    let primary: Vec<&Variant> = variants.iter().filter(|variant| variant.primary).collect();
+
+    assert_eq!(primary.len(), 1);
+    assert_eq!(primary[0].rule, 0);
+    assert_eq!(primary[0].transform, Transform::IDENTITY);
+}
+
+#[test]
+fn a_variant_knows_the_rule_it_came_from() {
+    let variants = variants(&[
+        (3, rotating(true)),
+        (3, TileRule::new(only("topLeft"))),
+        (4, TileRule::new(only("right"))),
+    ]);
+
+    let rules_of = |tile: usize| -> Vec<usize> {
+        variants
+            .iter()
+            .filter(|variant| variant.tile == tile)
+            .map(|variant| variant.rule)
+            .collect()
+    };
+
+    assert_eq!(rules_of(3).iter().filter(|&&rule| rule == 0).count(), 4);
+    assert_eq!(rules_of(3).iter().filter(|&&rule| rule == 1).count(), 1);
+    assert_eq!(rules_of(4), [0]);
+}
+
+#[test]
+fn rules_of_one_tile_need_not_be_adjacent() {
+    let variants = variants(&[
+        (5, TileRule::new(only("left"))),
+        (6, TileRule::new(only("left"))),
+        (5, anywhere(50.0)),
+    ]);
+
+    let mut rules_of_five: Vec<usize> = variants
+        .iter()
+        .filter(|variant| variant.tile == 5)
+        .map(|variant| variant.rule)
+        .collect();
+    rules_of_five.sort();
+
+    assert_eq!(rules_of_five, [0, 1]);
+    assert_eq!(
+        variants
+            .iter()
+            .filter(|variant| variant.tile == 5 && variant.primary)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_later_rule_reaching_a_known_neighborhood_by_another_transform_is_dropped() {
+    let turned = TileRule {
+        custom: Some(half_turn()),
+        ..TileRule::new(only("right"))
+    };
+
+    let variants = variants(&[(3, TileRule::new(only("left"))), (3, turned)]);
+
+    assert_eq!(variants.len(), 1);
+    assert_eq!(variants[0].rule, 0);
+}
+
+#[test]
+fn a_placement_repeated_by_a_later_rule_of_the_tile_is_dropped() {
+    let pools = pools(&[
+        (3, TileRule::new(only("left"))),
+        (3, anywhere(50.0)),
+        (3, TileRule::new(only("left"))),
+        (4, TileRule::new(only("left"))),
+    ]);
+
+    let shared = pools
+        .iter()
+        .find(|pool| pool.neighborhood == only("left"))
+        .unwrap();
+    let members: Vec<(usize, usize)> = shared
+        .members
+        .iter()
+        .map(|member| (member.tile, member.rule))
+        .collect();
+
+    assert_eq!(members, [(3, 0), (4, 0)]);
+    assert_eq!(pools.iter().flat_map(|pool| &pool.members).count(), 3);
 }

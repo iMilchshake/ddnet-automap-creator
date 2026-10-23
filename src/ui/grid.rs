@@ -25,6 +25,7 @@ const CONFIGURED_OUTLINE: Color32 = Color32::from_gray(205);
 const DEACTIVATED_OUTLINE: Color32 = Color32::from_gray(100);
 const SELECTED_OUTLINE: Color32 = Color32::from_rgb(255, 214, 102);
 const POOL_MATE_OUTLINE: Color32 = Color32::from_rgb(102, 204, 255);
+const PICKED_OUTLINE: Color32 = Color32::from_rgb(120, 220, 120);
 
 const DEACTIVATED_DARKEN_ALPHA: u8 = 50;
 
@@ -55,6 +56,7 @@ pub struct GridView<'a> {
     pub drag_anchor: Option<usize>,
     pub selected: Option<usize>,
     pub pool_mates: &'a [usize],
+    pub picked: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -144,6 +146,9 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
     };
     for &index in view.pool_mates {
         outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, POOL_MATE_OUTLINE);
+    }
+    if let Some(index) = view.picked {
+        outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, PICKED_OUTLINE);
     }
     if let Some(index) = view.selected {
         outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, SELECTED_OUTLINE);

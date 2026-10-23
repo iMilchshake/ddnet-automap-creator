@@ -1,13 +1,16 @@
+use std::f32::consts::PI;
+
 use egui::{
-    Color32, PointerButton, Rect, Response, Sense, Stroke, StrokeKind, TextureHandle, Ui, Vec2,
+    Align2, Color32, Painter, PointerButton, Pos2, Rect, Response, Sense, Shape, Stroke,
+    StrokeKind, TextureHandle, Ui, Vec2,
 };
 
-use crate::model::neighbor::{NeighborState, Neighborhood, neighbor_index_at};
+use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood, neighbor_index_at};
 use crate::model::pool::{ChanceMode, Pool};
 use crate::model::tile::{Chance, TileMods, TileRule};
 use crate::model::transform::{Orientations, Transform};
 use crate::tileset::Tileset;
-use crate::ui::{grid, preview};
+use crate::ui::{ADD_ICON, DUPLICATE_ICON, REMOVE_ICON, grid, icon_button, preview};
 
 const MIN_CELL_SIZE: f32 = 32.0;
 const MAX_CELL_SIZE: f32 = 80.0;
@@ -32,6 +35,20 @@ const OUTLINE_WIDTH: f32 = 2.0;
 const EMPTY_CROSS_INSET_FRACTION: f32 = 0.28;
 const MARK_WIDTH_FRACTION: f32 = 0.05;
 const MIN_MARK_WIDTH: f32 = 1.0;
+const BUTTON_FRACTION: f32 = 0.27;
+const MIN_BUTTON_SIZE: f32 = 8.0;
+const BUTTON_MARGIN: f32 = 1.0;
+const BUTTON_GAP: f32 = 2.0;
+const ICON_INSET_FRACTION: f32 = 0.22;
+const ICON_STROKE_FRACTION: f32 = 0.12;
+const MIN_ICON_STROKE: f32 = 1.0;
+const ARC_SEGMENTS: usize = 12;
+const ARC_START: f32 = -PI;
+const ARC_SWEEP: f32 = 1.5 * PI;
+const ARROW_HEAD_FRACTION: f32 = 0.35;
+const ARROW_HEAD_WIDTH: f32 = 0.7;
+const FLIP_GAP_FRACTION: f32 = 0.25;
+const FLIP_BASE_FRACTION: f32 = 0.7;
 
 const MARK_COLOR: Color32 = Color32::from_gray(150);
 const FULL_FILL: Color32 = Color32::from_gray(185);
@@ -44,53 +61,104 @@ const CROSS_COLOR: Color32 =
     Color32::from_rgba_premultiplied(CROSS_ALPHA, CROSS_ALPHA, CROSS_ALPHA, CROSS_ALPHA);
 
 const CELL_TOOLTIP: &str = "Left-click toggles full and any, right-click sets empty. \
-                            Or press 1 (empty), 2 (full), 3 (any) while hovering.";
+                            Or press 1 (empty), 2 (full), 3 (any) while hovering. \
+                            Ctrl-click picks a specific tile from the tileset.";
 const CHANCE_TOOLTIP: &str = "Tiles declaring the same neighborhood split it between them by \
                               their chances. With Normalize chances off, a total below 100 % \
                               can leave tiles unchanged.";
 const POOL_TOOLTIP: &str = "A pool holds all tiles with the exact neighborhood, considering \
                             rotations and flips.";
+const ROTATE_TOOLTIP: &str = "Rotate 90° clockwise";
+const FLIP_HORIZONTALLY_TOOLTIP: &str = "Flip horizontally";
+const FLIP_VERTICALLY_TOOLTIP: &str = "Flip vertically";
+const ADD_RULE_TOOLTIP: &str = "Add rule";
+const DUPLICATE_RULE_TOOLTIP: &str = "Duplicate rule";
+const REMOVE_RULE_TOOLTIP: &str = "Remove rule";
+const RESET_TOOLTIP: &str = "Reset orientation";
+const ORIENTATION_HINT: &str = "Use the buttons to rotate or flip the whole rule.";
 const UNCHANGED: &str = "unchanged";
 const LAST_ORIENTATION: &str = "At least one orientation is required";
 
-pub struct TilePools<'a> {
+pub struct TileContext<'a> {
     pub pools: Vec<&'a Pool>,
     pub mode: ChanceMode,
+    pub rule_count: usize,
+    pub always_show_turn_buttons: bool,
 }
+
+#[derive(Clone, Copy)]
+enum Icon {
+    Rotate,
+    FlipHorizontally,
+    FlipVertically,
+}
+
+struct TurnButton {
+    icon: Icon,
+    tooltip: &'static str,
+    turn: Transform,
+}
+
+const TURN_BUTTONS: [TurnButton; 3] = [
+    TurnButton {
+        icon: Icon::Rotate,
+        tooltip: ROTATE_TOOLTIP,
+        turn: Transform::ROTATE_CLOCKWISE,
+    },
+    TurnButton {
+        icon: Icon::FlipHorizontally,
+        tooltip: FLIP_HORIZONTALLY_TOOLTIP,
+        turn: Transform::FLIP_HORIZONTALLY,
+    },
+    TurnButton {
+        icon: Icon::FlipVertically,
+        tooltip: FLIP_VERTICALLY_TOOLTIP,
+        turn: Transform::FLIP_VERTICALLY,
+    },
+];
 
 struct PoolView<'a> {
     tileset: &'a Tileset,
     texture: &'a TextureHandle,
     mode: ChanceMode,
-    primary_share: String,
+    own_share: String,
 }
 
 pub enum TileEdit {
-    Apply(TileRule),
-    Remove,
+    Apply { index: usize, rule: TileRule },
+    Select(usize),
+    Add,
+    Duplicate(usize),
+    Remove(usize),
 }
 
 pub struct TilePanel {
     tile: usize,
+    index: usize,
     neighborhood: Neighborhood,
     mods: TileMods,
     custom: Option<Orientations>,
+    drawn: Transform,
     /// A plain percentage while editing; only a valid one becomes a `Chance`.
     chance_percent: f32,
     has_rule: bool,
     error: Option<String>,
+    picking: Option<usize>,
 }
 
 impl TilePanel {
-    pub fn new(tile: usize, rule: TileRule, has_rule: bool) -> Self {
+    pub fn new(tile: usize, index: usize, rule: TileRule, has_rule: bool) -> Self {
         Self {
             tile,
+            index,
             neighborhood: rule.neighborhood,
             mods: rule.mods,
             custom: rule.custom,
+            drawn: rule.drawn,
             chance_percent: rule.chance.percent(),
             has_rule,
             error: None,
+            picking: None,
         }
     }
 
@@ -98,25 +166,52 @@ impl TilePanel {
         self.tile
     }
 
+    pub fn is_picking(&self) -> bool {
+        self.picking.is_some()
+    }
+
+    pub fn picked(&self) -> Option<usize> {
+        self.neighborhood.state(self.picking?).tile()
+    }
+
+    pub fn stop_picking(&mut self) {
+        self.picking = None;
+    }
+
+    pub fn pick(&mut self, tile: usize) -> Option<TileEdit> {
+        let index = self.picking.take()?;
+        self.neighborhood.set_state(index, NeighborState::Is(tile));
+        self.has_rule = true;
+
+        self.apply()
+    }
+
     pub fn show(
         &mut self,
         ui: &mut Ui,
         tileset: &Tileset,
         texture: &TextureHandle,
-        pools: &TilePools,
+        context: &TileContext,
         deactivated: bool,
     ) -> Option<TileEdit> {
-        ui.heading(match (self.has_rule, deactivated) {
-            (true, false) => format!("Tile {}", self.tile),
-            (false, false) => format!("Tile {} (no rule yet)", self.tile),
-            (true, true) => format!("Tile {} (deactivated)", self.tile),
-            (false, true) => format!("Tile {} (no rule yet, deactivated)", self.tile),
-        });
+        let heading_edit = self.show_heading(ui, deactivated);
         ui.add_space(HEADING_SPACING);
 
-        let changed = self.show_neighborhood(ui, tileset, texture);
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.stop_picking();
+        }
+
+        let tab_edit = self.show_rule_tabs(ui, context.rule_count);
+        let changed =
+            self.show_neighborhood(ui, tileset, texture, context.always_show_turn_buttons);
         ui.add_space(SECTION_SPACING);
         show_legend(ui);
+        if let Some(index) = self.picking {
+            ui.weak(format!(
+                "Picking the {} neighbor — click a tile, Esc: cancel",
+                NEIGHBORS[index].label
+            ));
+        }
 
         ui.add_space(SECTION_SPACING);
         let edit = self.show_options(ui, tileset, texture, changed);
@@ -125,11 +220,30 @@ impl TilePanel {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
 
-        if !pools.pools.is_empty() {
+        if !context.pools.is_empty() {
             ui.add_space(SECTION_SPACING);
             ui.strong("Pools");
-            self.show_pools(ui, tileset, texture, pools);
+            self.show_pools(ui, tileset, texture, context);
         }
+
+        heading_edit.or(tab_edit).or(edit)
+    }
+
+    fn show_rule_tabs(&self, ui: &mut Ui, rule_count: usize) -> Option<TileEdit> {
+        if rule_count == 0 {
+            return None;
+        }
+
+        let mut edit = None;
+        ui.horizontal_wrapped(|ui| {
+            for index in 0..rule_count {
+                let label = format!("Rule {}", index + 1);
+                if ui.selectable_label(index == self.index, label).clicked() {
+                    edit = Some(TileEdit::Select(index));
+                }
+            }
+        });
+        ui.add_space(SECTION_SPACING);
 
         edit
     }
@@ -139,15 +253,24 @@ impl TilePanel {
         ui: &mut Ui,
         tileset: &Tileset,
         texture: &TextureHandle,
-        pools: &TilePools,
+        context: &TileContext,
     ) {
+        let own_pool = context
+            .pools
+            .iter()
+            .copied()
+            .find(|pool| {
+                pool.member_of(self.tile)
+                    .is_some_and(|member| member.rule == self.index)
+            })
+            .unwrap_or(context.pools[0]);
         let view = PoolView {
             tileset,
             texture,
-            mode: pools.mode,
-            primary_share: self.share_label(pools.pools[0], pools.mode),
+            mode: context.mode,
+            own_share: self.share_label(own_pool, context.mode),
         };
-        for (index, pool) in pools.pools.iter().enumerate() {
+        for (index, pool) in context.pools.iter().enumerate() {
             self.show_pool(ui, &view, pool, index == 0);
         }
     }
@@ -157,8 +280,8 @@ impl TilePanel {
             .member_of(self.tile)
             .map_or(Transform::IDENTITY, |member| member.transform);
         let share = self.share_label(pool, view.mode);
-        let title = format!("{}: {share}", transform_name(transform));
-        let title = match share == view.primary_share {
+        let title = format!("{}: {share}", drawn_name(transform));
+        let title = match share == view.own_share {
             true => egui::RichText::new(title),
             false => egui::RichText::new(title).color(ui.visuals().warn_fg_color),
         };
@@ -205,18 +328,7 @@ impl TilePanel {
             .unwrap_or_default()
     }
 
-    fn show_action(&mut self, ui: &mut Ui, changed: bool) -> Option<TileEdit> {
-        if self.has_rule {
-            if ui.button("Remove rule").clicked() {
-                self.has_rule = false;
-                self.error = None;
-                return Some(TileEdit::Remove);
-            }
-        } else if ui.button("Add rule").clicked() {
-            self.has_rule = true;
-            return self.apply();
-        }
-
+    fn apply_if_changed(&mut self, changed: bool) -> Option<TileEdit> {
         if !changed {
             return None;
         }
@@ -225,16 +337,82 @@ impl TilePanel {
         self.apply()
     }
 
+    fn show_heading(&mut self, ui: &mut Ui, deactivated: bool) -> Option<TileEdit> {
+        let title = match deactivated {
+            true => format!("Tile {} (deactivated)", self.tile),
+            false => format!("Tile {}", self.tile),
+        };
+
+        ui.horizontal(|ui| {
+            ui.heading(title);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.show_rule_buttons(ui)
+            })
+            .inner
+        })
+        .inner
+    }
+
+    fn show_rule_buttons(&mut self, ui: &mut Ui) -> Option<TileEdit> {
+        let mut edit = None;
+
+        let remove = ui.add_enabled(self.has_rule, icon_button(ui, REMOVE_ICON));
+        if remove.on_hover_text(REMOVE_RULE_TOOLTIP).clicked() {
+            self.error = None;
+            edit = Some(TileEdit::Remove(self.index));
+        }
+
+        let duplicate = ui.add_enabled(self.has_rule, icon_button(ui, DUPLICATE_ICON));
+        if duplicate.on_hover_text(DUPLICATE_RULE_TOOLTIP).clicked() {
+            edit = Some(TileEdit::Duplicate(self.index));
+        }
+
+        if ui
+            .add(icon_button(ui, ADD_ICON))
+            .on_hover_text(ADD_RULE_TOOLTIP)
+            .clicked()
+        {
+            edit = self.add_rule();
+        }
+
+        edit
+    }
+
+    fn add_rule(&mut self) -> Option<TileEdit> {
+        if self.has_rule {
+            return Some(TileEdit::Add);
+        }
+
+        self.has_rule = true;
+        self.apply()
+    }
+
+    fn rule(&self, chance: Chance) -> TileRule {
+        TileRule {
+            neighborhood: self.neighborhood,
+            mods: self.mods,
+            custom: self.custom,
+            drawn: self.drawn,
+            chance,
+        }
+    }
+
+    fn turn(&mut self, by: Transform) {
+        let chance = Chance::new(self.chance_percent).unwrap_or_default();
+        let turned = self.rule(chance).turned(by);
+        self.neighborhood = turned.neighborhood;
+        self.drawn = turned.drawn;
+        self.picking = None;
+    }
+
     fn apply(&mut self) -> Option<TileEdit> {
         match Chance::new(self.chance_percent) {
             Ok(chance) => {
                 self.error = None;
-                Some(TileEdit::Apply(TileRule {
-                    neighborhood: self.neighborhood,
-                    mods: self.mods,
-                    custom: self.custom,
-                    chance,
-                }))
+                Some(TileEdit::Apply {
+                    index: self.index,
+                    rule: self.rule(chance),
+                })
             }
             Err(error) => {
                 self.error = Some(error.to_string());
@@ -248,6 +426,7 @@ impl TilePanel {
         ui: &mut Ui,
         tileset: &Tileset,
         texture: &TextureHandle,
+        always_show_turn_buttons: bool,
     ) -> bool {
         let mut changed = false;
         let size = cell_size(ui);
@@ -261,45 +440,142 @@ impl TilePanel {
 
                     for dx in -1..=1 {
                         match neighbor_index_at(dx, dy) {
-                            Some(index) => changed |= self.show_state_cell(ui, index, size),
-                            None => show_tile_preview(ui, tileset, texture, self.tile, size),
+                            Some(index) => {
+                                changed |= self.show_state_cell(ui, tileset, texture, index, size)
+                            }
+                            None => {
+                                changed |= self.show_centre_cell(
+                                    ui,
+                                    tileset,
+                                    texture,
+                                    size,
+                                    always_show_turn_buttons,
+                                )
+                            }
                         }
                     }
                 });
             }
         });
 
-        changed
+        changed | self.show_orientation_note(ui)
     }
 
-    fn show_state_cell(&mut self, ui: &mut Ui, index: usize, size: f32) -> bool {
-        let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click_and_drag());
-        paint_state(ui, rect, self.neighborhood.state(index));
+    fn show_orientation_note(&mut self, ui: &mut Ui) -> bool {
+        if self.drawn == Transform::IDENTITY {
+            return false;
+        }
 
-        let mut state = self.neighborhood.state(index);
-        if response.hovered() {
+        let reset = ui
+            .horizontal(|ui| {
+                ui.label(format!("{} ·", capitalized(drawn_name(self.drawn))));
+                ui.link("reset").on_hover_text(RESET_TOOLTIP).clicked()
+            })
+            .inner;
+        if reset {
+            self.turn(self.drawn.inverse());
+        }
+
+        reset
+    }
+
+    fn show_centre_cell(
+        &mut self,
+        ui: &mut Ui,
+        tileset: &Tileset,
+        texture: &TextureHandle,
+        size: f32,
+        always_show_turn_buttons: bool,
+    ) -> bool {
+        let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+        self.paint_turned_tile(ui, rect, tileset, texture, self.drawn);
+
+        let button_size = (size * BUTTON_FRACTION).max(MIN_BUTTON_SIZE);
+        let mut turn = None;
+        if always_show_turn_buttons || ui.rect_contains_pointer(rect) {
+            for (index, button) in TURN_BUTTONS.into_iter().enumerate() {
+                let area = button_rect(rect, index, button_size);
+                if turn_button(ui, area, button.icon, button.tooltip) {
+                    turn = Some(button.turn);
+                }
+            }
+        }
+        response.on_hover_text(format!("{}\n{ORIENTATION_HINT}", drawn_name(self.drawn)));
+
+        let Some(by) = turn else {
+            return false;
+        };
+        self.turn(by);
+        true
+    }
+
+    fn paint_turned_tile(
+        &self,
+        ui: &Ui,
+        rect: Rect,
+        tileset: &Tileset,
+        texture: &TextureHandle,
+        transform: Transform,
+    ) {
+        paint_checker(ui.painter(), rect, PREVIEW_LIGHT, PREVIEW_DARK);
+        preview::paint_turned(
+            ui.painter(),
+            rect,
+            texture,
+            &tileset.tiles[self.tile],
+            transform,
+        );
+    }
+
+    fn show_state_cell(
+        &mut self,
+        ui: &mut Ui,
+        tileset: &Tileset,
+        texture: &TextureHandle,
+        index: usize,
+        size: f32,
+    ) -> bool {
+        let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click_and_drag());
+        let current = self.neighborhood.state(index);
+        paint_state(ui, rect, current);
+        if let Some(tile) = current.tile() {
+            grid::paint_tile(ui.painter(), rect, texture, &tileset.tiles[tile]);
+        }
+
+        let mut state = current;
+        if response.hovered() || self.picking == Some(index) {
             ui.painter().rect_stroke(
                 rect,
                 CORNER_RADIUS,
                 Stroke::new(OUTLINE_WIDTH, ui.visuals().selection.stroke.color),
                 StrokeKind::Inside,
             );
-
-            if let Some(pressed) = pressed_state(ui) {
-                state = pressed;
-            }
+        }
+        if response.hovered()
+            && let Some(pressed) = pressed_state(ui)
+        {
+            state = pressed;
         }
 
-        if released_on(ui, &response, rect, PointerButton::Primary) {
+        let primary = released_on(ui, &response, rect, PointerButton::Primary);
+        let secondary = released_on(ui, &response, rect, PointerButton::Secondary);
+        response.on_hover_text(cell_tooltip(current));
+
+        if primary && ui.input(|input| input.modifiers.command) {
+            self.picking = (self.picking != Some(index)).then_some(index);
+            return false;
+        }
+        if primary {
             state = state.toggled_solid();
         }
-        if released_on(ui, &response, rect, PointerButton::Secondary) {
+        if secondary {
             state = NeighborState::Empty;
         }
 
-        response.on_hover_text(CELL_TOOLTIP);
-
-        if state == self.neighborhood.state(index) {
+        if (primary || secondary || state != current) && self.picking == Some(index) {
+            self.picking = None;
+        }
+        if state == current {
             return false;
         }
 
@@ -374,14 +650,7 @@ impl TilePanel {
 
         let (rect, response) =
             ui.allocate_exact_size(Vec2::splat(ORIENTATION_SIZE), Sense::click());
-        paint_checker(ui.painter(), rect, PREVIEW_LIGHT, PREVIEW_DARK);
-        preview::paint_turned(
-            ui.painter(),
-            rect,
-            texture,
-            &tileset.tiles[self.tile],
-            transform,
-        );
+        self.paint_turned_tile(ui, rect, tileset, texture, transform.after(self.drawn));
         if !enabled {
             ui.painter().rect_filled(rect, 0.0, DISABLED_DARKEN);
             paint_cross(ui.painter(), rect);
@@ -429,7 +698,6 @@ impl TilePanel {
 
         ui.add_space(HEADING_SPACING);
 
-        let mut edit = None;
         ui.horizontal(|ui| {
             ui.label("Chance").on_hover_text(CHANCE_TOOLTIP);
             let chance = egui::DragValue::new(&mut self.chance_percent)
@@ -437,11 +705,9 @@ impl TilePanel {
                 .speed(CHANCE_DRAG_SPEED)
                 .suffix(" %");
             changed |= ui.add(chance).on_hover_text(CHANCE_TOOLTIP).changed();
-
-            edit = self.show_action(ui, changed);
         });
 
-        edit
+        self.apply_if_changed(changed)
     }
 }
 
@@ -471,6 +737,98 @@ fn orientation_frame(ui: &Ui, editable: bool) -> egui::Frame {
     }
 }
 
+fn button_rect(cell: Rect, index: usize, size: f32) -> Rect {
+    let count = TURN_BUTTONS.len() as f32;
+    let row = Vec2::new(count * size + (count - 1.0) * BUTTON_GAP, size);
+    let area = Align2::CENTER_BOTTOM.align_size_within_rect(row, cell.shrink(BUTTON_MARGIN));
+
+    Rect::from_min_size(
+        area.min + Vec2::X * index as f32 * (size + BUTTON_GAP),
+        Vec2::splat(size),
+    )
+}
+
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+fn turn_button(ui: &Ui, rect: Rect, icon: Icon, tooltip: &str) -> bool {
+    let response = ui.interact(rect, ui.id().with(tooltip), Sense::click());
+    let visuals = ui.style().interact(&response);
+    ui.painter().rect(
+        rect,
+        CORNER_RADIUS,
+        visuals.weak_bg_fill,
+        visuals.bg_stroke,
+        StrokeKind::Inside,
+    );
+
+    let icon_area = rect.shrink(rect.width() * ICON_INSET_FRACTION);
+    let width = (icon_area.width() * ICON_STROKE_FRACTION).max(MIN_ICON_STROKE);
+    paint_icon(
+        ui.painter(),
+        icon_area,
+        Stroke::new(width, visuals.fg_stroke.color),
+        icon,
+    );
+
+    let clicked = response.clicked();
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(tooltip);
+
+    clicked
+}
+
+fn paint_icon(painter: &Painter, rect: Rect, stroke: Stroke, icon: Icon) {
+    match icon {
+        Icon::Rotate => paint_curl(painter, rect, stroke),
+        Icon::FlipHorizontally => paint_flip(painter, rect, stroke, true),
+        Icon::FlipVertically => paint_flip(painter, rect, stroke, false),
+    }
+}
+
+fn paint_curl(painter: &Painter, rect: Rect, stroke: Stroke) {
+    let radius = rect.width() / 2.0;
+    let point = |angle: f32| rect.center() + radius * Vec2::new(angle.cos(), angle.sin());
+    let arc: Vec<Pos2> = (0..=ARC_SEGMENTS)
+        .map(|step| point(ARC_START + ARC_SWEEP * step as f32 / ARC_SEGMENTS as f32))
+        .collect();
+
+    let end = arc[arc.len() - 1];
+    let before_end = arc[arc.len() - 2];
+    let tangent = (end - before_end).normalized();
+    let head = rect.width() * ARROW_HEAD_FRACTION;
+    let wing = tangent.rot90() * head * ARROW_HEAD_WIDTH;
+    let arrow = vec![end + tangent * head, end + wing, end - wing];
+
+    painter.add(Shape::line(arc, stroke));
+    painter.add(Shape::convex_polygon(arrow, stroke.color, Stroke::NONE));
+}
+
+fn paint_flip(painter: &Painter, rect: Rect, stroke: Stroke, horizontal: bool) {
+    let half = rect.width() / 2.0;
+    let place = |along: f32, across: f32| {
+        rect.center()
+            + match horizontal {
+                true => Vec2::new(along, across),
+                false => Vec2::new(across, along),
+            }
+    };
+
+    painter.line_segment([place(0.0, -half), place(0.0, half)], stroke);
+    for side in [-1.0, 1.0] {
+        let base = half * FLIP_BASE_FRACTION;
+        let gap = side * half * FLIP_GAP_FRACTION;
+        let wedge = vec![place(gap, -base), place(gap, base), place(side * half, 0.0)];
+        painter.add(Shape::convex_polygon(wedge, stroke.color, Stroke::NONE));
+    }
+}
+
 fn paint_hover_outline(ui: &Ui, rect: Rect) {
     let stroke = ui.visuals().widgets.hovered.bg_stroke;
     ui.painter()
@@ -484,6 +842,13 @@ fn paint_cross(painter: &egui::Painter, rect: Rect) {
     painter.line_segment([rect.right_top(), rect.left_bottom()], stroke);
 }
 
+fn drawn_name(transform: Transform) -> &'static str {
+    match transform == Transform::IDENTITY {
+        true => "unrotated",
+        false => transform_name(transform),
+    }
+}
+
 fn transform_name(transform: Transform) -> &'static str {
     match (transform.x_flip, transform.y_flip, transform.rot) {
         (false, false, false) => "as drawn",
@@ -492,8 +857,8 @@ fn transform_name(transform: Transform) -> &'static str {
         (true, true, true) => "rotated 270°",
         (true, false, false) => "mirrored left-right",
         (false, true, false) => "mirrored top-bottom",
-        (true, false, true) => "mirrored along the anti diagonal",
-        (false, true, true) => "mirrored along the main diagonal",
+        (true, false, true) => "mirrored anti-diagonally",
+        (false, true, true) => "mirrored diagonally",
     }
 }
 
@@ -550,23 +915,20 @@ fn paint_state(ui: &Ui, rect: Rect, state: NeighborState) {
             paint_checker(painter, rect, ANY_LIGHT, ANY_DARK);
             mark
         }
+        NeighborState::Is(_) => {
+            paint_checker(painter, rect, PREVIEW_LIGHT, PREVIEW_DARK);
+            default_border
+        }
     };
 
     painter.rect_stroke(rect, CORNER_RADIUS, border, StrokeKind::Inside);
 }
 
-fn show_tile_preview(
-    ui: &mut Ui,
-    tileset: &Tileset,
-    texture: &TextureHandle,
-    tile: usize,
-    size: f32,
-) {
-    let (rect, _response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
-    let slice = &tileset.tiles[tile];
-
-    paint_checker(ui.painter(), rect, PREVIEW_LIGHT, PREVIEW_DARK);
-    grid::paint_tile(ui.painter(), rect, texture, slice);
+fn cell_tooltip(state: NeighborState) -> String {
+    match state {
+        NeighborState::Is(tile) => format!("is tile {tile}\n{CELL_TOOLTIP}"),
+        NeighborState::Empty | NeighborState::Full | NeighborState::Any => CELL_TOOLTIP.to_owned(),
+    }
 }
 
 fn show_legend(ui: &mut Ui) {

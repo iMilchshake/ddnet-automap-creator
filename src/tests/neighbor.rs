@@ -36,6 +36,17 @@ fn toggling_solid_moves_empty_to_full_and_swaps_full_with_any() {
 }
 
 #[test]
+fn toggling_solid_turns_a_tile_requirement_into_full() {
+    assert_eq!(NeighborState::Is(17).toggled_solid(), NeighborState::Full);
+}
+
+#[test]
+fn only_tile_requirements_expose_a_tile() {
+    assert_eq!(NeighborState::Any.tile(), None);
+    assert_eq!(NeighborState::Is(1).tile(), Some(1));
+}
+
+#[test]
 fn uniform_sets_every_state() {
     let neighborhood = Neighborhood::uniform(NeighborState::Any);
     assert_eq!(neighborhood.states(), &[NeighborState::Any; NEIGHBOR_COUNT]);

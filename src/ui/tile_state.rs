@@ -25,7 +25,7 @@ pub fn tile_state(tileset: &Tileset, project: &Project, tile: usize) -> TileStat
     if project.group_at(tile).is_some() {
         return TileState::Grouped;
     }
-    let rule = project.rule(tile).copied();
+    let rule = project.rules_of(tile).first().copied();
     if rule.is_none() && tileset.tiles[tile].kind == TileKind::Locked {
         return TileState::Locked;
     }
@@ -37,11 +37,7 @@ pub fn tile_state(tileset: &Tileset, project: &Project, tile: usize) -> TileStat
     }
 }
 
-pub fn seed_rule(tileset: &Tileset, project: &Project, tile: usize) -> TileRule {
-    if let Some(rule) = project.rule(tile) {
-        return *rule;
-    }
-
+pub fn seed_rule(tileset: &Tileset, tile: usize) -> TileRule {
     match tileset.tiles[tile].kind {
         TileKind::Open => TileRule::new(Neighborhood::uniform(NeighborState::Any)),
         TileKind::Locked => TileRule::new(Neighborhood::default()),

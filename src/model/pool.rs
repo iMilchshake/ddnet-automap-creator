@@ -5,6 +5,7 @@ use crate::model::tile::{Chance, TileRule};
 use crate::model::transform::Transform;
 
 const ALL_CELLS: f32 = 100.0;
+const CHANCE_RESOLUTION: f32 = 1000.0;
 
 /// How the chances of tiles sharing a neighborhood turn into what they place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -19,6 +20,7 @@ pub enum ChanceMode {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Variant {
     pub tile: usize,
+    pub rule: usize,
     pub transform: Transform,
     pub primary: bool,
     pub neighborhood: Neighborhood,
@@ -56,10 +58,13 @@ impl Pool {
     }
 
     pub fn total(&self) -> f32 {
-        self.members
+        let sum: f32 = self
+            .members
             .iter()
             .map(|member| member.chance.percent())
-            .sum()
+            .sum();
+
+        (sum * CHANCE_RESOLUTION).round() / CHANCE_RESOLUTION
     }
 
     pub fn contains(&self, tile: usize) -> bool {
@@ -127,23 +132,31 @@ pub fn pools(tiles: &[(usize, TileRule)]) -> Vec<Pool> {
 fn expand(tiles: &[(usize, TileRule)]) -> Vec<Variant> {
     let mut variants = Vec::new();
 
+    let mut rules_by_tile: BTreeMap<usize, Vec<TileRule>> = BTreeMap::new();
     for &(tile, rule) in tiles {
-        let mut seen = Vec::new();
-        for transform in rule.orientations().transforms() {
-            let neighborhood = transform.apply(&rule.neighborhood);
-            if seen.contains(&neighborhood) {
-                continue;
-            }
-            let primary = seen.is_empty();
-            seen.push(neighborhood);
+        rules_by_tile.entry(tile).or_default().push(rule);
+    }
 
-            variants.push(Variant {
-                tile,
-                transform,
-                primary,
-                neighborhood,
-                chance: rule.chance,
-            });
+    for (tile, rules) in rules_by_tile {
+        let mut seen = Vec::new();
+        for (index, rule) in rules.into_iter().enumerate() {
+            for relative in rule.orientations().transforms() {
+                let neighborhood = relative.apply(&rule.neighborhood);
+                if seen.contains(&neighborhood) {
+                    continue;
+                }
+                let primary = seen.is_empty();
+                seen.push(neighborhood);
+
+                variants.push(Variant {
+                    tile,
+                    rule: index,
+                    transform: relative.after(rule.drawn),
+                    primary,
+                    neighborhood,
+                    chance: rule.chance,
+                });
+            }
         }
     }
 

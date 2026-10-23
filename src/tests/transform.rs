@@ -1,7 +1,7 @@
-use crate::model::neighbor::NeighborState;
+use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::tile::TileMods;
 use crate::model::transform::{Orientations, Transform};
-use crate::tests::support::{half_turn, mods, named, outer_corner};
+use crate::tests::support::{all_distinct, half_turn, index_of, mods, named, outer_corner};
 
 fn transform(x_flip: bool, y_flip: bool, rot: bool) -> Transform {
     Transform {
@@ -177,4 +177,99 @@ fn with_and_without_add_and_remove_one_orientation() {
     assert_eq!(with_turn.len(), 2);
     assert_eq!(with_turn.without(quarter_turn), identity_only);
     assert!(identity_only.without(Transform::IDENTITY).is_empty());
+}
+
+#[test]
+fn applying_after_the_identity_changes_nothing() {
+    for transform in Transform::ALL {
+        assert_eq!(transform.after(Transform::IDENTITY), transform);
+        assert_eq!(Transform::IDENTITY.after(transform), transform);
+    }
+}
+
+#[test]
+fn after_applies_the_first_transform_first() {
+    let base = all_distinct();
+    for second in Transform::ALL {
+        for first in Transform::ALL {
+            assert_eq!(
+                second.after(first).apply(&base),
+                second.apply(&first.apply(&base)),
+                "{second:?} after {first:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn after_stays_within_the_eight_transforms() {
+    for second in Transform::ALL {
+        for first in Transform::ALL {
+            assert!(Transform::ALL.contains(&second.after(first)));
+        }
+    }
+}
+
+fn only_empty(name: &str) -> Neighborhood {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
+    neighborhood.set_state(index_of(name), NeighborState::Empty);
+
+    neighborhood
+}
+
+fn moved_empty(by: Transform, name: &str) -> Vec<&'static str> {
+    named(&by.apply(&only_empty(name)), NeighborState::Empty)
+}
+
+#[test]
+fn rotating_clockwise_moves_top_to_right_to_bottom_to_left() {
+    let rotate = Transform::ROTATE_CLOCKWISE;
+
+    assert_eq!(moved_empty(rotate, "top"), ["right"]);
+    assert_eq!(moved_empty(rotate, "right"), ["bottom"]);
+    assert_eq!(moved_empty(rotate, "bottom"), ["left"]);
+    assert_eq!(moved_empty(rotate, "left"), ["top"]);
+}
+
+#[test]
+fn flipping_horizontally_mirrors_left_and_right_only() {
+    let flip = Transform::FLIP_HORIZONTALLY;
+
+    assert_eq!(moved_empty(flip, "left"), ["right"]);
+    assert_eq!(moved_empty(flip, "topLeft"), ["topRight"]);
+    assert_eq!(moved_empty(flip, "top"), ["top"]);
+}
+
+#[test]
+fn flipping_vertically_mirrors_top_and_bottom_only() {
+    let flip = Transform::FLIP_VERTICALLY;
+
+    assert_eq!(moved_empty(flip, "top"), ["bottom"]);
+    assert_eq!(moved_empty(flip, "topLeft"), ["bottomLeft"]);
+    assert_eq!(moved_empty(flip, "left"), ["left"]);
+}
+
+#[test]
+fn rotating_four_times_or_flipping_twice_is_the_identity() {
+    let repeated = |by: Transform, times: usize| {
+        (0..times).fold(Transform::IDENTITY, |total, _| by.after(total))
+    };
+
+    assert_eq!(
+        repeated(Transform::ROTATE_CLOCKWISE, 4),
+        Transform::IDENTITY
+    );
+    assert_eq!(
+        repeated(Transform::FLIP_HORIZONTALLY, 2),
+        Transform::IDENTITY
+    );
+    assert_eq!(repeated(Transform::FLIP_VERTICALLY, 2), Transform::IDENTITY);
+}
+
+#[test]
+fn an_inverse_applied_after_or_before_gives_the_identity() {
+    for transform in Transform::ALL {
+        assert_eq!(transform.after(transform.inverse()), Transform::IDENTITY);
+        assert_eq!(transform.inverse().after(transform), Transform::IDENTITY);
+    }
 }

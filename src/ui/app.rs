@@ -17,14 +17,15 @@ use crate::model::pool::{self, ChanceMode, Pool};
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{AIR_TILE, Chance, TILESET_SIDE, TileRule};
-use crate::preview::{self, Automapped, Sample};
+use crate::preview::{self, Automapped, PlacedTile, Sample};
 use crate::tileset::{self, Tileset};
 use crate::ui::grid::{self, GridResponse, GridView};
 use crate::ui::group_panel::{GroupPanel, mode_label};
 use crate::ui::preview as preview_view;
 use crate::ui::status::StatusLine;
-use crate::ui::tile_panel::{TileEdit, TilePanel, TilePools};
+use crate::ui::tile_panel::{TileContext, TileEdit, TilePanel};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
+use crate::ui::{ADD_ICON, DUPLICATE_ICON, REMOVE_ICON, icon_button};
 
 const SIDE_PANEL_WIDTH: f32 = 260.0;
 const MIN_SIDE_PANEL_WIDTH: f32 = 220.0;
@@ -42,11 +43,10 @@ const GROUP_SWATCH_SPACING: f32 = 4.0;
 const HEADING_SPACING: f32 = 4.0;
 const DROP_LINE_WIDTH: f32 = 2.0;
 const FIRST_PREVIEW_SEED: u32 = 42;
+const FIRST_RULE: usize = 0;
 const DROP_OVERLAY_ALPHA: u8 = 160;
 const DROP_HINT_SIZE: f32 = 24.0;
 
-const REMOVE_ICON: &str = "✖";
-const DUPLICATE_ICON: &str = "⎘";
 const GITHUB_ICON: char = egui::special_emojis::GITHUB;
 const CREDIT: &str = env!("CARGO_PKG_NAME");
 const SHORT_CREDIT: &str = "GitHub";
@@ -69,9 +69,10 @@ const NORMALIZE_TOOLTIP: &str = "ON: chances are re-normalized to always add up 
                                  100%";
 const ZOOM_TOOLTIP: &str = "Shortcuts: Ctrl + and Ctrl - to zoom, Ctrl 0 to reset.";
 const PERCENT: f32 = 100.0;
-const KEYBINDS: [(&str, &str); 4] = [
+const KEYBINDS: [(&str, &str); 5] = [
     ("Ctrl O", "Open image"),
     ("1 / 2 / 3", "Set hovered neighbor to Empty / Full / Any"),
+    ("Ctrl click", "Pick a specific tile for a neighbor"),
     ("Ctrl + / Ctrl -", "Zoom"),
     ("Ctrl 0", "Reset zoom"),
 ];
@@ -124,6 +125,17 @@ impl Inspector {
     fn group(&self) -> Option<usize> {
         match self {
             Self::Group(panel) => Some(panel.index()),
+            _ => None,
+        }
+    }
+
+    fn is_picking(&self) -> bool {
+        matches!(self, Self::Tile(panel) if panel.is_picking())
+    }
+
+    fn picked(&self) -> Option<usize> {
+        match self {
+            Self::Tile(panel) => panel.picked(),
             _ => None,
         }
     }
@@ -235,6 +247,7 @@ pub struct AutomapperApp {
     preview_sample: Sample,
     inspector: Inspector,
     define_groups: bool,
+    always_show_turn_buttons: bool,
     drag_anchor: Option<usize>,
     hovered_tile: Option<usize>,
     export_open: bool,
@@ -261,6 +274,7 @@ impl Default for AutomapperApp {
             preview_sample: Sample::default(),
             inspector: Inspector::Empty,
             define_groups: false,
+            always_show_turn_buttons: false,
             drag_anchor: None,
             hovered_tile: None,
             export_open: false,
@@ -786,6 +800,11 @@ impl AutomapperApp {
                 });
         }
 
+        ui.checkbox(
+            &mut self.always_show_turn_buttons,
+            "Always show orientation buttons",
+        );
+
         if ui.ctx().options(|options| options.zoom_with_keyboard) {
             show_zoom(ui);
         }
@@ -875,14 +894,14 @@ impl AutomapperApp {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let can_remove = self.rule_sets.len() > 1;
                             if ui
-                                .add_enabled(can_remove, egui::Button::new(REMOVE_ICON))
+                                .add_enabled(can_remove, icon_button(ui, REMOVE_ICON))
                                 .on_hover_text("Remove this rule set")
                                 .clicked()
                             {
                                 rule_set_command = Some(RuleSetCommand::Remove);
                             }
                             if ui
-                                .button(DUPLICATE_ICON)
+                                .add(icon_button(ui, DUPLICATE_ICON))
                                 .on_hover_text("Duplicate this rule set")
                                 .clicked()
                             {
@@ -901,9 +920,15 @@ impl AutomapperApp {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         match (&self.workspace, &mut self.inspector) {
                             (Workspace::Ready(loaded), Inspector::Tile(panel)) => {
-                                let tile_pools = TilePools {
+                                let context = TileContext {
                                     pools: pool::pools_of(&pools, panel.tile()),
                                     mode: self.rule_sets.active().chance_mode(),
+                                    rule_count: self
+                                        .rule_sets
+                                        .active()
+                                        .rules_of(panel.tile())
+                                        .len(),
+                                    always_show_turn_buttons: self.always_show_turn_buttons,
                                 };
                                 let deactivated =
                                     self.rule_sets.active().is_deactivated(panel.tile());
@@ -912,7 +937,7 @@ impl AutomapperApp {
                                         ui,
                                         &loaded.tileset,
                                         &loaded.texture,
-                                        &tile_pools,
+                                        &context,
                                         deactivated,
                                     )
                                     .map(|edit| (panel.tile(), edit));
@@ -945,10 +970,7 @@ impl AutomapperApp {
             });
 
         if let Some((tile, edit)) = tile_edit {
-            match edit {
-                TileEdit::Apply(rule) => self.rule_sets.active_mut().set_rule(tile, rule),
-                TileEdit::Remove => self.rule_sets.active_mut().clear_rule(tile),
-            }
+            self.apply_tile_edit(tile, edit);
         }
         if let Some((index, group)) = group_edit {
             self.rule_sets.active_mut().replace_group(index, group);
@@ -983,6 +1005,49 @@ impl AutomapperApp {
             }
             Some(RuleSetCommand::Remove) => self.remove_active_rule_set(),
             None => {}
+        }
+    }
+
+    fn apply_tile_edit(&mut self, tile: usize, edit: TileEdit) {
+        match edit {
+            TileEdit::Apply { index, rule } => self.store_rule(tile, index, rule),
+            TileEdit::Select(index) => self.select_tile(tile, index),
+            TileEdit::Add => {
+                if let Some(rule) = self.seeded_rule(tile) {
+                    self.append_rule(tile, rule);
+                }
+            }
+            TileEdit::Duplicate(index) => {
+                if let Some(&rule) = self.rule_sets.active().rules_of(tile).get(index) {
+                    self.append_rule(tile, rule);
+                }
+            }
+            TileEdit::Remove(index) => {
+                self.rule_sets.active_mut().remove_rule(tile, index);
+                self.select_tile(tile, index.saturating_sub(1));
+            }
+        }
+    }
+
+    fn store_rule(&mut self, tile: usize, index: usize, rule: TileRule) {
+        let project = self.rule_sets.active_mut();
+        match index < project.rules_of(tile).len() {
+            true => project.replace_rule(tile, index, rule),
+            false => {
+                project.add_rule(tile, rule);
+            }
+        }
+    }
+
+    fn append_rule(&mut self, tile: usize, rule: TileRule) {
+        let index = self.rule_sets.active_mut().add_rule(tile, rule);
+        self.select_tile(tile, index);
+    }
+
+    fn seeded_rule(&self, tile: usize) -> Option<TileRule> {
+        match &self.workspace {
+            Workspace::Ready(loaded) => Some(seed_rule(&loaded.tileset, tile)),
+            Workspace::NoImage => None,
         }
     }
 
@@ -1129,6 +1194,7 @@ impl AutomapperApp {
                             drag_anchor: self.drag_anchor,
                             selected: self.inspector.tile(),
                             pool_mates: &pool_mates,
+                            picked: self.inspector.picked(),
                         },
                     )
                 })
@@ -1201,8 +1267,8 @@ impl AutomapperApp {
             }
         }
 
-        if let Some(tile) = clicked {
-            self.select_rule_of(tile);
+        if let Some(placed) = clicked {
+            self.select_rule_of(placed);
         }
     }
 
@@ -1247,13 +1313,18 @@ impl AutomapperApp {
             return;
         }
 
+        if self.inspector.is_picking() {
+            self.pick_tile(ctx, response);
+            return;
+        }
+
         if response.clicked == Some(AIR_TILE) {
             self.status
                 .warning(ctx, format!("Tile {AIR_TILE} {AIR_WARNING}"));
         }
 
         if let Some(tile) = response.clicked {
-            self.select_tile(tile);
+            self.select_tile(tile, FIRST_RULE);
         }
 
         if let Some(tile) = response.secondary_clicked {
@@ -1261,7 +1332,30 @@ impl AutomapperApp {
         }
     }
 
-    fn select_tile(&mut self, tile: usize) {
+    fn pick_tile(&mut self, ctx: &Context, response: GridResponse) {
+        let Inspector::Tile(panel) = &mut self.inspector else {
+            return;
+        };
+        if response.secondary_clicked.is_some() {
+            panel.stop_picking();
+            return;
+        }
+
+        let Some(tile) = response.clicked else {
+            return;
+        };
+        if tile == AIR_TILE {
+            self.status
+                .warning(ctx, format!("Tile {AIR_TILE} {AIR_WARNING}"));
+            return;
+        }
+        if let Some(edit) = panel.pick(tile) {
+            let owner = panel.tile();
+            self.apply_tile_edit(owner, edit);
+        }
+    }
+
+    fn select_tile(&mut self, tile: usize, index: usize) {
         let Workspace::Ready(loaded) = &self.workspace else {
             return;
         };
@@ -1269,23 +1363,40 @@ impl AutomapperApp {
             return;
         }
 
-        let rule = seed_rule(&loaded.tileset, self.rule_sets.active(), tile);
-        let has_rule = self.rule_sets.active().rule(tile).is_some();
-        self.inspector = Inspector::Tile(TilePanel::new(tile, rule, has_rule));
+        let (rule, has_rule) = match self.rule_sets.active().rules_of(tile).get(index) {
+            Some(&rule) => (rule, true),
+            None => (seed_rule(&loaded.tileset, tile), false),
+        };
+        self.inspector = Inspector::Tile(TilePanel::new(tile, index, rule, has_rule));
     }
 
-    fn select_rule_of(&mut self, tile: usize) {
+    fn select_rule_of(&mut self, placed: PlacedTile) {
         self.drag_anchor = None;
-        match self.rule_sets.active().group_at(tile) {
+        match self.rule_sets.active().group_at(placed.index) {
             Some(index) => {
                 self.define_groups = true;
                 self.select_group(index);
             }
             None => {
                 self.define_groups = false;
-                self.select_tile(tile);
+                let rule = self.rule_drawing(placed);
+                self.select_tile(placed.index, rule);
             }
         }
+    }
+
+    fn rule_drawing(&self, placed: PlacedTile) -> usize {
+        self.rule_sets
+            .active()
+            .rules_of(placed.index)
+            .iter()
+            .position(|rule| {
+                rule.orientations()
+                    .transforms()
+                    .into_iter()
+                    .any(|relative| relative.after(rule.drawn) == placed.transform)
+            })
+            .unwrap_or(FIRST_RULE)
     }
 
     fn handle_group_grid(&mut self, ctx: &Context, response: GridResponse) {
@@ -1595,7 +1706,11 @@ fn show_rule_set_tabs(ui: &mut Ui, rule_sets: &RuleSets, command: &mut Option<Ru
             }
         }
 
-        if ui.small_button("+").on_hover_text("Add rule set").clicked() {
+        if ui
+            .small_button(ADD_ICON)
+            .on_hover_text("Add rule set")
+            .clicked()
+        {
             *command = Some(RuleSetCommand::Add);
         }
     });
@@ -1692,7 +1807,7 @@ fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
         return format!("Tile {tile} · reserved for air");
     }
 
-    match tile_state(tileset, project, tile) {
+    let text = match tile_state(tileset, project, tile) {
         TileState::Locked => format!("Tile {tile} · locked"),
         TileState::Grouped => format!("Tile {tile} · in a group"),
         TileState::Deactivated(None) => format!("Tile {tile} · deactivated"),
@@ -1708,16 +1823,21 @@ fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
                 false => format!("Tile {tile} · {neighborhood} · {}%", rule.chance.percent()),
             }
         }
+    };
+
+    match project.rules_of(tile).len() {
+        0 | 1 => text,
+        count => format!("{text} · {count} rules"),
     }
 }
 
 fn describe_counts(project: &Project) -> String {
-    let tiles = match project.deactivated_rule_count() {
-        0 => format!("{} tiles", project.rule_count()),
-        deactivated => format!("{} tiles ({deactivated} deactivated)", project.rule_count()),
+    let rules = match project.deactivated_rule_count() {
+        0 => format!("{} rules", project.rule_count()),
+        deactivated => format!("{} rules ({deactivated} deactivated)", project.rule_count()),
     };
 
-    format!("{tiles}, {} groups configured", project.groups().len())
+    format!("{rules}, {} groups configured", project.groups().len())
 }
 
 fn format_neighborhood(neighborhood: Neighborhood) -> String {
@@ -1738,6 +1858,7 @@ fn state_glyph(state: NeighborState) -> char {
         NeighborState::Empty => '.',
         NeighborState::Full => '#',
         NeighborState::Any => '?',
+        NeighborState::Is(_) => '=',
     }
 }
 

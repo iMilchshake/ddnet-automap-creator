@@ -76,7 +76,7 @@ fn renaming_the_active_set_edits_it_in_place() {
 fn duplicating_inserts_a_copy_right_after_and_selects_it() {
     let mut sets = RuleSets::new("grass_main".to_owned());
     sets.active_mut()
-        .set_rule(5, TileRule::new(Neighborhood::uniform(NeighborState::Full)));
+        .add_rule(5, TileRule::new(Neighborhood::uniform(NeighborState::Full)));
     sets.add();
 
     let index = sets.duplicate(0).unwrap();

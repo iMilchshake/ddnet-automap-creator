@@ -6,7 +6,7 @@ use egui::{
 };
 
 use crate::model::transform::Transform;
-use crate::preview::{Automapped, PreviewCell};
+use crate::preview::{Automapped, PlacedTile, PreviewCell};
 use crate::tileset::{TileSlice, Tileset};
 
 const MIN_CELL_SIZE: f32 = 4.0;
@@ -23,7 +23,7 @@ pub fn show(
     tileset: &Tileset,
     texture: &TextureHandle,
     automapped: &Automapped,
-) -> Option<usize> {
+) -> Option<PlacedTile> {
     let pixels_per_point = ui.ctx().pixels_per_point();
     let cell_size = whole_pixel_cell_size(ui.available_size(), automapped, pixels_per_point);
     let size = Vec2::new(
@@ -79,7 +79,7 @@ pub fn show(
 
     response
         .clicked_by(PointerButton::Primary)
-        .then_some(placed.index)
+        .then_some(placed)
 }
 
 fn cell_rect(rect: Rect, cell_size: f32, column: usize, row: usize) -> Rect {

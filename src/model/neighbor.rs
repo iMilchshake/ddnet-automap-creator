@@ -12,13 +12,21 @@ pub enum NeighborState {
     Empty,
     Full,
     Any,
+    Is(usize),
 }
 
 impl NeighborState {
     pub fn toggled_solid(self) -> Self {
         match self {
-            Self::Empty | Self::Any => Self::Full,
+            Self::Empty | Self::Any | Self::Is(_) => Self::Full,
             Self::Full => Self::Any,
+        }
+    }
+
+    pub fn tile(self) -> Option<usize> {
+        match self {
+            Self::Is(tile) => Some(tile),
+            Self::Empty | Self::Full | Self::Any => None,
         }
     }
 }
@@ -29,21 +37,27 @@ pub struct Neighbor {
     /// Positive downwards.
     pub dy: i32,
     pub rpp_name: &'static str,
+    pub label: &'static str,
 }
 
-const fn neighbor(dx: i32, dy: i32, rpp_name: &'static str) -> Neighbor {
-    Neighbor { dx, dy, rpp_name }
+const fn neighbor(dx: i32, dy: i32, rpp_name: &'static str, label: &'static str) -> Neighbor {
+    Neighbor {
+        dx,
+        dy,
+        rpp_name,
+        label,
+    }
 }
 
 pub const NEIGHBORS: [Neighbor; NEIGHBOR_COUNT] = [
-    neighbor(-1, -1, "topLeft"),
-    neighbor(0, -1, "top"),
-    neighbor(1, -1, "topRight"),
-    neighbor(-1, 0, "left"),
-    neighbor(1, 0, "right"),
-    neighbor(-1, 1, "bottomLeft"),
-    neighbor(0, 1, "bottom"),
-    neighbor(1, 1, "bottomRight"),
+    neighbor(-1, -1, "topLeft", "top left"),
+    neighbor(0, -1, "top", "top"),
+    neighbor(1, -1, "topRight", "top right"),
+    neighbor(-1, 0, "left", "left"),
+    neighbor(1, 0, "right", "right"),
+    neighbor(-1, 1, "bottomLeft", "bottom left"),
+    neighbor(0, 1, "bottom", "bottom"),
+    neighbor(1, 1, "bottomRight", "bottom right"),
 ];
 
 pub fn neighbor_index_at(dx: i32, dy: i32) -> Option<usize> {
@@ -74,6 +88,10 @@ impl Neighborhood {
 
     pub fn states(&self) -> &[NeighborState; NEIGHBOR_COUNT] {
         &self.states
+    }
+
+    pub fn is_tile_specific(&self) -> bool {
+        self.states.iter().any(|state| state.tile().is_some())
     }
 }
 
