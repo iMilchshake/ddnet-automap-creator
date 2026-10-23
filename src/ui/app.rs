@@ -21,6 +21,7 @@ use crate::preview::{self, Automapped, PlacedTile, Sample};
 use crate::tileset::{self, Tileset};
 use crate::ui::grid::{self, GridResponse, GridView};
 use crate::ui::group_panel::{GroupPanel, mode_label};
+use crate::ui::picking;
 use crate::ui::preview as preview_view;
 use crate::ui::status::StatusLine;
 use crate::ui::tile_panel::{TileContext, TileEdit, TilePanel};
@@ -139,6 +140,19 @@ impl Inspector {
             _ => None,
         }
     }
+
+    fn picking_label(&self) -> Option<&'static str> {
+        match self {
+            Self::Tile(panel) => panel.picking_label(),
+            _ => None,
+        }
+    }
+
+    fn stop_picking(&mut self) {
+        if let Self::Tile(panel) = self {
+            panel.stop_picking();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,6 +254,8 @@ pub struct AutomapperApp {
     compile_target: Option<CompileTarget>,
     status: StatusLine,
     view: View,
+    view_before_picking: Option<View>,
+    was_picking: bool,
     split_ratio: f32,
     preview: PreviewResult,
     preview_source: Option<String>,
@@ -267,6 +283,8 @@ impl Default for AutomapperApp {
             compile_target: None,
             status: StatusLine::default(),
             view: View::Tileset,
+            view_before_picking: None,
+            was_picking: false,
             split_ratio: DEFAULT_SPLIT_RATIO,
             preview: PreviewResult::Waiting,
             preview_source: None,
@@ -313,6 +331,7 @@ impl eframe::App for AutomapperApp {
         self.show_help(&ctx);
         self.show_blueprint_confirmation(&ctx);
         show_drop_hint(&ctx);
+        self.follow_picking(&ctx);
 
         if self.compiler.is_running() {
             ctx.request_repaint();
@@ -324,20 +343,52 @@ impl AutomapperApp {
     fn show_view(&mut self, ui: &mut Ui, ctx: &Context) {
         match self.view {
             View::Tileset => {
-                egui::CentralPanel::default().show(ui, |ui| self.show_tileset(ui, ctx));
+                let panel = egui::CentralPanel::default().show(ui, |ui| self.show_tileset(ui, ctx));
+                self.show_picking(ctx, panel.response.rect);
             }
             View::Preview => {
                 self.hovered_tile = None;
                 egui::CentralPanel::default().show(ui, |ui| self.show_preview(ui));
             }
             View::Split => {
-                self.show_tileset_panel(ui, ctx);
+                let tileset_rect = self.show_tileset_panel(ui, ctx);
+                self.show_picking(ctx, tileset_rect);
                 egui::CentralPanel::default().show(ui, |ui| self.show_preview(ui));
             }
         }
     }
 
-    fn show_tileset_panel(&mut self, ui: &mut Ui, ctx: &Context) {
+    fn show_picking(&mut self, ctx: &Context, view: Rect) {
+        let Some(label) = self.inspector.picking_label() else {
+            return;
+        };
+        if picking::show(ctx, view, label) {
+            self.inspector.stop_picking();
+        }
+    }
+
+    fn follow_picking(&mut self, ctx: &Context) {
+        let picking = self.inspector.is_picking();
+        let started = picking && !self.was_picking;
+        self.was_picking = picking;
+
+        let target = match (started, picking, self.view_before_picking) {
+            (true, _, _) if self.view == View::Preview => {
+                self.view_before_picking = Some(View::Preview);
+                View::Tileset
+            }
+            (_, false, Some(view)) => {
+                self.view_before_picking = None;
+                view
+            }
+            _ => return,
+        };
+
+        self.view = target;
+        ctx.request_repaint();
+    }
+
+    fn show_tileset_panel(&mut self, ui: &mut Ui, ctx: &Context) -> Rect {
         let available = ui.available_rect_before_wrap();
         let panel_id = Id::new(SPLIT_PANEL_ID);
         let wanted_width = self.split_ratio * available.width();
@@ -362,6 +413,8 @@ impl AutomapperApp {
         if available.width() > 0.0 && !clamped_by_window {
             self.split_ratio = width / available.width();
         }
+
+        panel.response.rect
     }
 
     fn receive_files(&mut self, ctx: &Context) {
@@ -681,6 +734,7 @@ impl AutomapperApp {
         self.preview = PreviewResult::Waiting;
         self.preview_source = None;
         self.view = View::Tileset;
+        self.view_before_picking = None;
         self.workspace = Workspace::Ready(LoadedTileset { tileset, texture });
     }
 
@@ -775,6 +829,7 @@ impl AutomapperApp {
 
     fn show_view_picker(&mut self, ui: &mut Ui) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
+        let previous = self.view;
 
         ui.add_enabled_ui(has_image, |ui| {
             ui.selectable_value(&mut self.view, View::Tileset, "Tileset");
@@ -783,6 +838,10 @@ impl AutomapperApp {
         })
         .response
         .on_hover_text(PREVIEW_TOOLTIP);
+
+        if self.view != previous {
+            self.view_before_picking = None;
+        }
     }
 
     fn show_options(&mut self, ui: &mut Ui) {

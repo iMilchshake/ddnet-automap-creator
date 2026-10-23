@@ -1,6 +1,7 @@
 mod app;
 mod grid;
 mod group_panel;
+mod picking;
 mod preview;
 mod status;
 mod tile_panel;

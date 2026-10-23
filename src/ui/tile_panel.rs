@@ -170,6 +170,10 @@ impl TilePanel {
         self.picking.is_some()
     }
 
+    pub fn picking_label(&self) -> Option<&'static str> {
+        self.picking.map(|index| NEIGHBORS[index].label)
+    }
+
     pub fn picked(&self) -> Option<usize> {
         self.neighborhood.state(self.picking?).tile()
     }
@@ -206,12 +210,6 @@ impl TilePanel {
             self.show_neighborhood(ui, tileset, texture, context.always_show_turn_buttons);
         ui.add_space(SECTION_SPACING);
         show_legend(ui);
-        if let Some(index) = self.picking {
-            ui.weak(format!(
-                "Picking the {} neighbor — click a tile, Esc: cancel",
-                NEIGHBORS[index].label
-            ));
-        }
 
         ui.add_space(SECTION_SPACING);
         let edit = self.show_options(ui, tileset, texture, changed);
@@ -543,11 +541,16 @@ impl TilePanel {
         }
 
         let mut state = current;
-        if response.hovered() || self.picking == Some(index) {
+        let is_picked = self.picking == Some(index);
+        let outline = match is_picked {
+            true => Stroke::new(grid::SELECTED_OUTLINE_WIDTH, ui.visuals().selection.bg_fill),
+            false => Stroke::new(OUTLINE_WIDTH, ui.visuals().selection.stroke.color),
+        };
+        if response.hovered() || is_picked {
             ui.painter().rect_stroke(
                 rect,
                 CORNER_RADIUS,
-                Stroke::new(OUTLINE_WIDTH, ui.visuals().selection.stroke.color),
+                outline,
                 StrokeKind::Inside,
             );
         }

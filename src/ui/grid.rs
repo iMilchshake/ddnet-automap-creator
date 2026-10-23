@@ -25,12 +25,11 @@ const CONFIGURED_OUTLINE: Color32 = Color32::from_gray(205);
 const DEACTIVATED_OUTLINE: Color32 = Color32::from_gray(100);
 const SELECTED_OUTLINE: Color32 = Color32::from_rgb(255, 214, 102);
 const POOL_MATE_OUTLINE: Color32 = Color32::from_rgb(102, 204, 255);
-const PICKED_OUTLINE: Color32 = Color32::from_rgb(120, 220, 120);
 
 const DEACTIVATED_DARKEN_ALPHA: u8 = 50;
 
 const OUTLINE_WIDTH: f32 = 2.0;
-const SELECTED_OUTLINE_WIDTH: f32 = 3.0;
+pub(crate) const SELECTED_OUTLINE_WIDTH: f32 = 3.0;
 
 /// Hues a golden angle apart, so neighbouring groups never share a shade.
 const HUE_STEP: f32 = 137.5 / 360.0;
@@ -148,7 +147,8 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, POOL_MATE_OUTLINE);
     }
     if let Some(index) = view.picked {
-        outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, PICKED_OUTLINE);
+        let color = ui.visuals().selection.bg_fill;
+        outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, color);
     }
     if let Some(index) = view.selected {
         outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, SELECTED_OUTLINE);
