@@ -73,8 +73,9 @@ const NORMALIZE_TOOLTIP: &str = "ON: chances are re-normalized to always add up 
                                  100%";
 const ZOOM_TOOLTIP: &str = "Shortcuts: Ctrl + and Ctrl - to zoom, Ctrl 0 to reset.";
 const PERCENT: f32 = 100.0;
-const KEYBINDS: [(&str, &str); 7] = [
+const KEYBINDS: [(&str, &str); 8] = [
     ("Ctrl O", "Open image"),
+    ("Space (hold)", "Show the other view"),
     ("1 / 2 / 3", "Set hovered neighbor to Empty / Full / Any"),
     ("C", "Copy the selected rule"),
     ("V", "Paste over the selected rule"),
@@ -277,6 +278,7 @@ pub struct AutomapperApp {
     define_groups: bool,
     always_show_turn_buttons: bool,
     drag_anchor: Option<usize>,
+    peeking: bool,
     hovered_tile: Option<usize>,
     export_open: bool,
     help_open: bool,
@@ -308,6 +310,7 @@ impl Default for AutomapperApp {
             define_groups: false,
             always_show_turn_buttons: false,
             drag_anchor: None,
+            peeking: false,
             hovered_tile: None,
             export_open: false,
             help_open: false,
@@ -337,10 +340,15 @@ impl eframe::App for AutomapperApp {
         self.receive_compiled_rules(&ctx);
         self.handle_shortcuts(&ctx);
 
-        self.show_menu_bar(ui, &ctx);
+        if self.drag_anchor.is_none() {
+            self.peeking = self.is_peeking(&ctx);
+        }
+        let displayed_view = peeked_view(self.view, self.peeking);
+
+        self.show_menu_bar(ui, &ctx, displayed_view);
         self.show_status_bar(ui);
         self.show_side_panel(ui);
-        self.show_view(ui, &ctx);
+        self.show_view(ui, &ctx, displayed_view);
         self.show_export(&ctx);
         self.show_help(&ctx);
         self.show_blueprint_confirmation(&ctx);
@@ -354,8 +362,16 @@ impl eframe::App for AutomapperApp {
 }
 
 impl AutomapperApp {
-    fn show_view(&mut self, ui: &mut Ui, ctx: &Context) {
-        match self.view {
+    fn is_peeking(&self, ctx: &Context) -> bool {
+        matches!(self.workspace, Workspace::Ready(_))
+            && !self.inspector.is_picking()
+            && !ctx.egui_wants_keyboard_input()
+            && ctx.memory(|memory| memory.top_modal_layer().is_none())
+            && ctx.input(|input| input.modifiers.is_none() && input.key_down(egui::Key::Space))
+    }
+
+    fn show_view(&mut self, ui: &mut Ui, ctx: &Context, view: View) {
+        match view {
             View::Tileset => {
                 let panel = egui::CentralPanel::default().show(ui, |ui| self.show_tileset(ui, ctx));
                 self.show_picking(ctx, panel.response.rect);
@@ -408,14 +424,14 @@ impl AutomapperApp {
         let wanted_width = self.split_ratio * available.width();
         let max_width = available.width() - MIN_SPLIT_PANEL_WIDTH;
         let state = PanelState {
-            outer_rect: Rect::from_min_size(
-                available.min,
-                Vec2::new(wanted_width, available.height()),
+            outer_rect: Rect::from_min_max(
+                available.right_top() - Vec2::X * wanted_width,
+                available.max,
             ),
         };
         ctx.data_mut(|data| data.insert_persisted(panel_id, state));
 
-        let panel = egui::Panel::left(panel_id)
+        let panel = egui::Panel::right(panel_id)
             .resizable(true)
             .min_size(MIN_SPLIT_PANEL_WIDTH)
             .max_size(max_width)
@@ -759,7 +775,7 @@ impl AutomapperApp {
         }
     }
 
-    fn show_menu_bar(&mut self, ui: &mut Ui, ctx: &Context) {
+    fn show_menu_bar(&mut self, ui: &mut Ui, ctx: &Context, displayed_view: View) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
         let mut save_blueprint = false;
 
@@ -821,7 +837,7 @@ impl AutomapperApp {
                 ui.separator();
                 self.show_view_picker(ui);
                 ui.separator();
-                match self.view {
+                match displayed_view {
                     View::Tileset => self.show_selection_picker(ui),
                     View::Preview => self.show_preview_controls(ui),
                     View::Split => {
@@ -1656,6 +1672,14 @@ impl AutomapperApp {
         if modal.should_close() {
             self.help_open = false;
         }
+    }
+}
+
+fn peeked_view(selected: View, peeking: bool) -> View {
+    match (selected, peeking) {
+        (view, false) => view,
+        (View::Tileset | View::Split, true) => View::Preview,
+        (View::Preview, true) => View::Tileset,
     }
 }
 
