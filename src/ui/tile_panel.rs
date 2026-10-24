@@ -228,12 +228,12 @@ impl TilePanel {
     }
 
     fn show_rule_tabs(&self, ui: &mut Ui, rule_count: usize) -> Option<TileEdit> {
-        if rule_count == 0 {
-            return None;
-        }
-
         let mut edit = None;
         ui.horizontal_wrapped(|ui| {
+            if rule_count == 0 {
+                ui.set_invisible();
+                ui.selectable_label(false, "Rule 1");
+            }
             for index in 0..rule_count {
                 let label = format!("Rule {}", index + 1);
                 if ui.selectable_label(index == self.index, label).clicked() {
