@@ -45,28 +45,41 @@ fn placements(rule: TileRule) -> Vec<(Transform, Neighborhood)> {
 }
 
 #[test]
-fn turning_a_rule_clockwise_moves_its_neighborhood_and_records_the_drawing() {
-    let turned = top_empty_rule().turned(Transform::ROTATE_CLOCKWISE);
+fn turning_the_neighbors_clockwise_moves_only_the_neighborhood() {
+    let rule = top_empty_rule();
+    let turned = rule.turned_neighbors(Transform::ROTATE_CLOCKWISE);
 
     assert_eq!(named(&turned.neighborhood, NeighborState::Empty), ["right"]);
-    assert_eq!(turned.drawn, Transform::ROTATE_CLOCKWISE);
+    assert_eq!(turned.drawn, rule.drawn);
 }
 
 #[test]
-fn turning_by_the_inverse_of_the_drawing_restores_the_rule() {
-    let rule = distinct_rule();
-    let turned = rule
-        .turned(Transform::ROTATE_CLOCKWISE)
-        .turned(Transform::FLIP_HORIZONTALLY);
+fn turning_the_tile_clockwise_records_only_the_drawing() {
+    let rule = top_empty_rule();
+    let turned = rule.turned_tile(Transform::ROTATE_CLOCKWISE);
 
-    assert_eq!(turned.turned(turned.drawn.inverse()), rule);
+    assert_eq!(turned.drawn, Transform::ROTATE_CLOCKWISE);
+    assert_eq!(turned.neighborhood, rule.neighborhood);
+}
+
+#[test]
+fn turning_the_tile_clockwise_four_times_restores_the_rule() {
+    let rule = distinct_rule();
+    let turned = (0..4).fold(rule, |turned, _| {
+        turned.turned_tile(Transform::ROTATE_CLOCKWISE)
+    });
+
+    assert_eq!(turned, rule);
 }
 
 #[test]
 fn turning_a_rotating_rule_keeps_its_placements() {
     let rule = distinct_rule();
     let before = placements(rule);
-    let after = placements(rule.turned(Transform::ROTATE_CLOCKWISE));
+    let turned = rule
+        .turned_neighbors(Transform::ROTATE_CLOCKWISE)
+        .turned_tile(Transform::ROTATE_CLOCKWISE);
+    let after = placements(turned);
 
     assert_eq!(before.len(), after.len());
     assert!(before.iter().all(|placement| after.contains(placement)));

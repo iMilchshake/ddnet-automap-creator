@@ -265,11 +265,3 @@ fn rotating_four_times_or_flipping_twice_is_the_identity() {
     );
     assert_eq!(repeated(Transform::FLIP_VERTICALLY, 2), Transform::IDENTITY);
 }
-
-#[test]
-fn an_inverse_applied_after_or_before_gives_the_identity() {
-    for transform in Transform::ALL {
-        assert_eq!(transform.after(transform.inverse()), Transform::IDENTITY);
-        assert_eq!(transform.inverse().after(transform), Transform::IDENTITY);
-    }
-}

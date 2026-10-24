@@ -96,9 +96,15 @@ impl TileRule {
         Orientations::resolved(self.custom, self.mods)
     }
 
-    pub fn turned(self, by: Transform) -> Self {
+    pub fn turned_neighbors(self, by: Transform) -> Self {
         Self {
             neighborhood: by.apply(&self.neighborhood),
+            ..self
+        }
+    }
+
+    pub fn turned_tile(self, by: Transform) -> Self {
+        Self {
             drawn: by.after(self.drawn),
             ..self
         }

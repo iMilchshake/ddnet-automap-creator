@@ -38,13 +38,6 @@ impl Transform {
     pub const FLIP_HORIZONTALLY: Self = transform(true, false, false);
     pub const FLIP_VERTICALLY: Self = transform(false, true, false);
 
-    pub fn inverse(self) -> Self {
-        Self::ALL
-            .into_iter()
-            .find(|candidate| self.after(*candidate) == Self::IDENTITY)
-            .expect("every transform has an inverse")
-    }
-
     pub fn suffix(self) -> String {
         let mut suffix = String::new();
         if self.x_flip {

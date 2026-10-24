@@ -24,7 +24,9 @@ use crate::ui::group_panel::{GroupPanel, mode_label};
 use crate::ui::picking;
 use crate::ui::preview as preview_view;
 use crate::ui::status::StatusLine;
-use crate::ui::tile_panel::{TileContext, TileEdit, TilePanel};
+use crate::ui::tile_panel::{
+    CopiedRule, FlashKind, GridFlash, TileContext, TileEdit, TilePanel,
+};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 use crate::ui::{ADD_ICON, DUPLICATE_ICON, REMOVE_ICON, icon_button};
 
@@ -47,6 +49,7 @@ const FIRST_PREVIEW_SEED: u32 = 42;
 const FIRST_RULE: usize = 0;
 const DROP_OVERLAY_ALPHA: u8 = 160;
 const DROP_HINT_SIZE: f32 = 24.0;
+const FLASH_SECONDS: f64 = 0.4;
 
 const GITHUB_ICON: char = egui::special_emojis::GITHUB;
 const CREDIT: &str = env!("CARGO_PKG_NAME");
@@ -70,9 +73,11 @@ const NORMALIZE_TOOLTIP: &str = "ON: chances are re-normalized to always add up 
                                  100%";
 const ZOOM_TOOLTIP: &str = "Shortcuts: Ctrl + and Ctrl - to zoom, Ctrl 0 to reset.";
 const PERCENT: f32 = 100.0;
-const KEYBINDS: [(&str, &str); 5] = [
+const KEYBINDS: [(&str, &str); 7] = [
     ("Ctrl O", "Open image"),
     ("1 / 2 / 3", "Set hovered neighbor to Empty / Full / Any"),
+    ("C", "Copy the selected rule"),
+    ("V", "Paste over the selected rule"),
     ("Ctrl click", "Pick a specific tile for a neighbor"),
     ("Ctrl + / Ctrl -", "Zoom"),
     ("Ctrl 0", "Reset zoom"),
@@ -93,6 +98,11 @@ const LOAD_WARNING: &str = "Its tile ids are loaded as they are.";
 const LOAD_CONFIRM: &str = "Load anyway";
 const LOAD_CANCELLED: &str = "Load cancelled";
 const BLUEPRINT_CANCEL: &str = "Cancel";
+
+struct Flash {
+    started: f64,
+    kind: FlashKind,
+}
 
 enum GroupCommand {
     Select(usize),
@@ -262,6 +272,8 @@ pub struct AutomapperApp {
     preview_seed: u32,
     preview_sample: Sample,
     inspector: Inspector,
+    clipboard: Option<CopiedRule>,
+    flash: Option<Flash>,
     define_groups: bool,
     always_show_turn_buttons: bool,
     drag_anchor: Option<usize>,
@@ -291,6 +303,8 @@ impl Default for AutomapperApp {
             preview_seed: FIRST_PREVIEW_SEED,
             preview_sample: Sample::default(),
             inspector: Inspector::Empty,
+            clipboard: None,
+            flash: None,
             define_groups: false,
             always_show_turn_buttons: false,
             drag_anchor: None,
@@ -729,6 +743,7 @@ impl AutomapperApp {
 
         self.rule_sets = RuleSets::new(stem.clone());
         self.inspector = Inspector::Empty;
+        self.clipboard = None;
         self.drag_anchor = None;
         self.hovered_tile = None;
         self.preview = PreviewResult::Waiting;
@@ -872,14 +887,17 @@ impl AutomapperApp {
     fn show_preview_controls(&mut self, ui: &mut Ui) {
         let ready = matches!(self.preview, PreviewResult::Ready { .. });
 
+        let mut chosen = self.preview_sample;
         ui.label("Map:");
-        for sample in Sample::ALL {
-            if ui
-                .selectable_label(self.preview_sample == sample, sample.name())
-                .clicked()
-            {
-                self.switch_sample(sample);
-            }
+        egui::ComboBox::from_id_salt("preview_sample")
+            .selected_text(chosen.name())
+            .show_ui(ui, |ui| {
+                for sample in Sample::ALL {
+                    ui.selectable_value(&mut chosen, sample, sample.name());
+                }
+            });
+        if chosen != self.preview_sample {
+            self.switch_sample(chosen);
         }
         ui.separator();
 
@@ -934,6 +952,7 @@ impl AutomapperApp {
     fn show_side_panel(&mut self, ui: &mut Ui) {
         let has_image = matches!(self.workspace, Workspace::Ready(_));
         let selected_group = self.inspector.group();
+        let flash = self.active_flash(ui.ctx());
         let pools = pool::pools(&self.rule_sets.active().rules());
         let mut pending = None;
         let mut tile_edit = None;
@@ -953,14 +972,14 @@ impl AutomapperApp {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let can_remove = self.rule_sets.len() > 1;
                             if ui
-                                .add_enabled(can_remove, icon_button(ui, REMOVE_ICON))
+                                .add_enabled(can_remove, icon_button(REMOVE_ICON))
                                 .on_hover_text("Remove this rule set")
                                 .clicked()
                             {
                                 rule_set_command = Some(RuleSetCommand::Remove);
                             }
                             if ui
-                                .add(icon_button(ui, DUPLICATE_ICON))
+                                .add(icon_button(DUPLICATE_ICON))
                                 .on_hover_text("Duplicate this rule set")
                                 .clicked()
                             {
@@ -988,6 +1007,8 @@ impl AutomapperApp {
                                         .rules_of(panel.tile())
                                         .len(),
                                     always_show_turn_buttons: self.always_show_turn_buttons,
+                                    copied: self.clipboard.as_ref(),
+                                    flash,
                                 };
                                 let deactivated =
                                     self.rule_sets.active().is_deactivated(panel.tile());
@@ -1029,7 +1050,7 @@ impl AutomapperApp {
             });
 
         if let Some((tile, edit)) = tile_edit {
-            self.apply_tile_edit(tile, edit);
+            self.apply_tile_edit(ui.ctx(), tile, edit);
         }
         if let Some((index, group)) = group_edit {
             self.rule_sets.active_mut().replace_group(index, group);
@@ -1067,7 +1088,29 @@ impl AutomapperApp {
         }
     }
 
-    fn apply_tile_edit(&mut self, tile: usize, edit: TileEdit) {
+    fn active_flash(&mut self, ctx: &Context) -> Option<GridFlash> {
+        let flash = self.flash.as_ref()?;
+
+        let elapsed = ctx.input(|input| input.time) - flash.started;
+        if elapsed >= FLASH_SECONDS {
+            self.flash = None;
+            return None;
+        }
+
+        ctx.request_repaint();
+        Some(GridFlash {
+            kind: flash.kind,
+            remaining: (1.0 - elapsed / FLASH_SECONDS) as f32,
+        })
+    }
+
+    fn start_flash(&mut self, ctx: &Context, kind: FlashKind) {
+        let started = ctx.input(|input| input.time);
+        self.flash = Some(Flash { started, kind });
+        ctx.request_repaint();
+    }
+
+    fn apply_tile_edit(&mut self, ctx: &Context, tile: usize, edit: TileEdit) {
         match edit {
             TileEdit::Apply { index, rule } => self.store_rule(tile, index, rule),
             TileEdit::Select(index) => self.select_tile(tile, index),
@@ -1085,7 +1128,38 @@ impl AutomapperApp {
                 self.rule_sets.active_mut().remove_rule(tile, index);
                 self.select_tile(tile, index.saturating_sub(1));
             }
+            TileEdit::Copy(index) => self.copy_rule(ctx, tile, index),
+            TileEdit::Paste(index) => self.paste_rule(ctx, tile, index),
         }
+    }
+
+    fn copy_rule(&mut self, ctx: &Context, tile: usize, index: usize) {
+        if let Some(&rule) = self.rule_sets.active().rules_of(tile).get(index) {
+            self.clipboard = Some(CopiedRule { rule, tile, index });
+            self.start_flash(ctx, FlashKind::Copy);
+            self.status.info(ctx, format!("Copied tile {tile}"));
+        }
+    }
+
+    fn paste_rule(&mut self, ctx: &Context, tile: usize, index: usize) {
+        let Some(copied) = &self.clipboard else {
+            return;
+        };
+
+        let existing = self.rule_sets.active().rules_of(tile);
+        let target = index.min(existing.len());
+        let rule = match existing.get(target) {
+            Some(replaced) => TileRule {
+                drawn: replaced.drawn,
+                ..copied.rule
+            },
+            None => copied.rule,
+        };
+        let source = copied.tile;
+        self.store_rule(tile, target, rule);
+        self.select_tile(tile, target);
+        self.start_flash(ctx, FlashKind::Paste);
+        self.status.info(ctx, format!("Pasted tile {source} onto tile {tile}"));
     }
 
     fn store_rule(&mut self, tile: usize, index: usize, rule: TileRule) {
@@ -1410,7 +1484,7 @@ impl AutomapperApp {
         }
         if let Some(edit) = panel.pick(tile) {
             let owner = panel.tile();
-            self.apply_tile_edit(owner, edit);
+            self.apply_tile_edit(ctx, owner, edit);
         }
     }
 

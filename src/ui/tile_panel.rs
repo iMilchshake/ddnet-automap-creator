@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use egui::{
-    Align2, Color32, Painter, PointerButton, Pos2, Rect, Response, Sense, Shape, Stroke,
+    Align2, Color32, FontId, Painter, PointerButton, Pos2, Rect, Response, Sense, Shape, Stroke,
     StrokeKind, TextureHandle, Ui, Vec2,
 };
 
@@ -10,15 +10,19 @@ use crate::model::pool::{ChanceMode, Pool};
 use crate::model::tile::{Chance, TileMods, TileRule};
 use crate::model::transform::{Orientations, Transform};
 use crate::tileset::Tileset;
-use crate::ui::{ADD_ICON, DUPLICATE_ICON, REMOVE_ICON, grid, icon_button, preview};
+use crate::ui::{
+    ADD_ICON, COPY_ICON, DUPLICATE_ICON, PASTE_ICON, REMOVE_ICON, grid, icon_button, preview,
+};
 
 const MIN_CELL_SIZE: f32 = 32.0;
 const MAX_CELL_SIZE: f32 = 80.0;
 const CELL_GAP: f32 = 3.0;
+const GRID_SIDE: f32 = 3.0;
 const SWATCH_SIZE: f32 = 14.0;
 const MIN_CHANCE_PERCENT: f32 = 0.1;
 const MAX_CHANCE_PERCENT: f32 = 100.0;
 const CHANCE_DRAG_SPEED: f64 = 0.5;
+const FLASH_PEAK_OPACITY: f32 = 0.5;
 
 const HEADING_SPACING: f32 = 4.0;
 const LEGEND_SPACING: f32 = 4.0;
@@ -68,14 +72,20 @@ const CHANCE_TOOLTIP: &str = "Tiles declaring the same neighborhood split it bet
                               can leave tiles unchanged.";
 const POOL_TOOLTIP: &str = "A pool holds all tiles with the exact neighborhood, considering \
                             rotations and flips.";
-const ROTATE_TOOLTIP: &str = "Rotate 90° clockwise";
-const FLIP_HORIZONTALLY_TOOLTIP: &str = "Flip horizontally";
-const FLIP_VERTICALLY_TOOLTIP: &str = "Flip vertically";
+const ROTATE_NEIGHBORS_TOOLTIP: &str = "Rotate neighbors 90° clockwise";
+const FLIP_NEIGHBORS_HORIZONTALLY_TOOLTIP: &str = "Flip neighbors horizontally";
+const FLIP_NEIGHBORS_VERTICALLY_TOOLTIP: &str = "Flip neighbors vertically";
+const ROTATE_TILE_TOOLTIP: &str = "Rotate tile 90° clockwise";
+const FLIP_TILE_HORIZONTALLY_TOOLTIP: &str = "Flip tile horizontally";
+const FLIP_TILE_VERTICALLY_TOOLTIP: &str = "Flip tile vertically";
 const ADD_RULE_TOOLTIP: &str = "Add rule";
 const DUPLICATE_RULE_TOOLTIP: &str = "Duplicate rule";
 const REMOVE_RULE_TOOLTIP: &str = "Remove rule";
-const RESET_TOOLTIP: &str = "Reset orientation";
-const ORIENTATION_HINT: &str = "Use the buttons to rotate or flip the whole rule.";
+const COPY_RULE_TOOLTIP: &str = "Copy rule (C)";
+const NOTHING_COPIED_TOOLTIP: &str = "Nothing copied yet";
+const RESET_TOOLTIP: &str = "Reset tile orientation";
+const ORIENTATION_HINT: &str = "Use the buttons to rotate or flip the tile only.";
+const RESET_GLYPH: &str = "↺";
 const UNCHANGED: &str = "unchanged";
 const LAST_ORIENTATION: &str = "At least one orientation is required";
 
@@ -84,6 +94,32 @@ pub struct TileContext<'a> {
     pub mode: ChanceMode,
     pub rule_count: usize,
     pub always_show_turn_buttons: bool,
+    pub copied: Option<&'a CopiedRule>,
+    pub flash: Option<GridFlash>,
+}
+
+#[derive(Clone, Copy)]
+pub enum FlashKind {
+    Copy,
+    Paste,
+}
+
+#[derive(Clone, Copy)]
+pub struct GridFlash {
+    pub kind: FlashKind,
+    pub remaining: f32,
+}
+
+pub struct CopiedRule {
+    pub rule: TileRule,
+    pub tile: usize,
+    pub index: usize,
+}
+
+impl CopiedRule {
+    fn paste_tooltip(&self) -> String {
+        format!("Paste rule {} of tile {} (V)", self.index + 1, self.tile)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -91,28 +127,33 @@ enum Icon {
     Rotate,
     FlipHorizontally,
     FlipVertically,
+    Reset,
 }
 
 struct TurnButton {
     icon: Icon,
-    tooltip: &'static str,
+    neighbors_tooltip: &'static str,
+    tile_tooltip: &'static str,
     turn: Transform,
 }
 
 const TURN_BUTTONS: [TurnButton; 3] = [
     TurnButton {
         icon: Icon::Rotate,
-        tooltip: ROTATE_TOOLTIP,
+        neighbors_tooltip: ROTATE_NEIGHBORS_TOOLTIP,
+        tile_tooltip: ROTATE_TILE_TOOLTIP,
         turn: Transform::ROTATE_CLOCKWISE,
     },
     TurnButton {
         icon: Icon::FlipHorizontally,
-        tooltip: FLIP_HORIZONTALLY_TOOLTIP,
+        neighbors_tooltip: FLIP_NEIGHBORS_HORIZONTALLY_TOOLTIP,
+        tile_tooltip: FLIP_TILE_HORIZONTALLY_TOOLTIP,
         turn: Transform::FLIP_HORIZONTALLY,
     },
     TurnButton {
         icon: Icon::FlipVertically,
-        tooltip: FLIP_VERTICALLY_TOOLTIP,
+        neighbors_tooltip: FLIP_NEIGHBORS_VERTICALLY_TOOLTIP,
+        tile_tooltip: FLIP_TILE_VERTICALLY_TOOLTIP,
         turn: Transform::FLIP_VERTICALLY,
     },
 ];
@@ -130,6 +171,8 @@ pub enum TileEdit {
     Add,
     Duplicate(usize),
     Remove(usize),
+    Copy(usize),
+    Paste(usize),
 }
 
 pub struct TilePanel {
@@ -198,16 +241,16 @@ impl TilePanel {
         context: &TileContext,
         deactivated: bool,
     ) -> Option<TileEdit> {
-        let heading_edit = self.show_heading(ui, deactivated);
+        let heading_edit = self.show_heading(ui, context, deactivated);
         ui.add_space(HEADING_SPACING);
 
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.stop_picking();
         }
 
+        let changed = self.show_neighborhood(ui, tileset, texture, context);
+        ui.add_space(SECTION_SPACING);
         let tab_edit = self.show_rule_tabs(ui, context.rule_count);
-        let changed =
-            self.show_neighborhood(ui, tileset, texture, context.always_show_turn_buttons);
         ui.add_space(SECTION_SPACING);
         show_legend(ui);
 
@@ -224,7 +267,32 @@ impl TilePanel {
             self.show_pools(ui, tileset, texture, context);
         }
 
-        heading_edit.or(tab_edit).or(edit)
+        heading_edit
+            .or(tab_edit)
+            .or(edit)
+            .or(self.key_edit(ui, context))
+    }
+
+    fn key_edit(&self, ui: &Ui, context: &TileContext) -> Option<TileEdit> {
+        let ctx = ui.ctx();
+        if ctx.egui_wants_keyboard_input()
+            || ctx.memory(|memory| memory.top_modal_layer().is_some())
+        {
+            return None;
+        }
+
+        let (copy, paste) = ui.input(|input| {
+            let plain = input.modifiers.is_none();
+            (
+                plain && input.key_pressed(egui::Key::C),
+                plain && input.key_pressed(egui::Key::V),
+            )
+        });
+        match (copy && self.has_rule, paste && context.copied.is_some()) {
+            (true, _) => Some(TileEdit::Copy(self.index)),
+            (_, true) => Some(TileEdit::Paste(self.index)),
+            _ => None,
+        }
     }
 
     fn show_rule_tabs(&self, ui: &mut Ui, rule_count: usize) -> Option<TileEdit> {
@@ -232,7 +300,7 @@ impl TilePanel {
         ui.horizontal_wrapped(|ui| {
             if rule_count == 0 {
                 ui.set_invisible();
-                ui.selectable_label(false, "Rule 1");
+                let _placeholder = ui.selectable_label(false, "Rule 1");
             }
             for index in 0..rule_count {
                 let label = format!("Rule {}", index + 1);
@@ -241,7 +309,6 @@ impl TilePanel {
                 }
             }
         });
-        ui.add_space(SECTION_SPACING);
 
         edit
     }
@@ -335,7 +402,12 @@ impl TilePanel {
         self.apply()
     }
 
-    fn show_heading(&mut self, ui: &mut Ui, deactivated: bool) -> Option<TileEdit> {
+    fn show_heading(
+        &mut self,
+        ui: &mut Ui,
+        context: &TileContext,
+        deactivated: bool,
+    ) -> Option<TileEdit> {
         let title = match deactivated {
             true => format!("Tile {} (deactivated)", self.tile),
             false => format!("Tile {}", self.tile),
@@ -344,29 +416,45 @@ impl TilePanel {
         ui.horizontal(|ui| {
             ui.heading(title);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                self.show_rule_buttons(ui)
+                self.show_rule_buttons(ui, context)
             })
             .inner
         })
         .inner
     }
 
-    fn show_rule_buttons(&mut self, ui: &mut Ui) -> Option<TileEdit> {
+    fn show_rule_buttons(&mut self, ui: &mut Ui, context: &TileContext) -> Option<TileEdit> {
         let mut edit = None;
 
-        let remove = ui.add_enabled(self.has_rule, icon_button(ui, REMOVE_ICON));
+        let paste = ui.add_enabled(context.copied.is_some(), icon_button(PASTE_ICON));
+        let paste = match context.copied {
+            Some(copied) => paste.on_hover_text(copied.paste_tooltip()),
+            None => paste.on_disabled_hover_text(NOTHING_COPIED_TOOLTIP),
+        };
+        if paste.clicked() {
+            edit = Some(TileEdit::Paste(self.index));
+        }
+
+        let copy = ui.add_enabled(self.has_rule, icon_button(COPY_ICON));
+        if copy.on_hover_text(COPY_RULE_TOOLTIP).clicked() {
+            edit = Some(TileEdit::Copy(self.index));
+        }
+
+        ui.separator();
+
+        let remove = ui.add_enabled(self.has_rule, icon_button(REMOVE_ICON));
         if remove.on_hover_text(REMOVE_RULE_TOOLTIP).clicked() {
             self.error = None;
             edit = Some(TileEdit::Remove(self.index));
         }
 
-        let duplicate = ui.add_enabled(self.has_rule, icon_button(ui, DUPLICATE_ICON));
+        let duplicate = ui.add_enabled(self.has_rule, icon_button(DUPLICATE_ICON));
         if duplicate.on_hover_text(DUPLICATE_RULE_TOOLTIP).clicked() {
             edit = Some(TileEdit::Duplicate(self.index));
         }
 
         if ui
-            .add(icon_button(ui, ADD_ICON))
+            .add(icon_button(ADD_ICON))
             .on_hover_text(ADD_RULE_TOOLTIP)
             .clicked()
         {
@@ -395,9 +483,8 @@ impl TilePanel {
         }
     }
 
-    fn turn(&mut self, by: Transform) {
-        let chance = Chance::new(self.chance_percent).unwrap_or_default();
-        let turned = self.rule(chance).turned(by);
+    fn turn(&mut self, turn: fn(TileRule, Transform) -> TileRule, by: Transform) {
+        let turned = turn(self.rule(Chance::FULL), by);
         self.neighborhood = turned.neighborhood;
         self.drawn = turned.drawn;
         self.picking = None;
@@ -424,7 +511,7 @@ impl TilePanel {
         ui: &mut Ui,
         tileset: &Tileset,
         texture: &TextureHandle,
-        always_show_turn_buttons: bool,
+        context: &TileContext,
     ) -> bool {
         let mut changed = false;
         let size = cell_size(ui);
@@ -432,6 +519,7 @@ impl TilePanel {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing = Vec2::splat(CELL_GAP);
 
+            let grid_area = Rect::from_min_size(ui.cursor().min, Vec2::splat(grid_extent(size)));
             for dy in -1..=1 {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::splat(CELL_GAP);
@@ -447,34 +535,44 @@ impl TilePanel {
                                     tileset,
                                     texture,
                                     size,
-                                    always_show_turn_buttons,
+                                    context.always_show_turn_buttons,
                                 )
                             }
                         }
                     }
                 });
             }
+
+            paint_flash(ui, grid_area, context.flash);
+            changed |= self.show_neighbor_turn_buttons(ui, size);
         });
 
-        changed | self.show_orientation_note(ui)
+        changed
     }
 
-    fn show_orientation_note(&mut self, ui: &mut Ui) -> bool {
-        if self.drawn == Transform::IDENTITY {
+    fn reset_drawn(&mut self) {
+        self.drawn = Transform::IDENTITY;
+        self.picking = None;
+    }
+
+    fn show_neighbor_turn_buttons(&mut self, ui: &mut Ui, size: f32) -> bool {
+        let button_size = button_size(size);
+        let (row, _response) =
+            ui.allocate_exact_size(Vec2::new(grid_extent(size), button_size), Sense::hover());
+
+        let mut turn = None;
+        for (index, button) in TURN_BUTTONS.into_iter().enumerate() {
+            let area = button_rect(row, Align2::CENTER_CENTER, index, button_size);
+            if turn_button(ui, area, button.icon, button.neighbors_tooltip) {
+                turn = Some(button.turn);
+            }
+        }
+
+        let Some(by) = turn else {
             return false;
-        }
-
-        let reset = ui
-            .horizontal(|ui| {
-                ui.label(format!("{} ·", capitalized(drawn_name(self.drawn))));
-                ui.link("reset").on_hover_text(RESET_TOOLTIP).clicked()
-            })
-            .inner;
-        if reset {
-            self.turn(self.drawn.inverse());
-        }
-
-        reset
+        };
+        self.turn(TileRule::turned_neighbors, by);
+        true
     }
 
     fn show_centre_cell(
@@ -488,23 +586,32 @@ impl TilePanel {
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
         self.paint_turned_tile(ui, rect, tileset, texture, self.drawn);
 
-        let button_size = (size * BUTTON_FRACTION).max(MIN_BUTTON_SIZE);
+        let button_size = button_size(size);
+        let bounds = rect.shrink(BUTTON_MARGIN);
         let mut turn = None;
+        let mut reset = false;
         if always_show_turn_buttons || ui.rect_contains_pointer(rect) {
             for (index, button) in TURN_BUTTONS.into_iter().enumerate() {
-                let area = button_rect(rect, index, button_size);
-                if turn_button(ui, area, button.icon, button.tooltip) {
+                let area = button_rect(bounds, Align2::CENTER_BOTTOM, index, button_size);
+                if turn_button(ui, area, button.icon, button.tile_tooltip) {
                     turn = Some(button.turn);
                 }
+            }
+            if self.drawn != Transform::IDENTITY {
+                let area =
+                    Align2::RIGHT_TOP.align_size_within_rect(Vec2::splat(button_size), bounds);
+                reset = turn_button(ui, area, Icon::Reset, RESET_TOOLTIP);
             }
         }
         response.on_hover_text(format!("{}\n{ORIENTATION_HINT}", drawn_name(self.drawn)));
 
-        let Some(by) = turn else {
-            return false;
-        };
-        self.turn(by);
-        true
+        if reset {
+            self.reset_drawn();
+        }
+        if let Some(by) = turn {
+            self.turn(TileRule::turned_tile, by);
+        }
+        reset || turn.is_some()
     }
 
     fn paint_turned_tile(
@@ -547,12 +654,8 @@ impl TilePanel {
             false => Stroke::new(OUTLINE_WIDTH, ui.visuals().selection.stroke.color),
         };
         if response.hovered() || is_picked {
-            ui.painter().rect_stroke(
-                rect,
-                CORNER_RADIUS,
-                outline,
-                StrokeKind::Inside,
-            );
+            ui.painter()
+                .rect_stroke(rect, CORNER_RADIUS, outline, StrokeKind::Inside);
         }
         if response.hovered()
             && let Some(pressed) = pressed_state(ui)
@@ -740,23 +843,36 @@ fn orientation_frame(ui: &Ui, editable: bool) -> egui::Frame {
     }
 }
 
-fn button_rect(cell: Rect, index: usize, size: f32) -> Rect {
+fn grid_extent(cell_size: f32) -> f32 {
+    GRID_SIDE * cell_size + (GRID_SIDE - 1.0) * CELL_GAP
+}
+
+fn paint_flash(ui: &Ui, rect: Rect, flash: Option<GridFlash>) {
+    let Some(flash) = flash else {
+        return;
+    };
+
+    let base = match flash.kind {
+        FlashKind::Copy => ui.visuals().selection.bg_fill,
+        FlashKind::Paste => ui.visuals().warn_fg_color,
+    };
+    let color = base.gamma_multiply(flash.remaining * FLASH_PEAK_OPACITY);
+    ui.painter().rect_filled(rect, CORNER_RADIUS, color);
+}
+
+fn button_size(cell_size: f32) -> f32 {
+    (cell_size * BUTTON_FRACTION).max(MIN_BUTTON_SIZE)
+}
+
+fn button_rect(bounds: Rect, align: Align2, index: usize, size: f32) -> Rect {
     let count = TURN_BUTTONS.len() as f32;
     let row = Vec2::new(count * size + (count - 1.0) * BUTTON_GAP, size);
-    let area = Align2::CENTER_BOTTOM.align_size_within_rect(row, cell.shrink(BUTTON_MARGIN));
+    let area = align.align_size_within_rect(row, bounds);
 
     Rect::from_min_size(
         area.min + Vec2::X * index as f32 * (size + BUTTON_GAP),
         Vec2::splat(size),
     )
-}
-
-fn capitalized(text: &str) -> String {
-    let mut chars = text.chars();
-    chars
-        .next()
-        .map(|first| first.to_uppercase().chain(chars).collect())
-        .unwrap_or_default()
 }
 
 fn turn_button(ui: &Ui, rect: Rect, icon: Icon, tooltip: &str) -> bool {
@@ -792,6 +908,16 @@ fn paint_icon(painter: &Painter, rect: Rect, stroke: Stroke, icon: Icon) {
         Icon::Rotate => paint_curl(painter, rect, stroke),
         Icon::FlipHorizontally => paint_flip(painter, rect, stroke, true),
         Icon::FlipVertically => paint_flip(painter, rect, stroke, false),
+        Icon::Reset => {
+            let font = FontId::proportional(rect.height());
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                RESET_GLYPH,
+                font,
+                stroke.color,
+            );
+        }
     }
 }
 
@@ -866,7 +992,7 @@ fn transform_name(transform: Transform) -> &'static str {
 }
 
 fn cell_size(ui: &Ui) -> f32 {
-    ((ui.available_width() - 2.0 * CELL_GAP) / 3.0)
+    ((ui.available_width() - (GRID_SIDE - 1.0) * CELL_GAP) / GRID_SIDE)
         .floor()
         .clamp(MIN_CELL_SIZE, MAX_CELL_SIZE)
 }
