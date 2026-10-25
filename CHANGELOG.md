@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Custom preview map: draw your own shape to test the rules on.
+- Rules can place tiles into empty cells: right-click the center tile.
+
 ## [0.3.0] - 2026-10-24
 
 ### Added

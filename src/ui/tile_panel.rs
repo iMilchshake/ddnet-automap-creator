@@ -7,7 +7,7 @@ use egui::{
 
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood, neighbor_index_at};
 use crate::model::pool::{ChanceMode, Pool};
-use crate::model::tile::{Chance, TileMods, TileRule};
+use crate::model::tile::{Centre, Chance, TileMods, TileRule};
 use crate::model::transform::{Orientations, Transform};
 use crate::tileset::Tileset;
 use crate::ui::{
@@ -61,6 +61,13 @@ const ANY_DARK: Color32 = Color32::from_gray(64);
 const PREVIEW_LIGHT: Color32 = Color32::from_gray(64);
 const PREVIEW_DARK: Color32 = Color32::from_gray(48);
 const DISABLED_DARKEN: Color32 = Color32::from_black_alpha(72);
+const EMPTY_CENTRE_ALPHA: u8 = 150;
+const EMPTY_CENTRE_TINT: Color32 = Color32::from_rgba_premultiplied(
+    EMPTY_CENTRE_ALPHA,
+    EMPTY_CENTRE_ALPHA,
+    EMPTY_CENTRE_ALPHA,
+    EMPTY_CENTRE_ALPHA,
+);
 const CROSS_COLOR: Color32 =
     Color32::from_rgba_premultiplied(CROSS_ALPHA, CROSS_ALPHA, CROSS_ALPHA, CROSS_ALPHA);
 
@@ -85,6 +92,7 @@ const COPY_RULE_TOOLTIP: &str = "Copy rule (C)";
 const NOTHING_COPIED_TOOLTIP: &str = "Nothing copied yet";
 const RESET_TOOLTIP: &str = "Reset tile orientation";
 const ORIENTATION_HINT: &str = "Use the buttons to rotate or flip the tile only.";
+const CENTRE_HINT: &str = "Left-click: full, right-click: empty (places into empty cells).";
 const RESET_GLYPH: &str = "↺";
 const UNCHANGED: &str = "unchanged";
 const LAST_ORIENTATION: &str = "At least one orientation is required";
@@ -179,6 +187,7 @@ pub struct TilePanel {
     tile: usize,
     index: usize,
     neighborhood: Neighborhood,
+    centre: Centre,
     mods: TileMods,
     custom: Option<Orientations>,
     drawn: Transform,
@@ -195,6 +204,7 @@ impl TilePanel {
             tile,
             index,
             neighborhood: rule.neighborhood,
+            centre: rule.centre,
             mods: rule.mods,
             custom: rule.custom,
             drawn: rule.drawn,
@@ -345,21 +355,24 @@ impl TilePanel {
             .member_of(self.tile)
             .map_or(Transform::IDENTITY, |member| member.transform);
         let share = self.share_label(pool, view.mode);
-        let title = format!("{}: {share}", drawn_name(transform));
+        let title = match pool.centre {
+            Centre::Full => format!("{}: {share}", drawn_name(transform)),
+            Centre::Empty => format!("{}, empty center: {share}", drawn_name(transform)),
+        };
         let title = match share == view.own_share {
             true => egui::RichText::new(title),
             false => egui::RichText::new(title).color(ui.visuals().warn_fg_color),
         };
 
         let header = egui::CollapsingHeader::new(title)
-            .id_salt(("pool", self.tile, pool.neighborhood))
+            .id_salt(("pool", self.tile, pool.neighborhood, pool.centre))
             .default_open(open)
             .show(ui, |ui| self.show_members(ui, view, pool));
         header.header_response.on_hover_text(POOL_TOOLTIP);
     }
 
     fn show_members(&self, ui: &mut Ui, view: &PoolView, pool: &Pool) {
-        egui::Grid::new(("pool_members", pool.neighborhood)).show(ui, |ui| {
+        egui::Grid::new(("pool_members", pool.neighborhood, pool.centre)).show(ui, |ui| {
             for (member, share) in pool.members.iter().zip(pool.shares(view.mode)) {
                 let (rect, _response) =
                     ui.allocate_exact_size(Vec2::splat(MEMBER_SIZE), Sense::hover());
@@ -476,6 +489,7 @@ impl TilePanel {
     fn rule(&self, chance: Chance) -> TileRule {
         TileRule {
             neighborhood: self.neighborhood,
+            centre: self.centre,
             mods: self.mods,
             custom: self.custom,
             drawn: self.drawn,
@@ -583,8 +597,8 @@ impl TilePanel {
         size: f32,
         always_show_turn_buttons: bool,
     ) -> bool {
-        let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
-        self.paint_turned_tile(ui, rect, tileset, texture, self.drawn);
+        let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+        self.paint_centre(ui, rect, tileset, texture);
 
         let button_size = button_size(size);
         let bounds = rect.shrink(BUTTON_MARGIN);
@@ -603,7 +617,11 @@ impl TilePanel {
                 reset = turn_button(ui, area, Icon::Reset, RESET_TOOLTIP);
             }
         }
-        response.on_hover_text(format!("{}\n{ORIENTATION_HINT}", drawn_name(self.drawn)));
+        let clicked = clicked_centre(&response).filter(|centre| *centre != self.centre);
+        response.on_hover_text(format!(
+            "{}\n{ORIENTATION_HINT}\n{CENTRE_HINT}",
+            drawn_name(self.drawn)
+        ));
 
         if reset {
             self.reset_drawn();
@@ -611,7 +629,28 @@ impl TilePanel {
         if let Some(by) = turn {
             self.turn(TileRule::turned_tile, by);
         }
-        reset || turn.is_some()
+        if let Some(centre) = clicked {
+            self.centre = centre;
+            self.picking = None;
+        }
+        reset || turn.is_some() || clicked.is_some()
+    }
+
+    fn paint_centre(&self, ui: &Ui, rect: Rect, tileset: &Tileset, texture: &TextureHandle) {
+        match self.centre {
+            Centre::Full => self.paint_turned_tile(ui, rect, tileset, texture, self.drawn),
+            Centre::Empty => {
+                paint_state(ui, rect, NeighborState::Empty);
+                preview::paint_tinted(
+                    ui.painter(),
+                    rect,
+                    texture,
+                    &tileset.tiles[self.tile],
+                    self.drawn,
+                    EMPTY_CENTRE_TINT,
+                );
+            }
+        }
     }
 
     fn paint_turned_tile(
@@ -1006,6 +1045,16 @@ fn released_on(ui: &Ui, response: &Response, rect: Rect, button: PointerButton) 
                 .is_some_and(|pos| rect.contains(pos))
         });
     response.clicked_by(button) || released_inside
+}
+
+fn clicked_centre(response: &Response) -> Option<Centre> {
+    if response.clicked_by(PointerButton::Primary) {
+        return Some(Centre::Full);
+    }
+
+    response
+        .clicked_by(PointerButton::Secondary)
+        .then_some(Centre::Empty)
 }
 
 fn pressed_state(ui: &Ui) -> Option<NeighborState> {

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::model::neighbor::{NeighborState, Neighborhood};
-use crate::model::tile::{Chance, TileRule};
+use crate::model::tile::{Centre, Chance, TileRule};
 use crate::model::transform::Transform;
 
 const ALL_CELLS: f32 = 100.0;
@@ -24,13 +24,14 @@ pub struct Variant {
     pub transform: Transform,
     pub primary: bool,
     pub neighborhood: Neighborhood,
+    pub centre: Centre,
     pub chance: Chance,
 }
 
-/// Every variant declaring one exact neighborhood; rpp rolls between them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pool {
     pub neighborhood: Neighborhood,
+    pub centre: Centre,
     pub members: Vec<Variant>,
 }
 
@@ -114,13 +115,13 @@ pub fn pools(tiles: &[(usize, TileRule)]) -> Vec<Pool> {
     let mut pools: Vec<Pool> = Vec::new();
 
     for variant in expand(tiles) {
-        match pools
-            .iter_mut()
-            .find(|pool| pool.neighborhood == variant.neighborhood)
-        {
+        match pools.iter_mut().find(|pool| {
+            pool.neighborhood == variant.neighborhood && pool.centre == variant.centre
+        }) {
             Some(pool) => pool.members.push(variant),
             None => pools.push(Pool {
                 neighborhood: variant.neighborhood,
+                centre: variant.centre,
                 members: vec![variant],
             }),
         }
@@ -142,11 +143,11 @@ fn expand(tiles: &[(usize, TileRule)]) -> Vec<Variant> {
         for (index, rule) in rules.into_iter().enumerate() {
             for relative in rule.orientations().transforms() {
                 let neighborhood = relative.apply(&rule.neighborhood);
-                if seen.contains(&neighborhood) {
+                if seen.contains(&(neighborhood, rule.centre)) {
                     continue;
                 }
                 let primary = seen.is_empty();
-                seen.push(neighborhood);
+                seen.push((neighborhood, rule.centre));
 
                 variants.push(Variant {
                     tile,
@@ -154,6 +155,7 @@ fn expand(tiles: &[(usize, TileRule)]) -> Vec<Variant> {
                     transform: relative.after(rule.drawn),
                     primary,
                     neighborhood,
+                    centre: rule.centre,
                     chance: rule.chance,
                 });
             }

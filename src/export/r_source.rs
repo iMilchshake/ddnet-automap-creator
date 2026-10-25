@@ -4,7 +4,9 @@ use crate::model::group::{self, GroupError, GroupMode, TileGroup};
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode, Pool, Variant};
 use crate::model::project::is_free_tile;
-use crate::model::tile::{AIR_TILE, Chance, TileRule, highest_free_tile, referenced_tiles};
+use crate::model::tile::{
+    AIR_TILE, Centre, Chance, TileRule, highest_free_tile, referenced_tiles,
+};
 use crate::model::transform::Transform;
 
 /// Group names live under a prefix of our own. rpp keywords and base.r globals
@@ -14,6 +16,9 @@ const OBJECT_PREFIX: &str = "o:";
 
 const MASK: &str = "g:mask";
 const ON_MASK: &str = ".If(IndexAt([0, 0]).Is(g:mask))";
+const NO_DEFAULT_RULE: &str = "util:NoDefaultPosRule();";
+const INSIDE_MAP_CONDITION: &str = "util:IsNotOut();";
+const EMPTY_CENTRE_CONDITION: &str = "util:NewPosRule([0, 0]); util:IsEmpty();";
 
 #[derive(Debug, Error)]
 pub enum ExportError {
@@ -68,7 +73,11 @@ impl RuleSet<'_> {
     fn needs_mask(&self) -> bool {
         pool::pools(&self.active_tiles())
             .iter()
-            .any(|pool| !pool.neighborhood.is_tile_specific() && pool.members.len() > 1)
+            .any(|pool| {
+                pool.centre == Centre::Full
+                    && !pool.neighborhood.is_tile_specific()
+                    && pool.members.len() > 1
+            })
     }
 
     fn mask_line(&self) -> Result<Option<String>, ExportError> {
@@ -150,8 +159,10 @@ fn render_rule_set(
     lines.extend(mask_line);
 
     let pools = pool::pools(&rule_set.active_tiles());
-    let (specific, plain): (Vec<&Pool>, Vec<&Pool>) = pools
-        .iter()
+    let (empty_centred, full_centred): (Vec<&Pool>, Vec<&Pool>) =
+        pools.iter().partition(|pool| pool.centre == Centre::Empty);
+    let (specific, plain): (Vec<&Pool>, Vec<&Pool>) = full_centred
+        .into_iter()
         .partition(|pool| pool.neighborhood.is_tile_specific());
 
     let mut runs: Vec<Vec<String>> = Vec::new();
@@ -164,7 +175,7 @@ fn render_rule_set(
     if !specific.is_empty() {
         let rules = specific
             .iter()
-            .flat_map(|pool| tile_specific_lines(pool, rule_set.chance_mode));
+            .flat_map(|pool| copy_run_lines(pool, rule_set.chance_mode));
         runs.push(new_run(false, rules));
     }
     if !rule_set.groups.is_empty() {
@@ -174,6 +185,12 @@ fn render_rule_set(
             .map(|group| insert_object_block(index, namespaced, group, rule_set.groups));
         runs.push(new_run(true, objects));
         runs.push(new_run(true, ["Run().FillObjects();".to_owned()]));
+    }
+    if !empty_centred.is_empty() {
+        let rules = empty_centred
+            .iter()
+            .flat_map(|pool| copy_run_lines(pool, rule_set.chance_mode));
+        runs.push(new_run(false, rules));
     }
 
     lines.extend(runs.join(&String::new()));
@@ -404,7 +421,7 @@ pub fn last_wins_odds(shares: &[f32], covers_all: bool) -> Vec<Option<f32>> {
     odds
 }
 
-fn tile_specific_lines(pool: &Pool, mode: ChanceMode) -> Vec<String> {
+fn copy_run_lines(pool: &Pool, mode: ChanceMode) -> Vec<String> {
     let covers_all = pool.coverage(mode) >= Chance::FULL.percent();
     let odds = last_wins_odds(&pool.shares(mode), covers_all);
 
@@ -419,27 +436,42 @@ fn index_rule_lines(member: &Variant, odds: Option<f32>) -> Vec<String> {
     let chance = odds
         .map(|odds| format!(" util:Chance({odds});"))
         .unwrap_or_default();
+    let (no_default, centre_condition) = match member.centre {
+        Centre::Full => (String::new(), None),
+        Centre::Empty => (
+            format!(" {NO_DEFAULT_RULE}"),
+            Some(EMPTY_CENTRE_CONDITION.to_owned()),
+        ),
+    };
     let head = format!(
-        "util:NewRule(); util:InsertIndex({});{chance}",
+        "util:NewRule(); util:InsertIndex({});{chance}{no_default}",
         index_name(member.tile, member.transform)
     );
 
-    let tests = NEIGHBORS
+    let conditions = NEIGHBORS
         .iter()
         .enumerate()
-        .filter_map(|(index, neighbor)| {
-            let test = neighbor_test(member.neighborhood.state(index))?;
+        .flat_map(|(index, neighbor)| {
+            let state = member.neighborhood.state(index);
+            let position = format!("util:NewPosRule([{}, {}]);", neighbor.dx, neighbor.dy);
+            let keep_inside = member.centre == Centre::Empty && state == NeighborState::Full;
 
-            Some(format!(
-                "util:NewPosRule([{}, {}]); {test}",
-                neighbor.dx, neighbor.dy
-            ))
+            [
+                neighbor_condition(state),
+                keep_inside.then(|| INSIDE_MAP_CONDITION.to_owned()),
+            ]
+            .into_iter()
+            .flatten()
+            .map(move |condition| format!("{position} {condition}"))
         });
 
-    std::iter::once(head).chain(tests).collect()
+    std::iter::once(head)
+        .chain(centre_condition)
+        .chain(conditions)
+        .collect()
 }
 
-fn neighbor_test(state: NeighborState) -> Option<String> {
+fn neighbor_condition(state: NeighborState) -> Option<String> {
     match state {
         NeighborState::Any => None,
         NeighborState::Full => Some("util:IsFull();".to_owned()),

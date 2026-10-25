@@ -1,13 +1,18 @@
 use std::ops::Range;
+use std::time::{Duration, Instant};
 
 use twmap::Tile;
 use twmap::ndarray::Array2;
 
+use crate::export::compiler::RulesCompiler;
+use crate::export::r_source::{RuleSet, output_file, render};
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
-use crate::model::tile::{Chance, TILE_COUNT, TileRule};
+use crate::model::tile::{Centre, Chance, TILE_COUNT, TileRule};
 use crate::model::transform::Transform;
+use crate::tests::support::index_of;
 use crate::preview::{
     Automapped, CustomShape, FALLBACK_UNMATCHED_MARKER, PlacedTile, PreviewCell, PreviewError,
     Sample, automap, unmatched_marker,
@@ -25,12 +30,58 @@ const FLIPPED_EVERYWHERE: &str = "[Test]\nIndex 5 XFLIP\n";
 const TOP_EDGES: &str = "[Test]\nIndex 2\nIndex 7\nPos 0 -1 EMPTY\n";
 const ONLY_TOP_EDGES: &str = "[Test]\nIndex 7\nPos 0 -1 EMPTY\n";
 const TILE_ONE_ON_TOP_EDGES: &str = "[Test]\nIndex 1\nPos 0 -1 EMPTY\n";
+const IMAGE_STEM: &str = "grass_main";
+const COMPILE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const COMPILE_TIMEOUT: Duration = Duration::from_secs(30);
+const AIR_DECORATION: usize = 9;
 
-fn plain(index: usize) -> PreviewCell {
+fn placed(index: usize, centre: Centre) -> PreviewCell {
     PreviewCell::Placed(PlacedTile {
         index,
         transform: Transform::IDENTITY,
+        centre,
     })
+}
+
+fn plain(index: usize) -> PreviewCell {
+    placed(index, Centre::Full)
+}
+
+fn compiled(source: String) -> String {
+    let mut compiler = RulesCompiler::new();
+    compiler.start(source, output_file(IMAGE_STEM));
+
+    let deadline = Instant::now() + COMPILE_TIMEOUT;
+    while Instant::now() < deadline {
+        if let Some(result) = compiler.poll() {
+            return result.unwrap().rules;
+        }
+        std::thread::sleep(COMPILE_POLL_INTERVAL);
+    }
+
+    panic!("rpp did not finish within {COMPILE_TIMEOUT:?}");
+}
+
+fn empty_above_ground() -> String {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
+    neighborhood.set_state(index_of("bottom"),NeighborState::Full);
+    let tiles = [(
+        AIR_DECORATION,
+        TileRule {
+            centre: Centre::Empty,
+            ..TileRule::new(neighborhood)
+        },
+    )];
+
+    render(&[RuleSet {
+        image_stem: IMAGE_STEM,
+        name: "Test",
+        tiles: &tiles,
+        deactivated: &[],
+        groups: &[],
+        chance_mode: ChanceMode::Normalize,
+    }])
+    .unwrap()
 }
 
 fn unmatched_count(automapped: &Automapped) -> usize {
@@ -90,6 +141,7 @@ fn a_rule_without_conditions_replaces_every_solid_cell() {
             y_flip: false,
             rot: false,
         },
+        centre: Centre::Full,
     });
 
     for sample in Sample::ALL {
@@ -208,6 +260,46 @@ fn solid_cells_no_rule_touched_are_unmatched() {
         assert_eq!(automapped.cell(air_column, air_row), PreviewCell::Air);
         assert_eq!(unmatched_count(&automapped), solid - top_edges);
     }
+}
+
+#[test]
+fn an_exported_empty_centre_rule_places_into_the_air_above_ground() {
+    let rules = compiled(empty_above_ground());
+    assert!(rules.contains("NoDefaultRule"), "{rules}");
+    assert!(rules.contains("Pos 0 0 EMPTY"), "{rules}");
+    assert!(
+        rules.contains("Pos 0 1 FULL\nPos 0 1 NOTINDEX -1\n"),
+        "{rules}"
+    );
+
+    let all_air = automap(
+        &rules,
+        Sample::Custom,
+        &CustomShape::empty(SHAPE_SIZE, SHAPE_SIZE),
+        SEED,
+        UNMATCHED_MARKER,
+    )
+    .unwrap();
+    assert_eq!(all_air.cell(0, SHAPE_SIZE - 1), PreviewCell::Air);
+
+    let automapped = automap(
+        &rules,
+        Sample::Custom,
+        &ground_shape(),
+        SEED,
+        UNMATCHED_MARKER,
+    )
+    .unwrap();
+
+    assert_eq!(
+        automapped.cell(0, GROUND_ROWS.start - 1),
+        placed(AIR_DECORATION, Centre::Empty)
+    );
+    assert_eq!(automapped.cell(0, 0), PreviewCell::Air);
+    assert_eq!(
+        automapped.cell(0, GROUND_ROWS.start),
+        PreviewCell::Unmatched
+    );
 }
 
 #[test]

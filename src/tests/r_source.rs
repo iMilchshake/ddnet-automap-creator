@@ -2,7 +2,7 @@ use crate::export::r_source::{ExportError, RuleSet, last_wins_odds, render};
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
-use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileRule};
+use crate::model::tile::{AIR_TILE, Centre, Chance, TILE_COUNT, TileRule};
 use crate::tests::support::{HALF_TURN, index_of, mods, outer_corner};
 
 fn rule(neighborhood: Neighborhood, percent: f32, can_rotate: bool) -> TileRule {
@@ -707,6 +707,94 @@ fn the_copy_run_sits_before_the_group_runs() {
 
     assert!(source.find("util:NewRule()") < source.find("InsertObject"));
     assert!(source.contains("util:InsertIndex(2);\n"));
+}
+
+fn full_at_right() -> Neighborhood {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
+    neighborhood.set_state(index_of("right"), NeighborState::Full);
+
+    neighborhood
+}
+
+fn empty_centred(neighborhood: Neighborhood, percent: f32) -> TileRule {
+    TileRule {
+        centre: Centre::Empty,
+        ..rule(neighborhood, percent, false)
+    }
+}
+
+#[test]
+fn empty_centre_rules_get_a_last_copy_run_after_the_group_runs() {
+    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let tiles = [(2, empty_centred(full_at_right(), 100.0))];
+
+    let source = emit_with_groups(&tiles, &groups).unwrap();
+
+    assert!(
+        source.ends_with(
+            "Run().FillObjects();\n\
+             \n\
+             NewRun();\n\
+             util:NewRule(); util:InsertIndex(2); util:NoDefaultPosRule();\n\
+             util:NewPosRule([0, 0]); util:IsEmpty();\n\
+             util:NewPosRule([1, 0]); util:IsFull();\n\
+             util:NewPosRule([1, 0]); util:IsNotOut();\n"
+        ),
+        "{source}"
+    );
+    assert!(!source.contains("OverrideLayer();\nutil:"));
+}
+
+#[test]
+fn empty_centre_pools_split_their_cells_like_other_copy_runs() {
+    let tiles = [
+        (2, empty_centred(full_at_right(), 100.0)),
+        (3, empty_centred(full_at_right(), 100.0)),
+    ];
+
+    let source = emit(&tiles);
+
+    assert!(source.contains("util:InsertIndex(2); util:NoDefaultPosRule();\n"));
+    assert!(source.contains("util:InsertIndex(3); util:Chance(2); util:NoDefaultPosRule();\n"));
+    assert!(!source.contains("g:mask"));
+}
+
+#[test]
+fn a_full_and_an_empty_centre_rule_on_one_neighborhood_do_not_compete() {
+    let tiles = [
+        (1, rule(full_at_right(), 100.0, false)),
+        (2, empty_centred(full_at_right(), 100.0)),
+    ];
+
+    let source = emit(&tiles);
+
+    assert_eq!(
+        body(&source),
+        ["Insert(1).If(IndexAt([0, 0]).IsFullAt(right));"]
+    );
+    assert!(source.contains("util:InsertIndex(2); util:NoDefaultPosRule();\n"));
+    assert!(!source.contains("g:mask"));
+}
+
+#[test]
+fn only_empty_centre_rules_keep_full_neighbors_inside_the_map() {
+    let tiles = [
+        (1, rule(full_at_right(), 100.0, false)),
+        (2, rule(tile_specific(), 100.0, false)),
+        (3, empty_centred(empty_at(&["top"]), 100.0)),
+    ];
+
+    assert!(!emit(&tiles).contains("IsNotOut"));
+}
+
+#[test]
+fn rule_sets_without_empty_centres_never_mention_the_default_rule() {
+    let tiles = [
+        (1, anywhere(100.0)),
+        (2, rule(tile_specific(), 100.0, false)),
+    ];
+
+    assert!(!emit(&tiles).contains("NoDefaultPosRule"));
 }
 
 #[test]

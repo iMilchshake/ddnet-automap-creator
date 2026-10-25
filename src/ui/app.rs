@@ -1582,10 +1582,12 @@ impl AutomapperApp {
             .rules_of(placed.index)
             .iter()
             .position(|rule| {
-                rule.orientations()
-                    .transforms()
-                    .into_iter()
-                    .any(|relative| relative.after(rule.drawn) == placed.transform)
+                rule.centre == placed.centre
+                    && rule
+                        .orientations()
+                        .transforms()
+                        .into_iter()
+                        .any(|relative| relative.after(rule.drawn) == placed.transform)
             })
             .unwrap_or(FIRST_RULE)
     }

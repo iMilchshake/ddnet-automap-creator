@@ -6,7 +6,7 @@ use twmap::ndarray::Array2;
 use twmap::{GameLayer, Tile, TileFlags, TwMap};
 
 use crate::model::project::Project;
-use crate::model::tile::{AIR_TILE, TILE_COUNT, referenced_tiles};
+use crate::model::tile::{AIR_TILE, Centre, TILE_COUNT, referenced_tiles};
 use crate::model::transform::Transform;
 
 const DM1: &[u8] = include_bytes!("../assets/dm1.map");
@@ -197,6 +197,7 @@ impl CustomShape {
 pub struct PlacedTile {
     pub index: usize,
     pub transform: Transform,
+    pub centre: Centre,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,9 +258,10 @@ pub fn automap(
     let rule_set = automapper.configs.first().ok_or(PreviewError::NoRuleSet)?;
 
     let mut tiles = sample.tiles(custom, unmatched_marker)?;
+    let was_solid = tiles.map(|tile| tile.id != 0);
     rule_set.run(seed, &mut tiles);
 
-    Ok(collect(&tiles, unmatched_marker))
+    Ok(collect(&tiles, &was_solid, unmatched_marker))
 }
 
 fn drawn_tiles(rows: &[&str], solid_id: u8) -> Array2<Tile> {
@@ -292,7 +294,7 @@ fn solid_tile(id: u8) -> Tile {
     Tile::new(id, TileFlags::empty())
 }
 
-fn collect(tiles: &Array2<Tile>, unmatched_marker: u8) -> Automapped {
+fn collect(tiles: &Array2<Tile>, was_solid: &Array2<bool>, unmatched_marker: u8) -> Automapped {
     let (height, width) = tiles.dim();
 
     Automapped {
@@ -300,12 +302,13 @@ fn collect(tiles: &Array2<Tile>, unmatched_marker: u8) -> Automapped {
         height,
         cells: tiles
             .iter()
-            .map(|tile| cell(*tile, unmatched_marker))
+            .zip(was_solid)
+            .map(|(tile, was_solid)| cell(*tile, *was_solid, unmatched_marker))
             .collect(),
     }
 }
 
-fn cell(tile: Tile, unmatched_marker: u8) -> PreviewCell {
+fn cell(tile: Tile, was_solid: bool, unmatched_marker: u8) -> PreviewCell {
     if tile.id == 0 {
         return PreviewCell::Air;
     }
@@ -315,6 +318,10 @@ fn cell(tile: Tile, unmatched_marker: u8) -> PreviewCell {
 
     PreviewCell::Placed(PlacedTile {
         index: usize::from(tile.id),
+        centre: match was_solid {
+            true => Centre::Full,
+            false => Centre::Empty,
+        },
         transform: Transform {
             x_flip: tile.flags.contains(TileFlags::FLIP_X),
             y_flip: tile.flags.contains(TileFlags::FLIP_Y),

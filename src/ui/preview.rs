@@ -62,7 +62,7 @@ pub fn show(
                 PreviewCell::Unmatched => unmatched.push(cell),
                 PreviewCell::Placed(placed) => {
                     if let Some(slice) = tileset.tiles.get(placed.index) {
-                        add_tile(&mut mesh, cell, slice, placed.transform);
+                        add_tile(&mut mesh, cell, slice, placed.transform, Color32::WHITE);
                     }
                 }
             }
@@ -223,12 +223,23 @@ pub fn paint_turned(
     slice: &TileSlice,
     transform: Transform,
 ) {
+    paint_tinted(painter, cell, texture, slice, transform, Color32::WHITE);
+}
+
+pub fn paint_tinted(
+    painter: &egui::Painter,
+    cell: Rect,
+    texture: &TextureHandle,
+    slice: &TileSlice,
+    transform: Transform,
+    tint: Color32,
+) {
     let mut mesh = Mesh::with_texture(texture.id());
-    add_tile(&mut mesh, cell, slice, transform);
+    add_tile(&mut mesh, cell, slice, transform, tint);
     painter.add(egui::Shape::mesh(mesh));
 }
 
-fn add_tile(mesh: &mut Mesh, cell: Rect, slice: &TileSlice, transform: Transform) {
+fn add_tile(mesh: &mut Mesh, cell: Rect, slice: &TileSlice, transform: Transform, tint: Color32) {
     let corners = [
         cell.left_top(),
         cell.right_top(),
@@ -242,7 +253,7 @@ fn add_tile(mesh: &mut Mesh, cell: Rect, slice: &TileSlice, transform: Transform
         mesh.vertices.push(Vertex {
             pos,
             uv,
-            color: Color32::WHITE,
+            color: tint,
         });
     }
     mesh.add_triangle(first, first + 1, first + 2);

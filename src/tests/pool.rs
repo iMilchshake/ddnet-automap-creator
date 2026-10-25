@@ -1,6 +1,6 @@
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::{ChanceMode, Pool, Variant, base_shares, pools, pools_of};
-use crate::model::tile::{Chance, TileRule};
+use crate::model::tile::{Centre, Chance, TileRule};
 use crate::model::transform::{Orientations, Transform};
 use crate::tests::support::{HALF_TURN, QUARTER_TURN, half_turn, index_of, mods};
 
@@ -293,6 +293,57 @@ fn a_later_rule_reaching_a_known_neighborhood_by_another_transform_is_dropped() 
 
     assert_eq!(variants.len(), 1);
     assert_eq!(variants[0].rule, 0);
+}
+
+fn empty_centred(neighborhood: Neighborhood) -> TileRule {
+    TileRule {
+        centre: Centre::Empty,
+        ..TileRule::new(neighborhood)
+    }
+}
+
+#[test]
+fn rules_only_share_a_pool_when_neighborhood_and_centre_match() {
+    let pools = pools(&[
+        (1, TileRule::new(only("left"))),
+        (2, empty_centred(only("left"))),
+        (3, TileRule::new(only("left"))),
+    ]);
+
+    let members: Vec<(Centre, Vec<usize>)> = pools
+        .iter()
+        .map(|pool| {
+            (
+                pool.centre,
+                pool.members.iter().map(|member| member.tile).collect(),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        members,
+        [(Centre::Full, vec![1, 3]), (Centre::Empty, vec![2])]
+    );
+}
+
+#[test]
+fn a_tile_keeps_its_full_and_its_empty_centre_rule_on_one_neighborhood() {
+    let variants = variants(&[
+        (3, TileRule::new(only("left"))),
+        (3, empty_centred(only("left"))),
+    ]);
+
+    let centres: Vec<Centre> = variants.iter().map(|variant| variant.centre).collect();
+
+    assert_eq!(centres, [Centre::Full, Centre::Empty]);
+}
+
+#[test]
+fn turning_a_rule_leaves_its_centre_alone() {
+    let rule = empty_centred(only("left"));
+
+    assert_eq!(rule.turned_neighbors(HALF_TURN).centre, Centre::Empty);
+    assert_eq!(rule.turned_tile(HALF_TURN).centre, Centre::Empty);
 }
 
 #[test]

@@ -7,7 +7,9 @@ use crate::model::neighbor::{NEIGHBOR_COUNT, NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{AIR_TILE, Chance, InvalidChance, TILE_COUNT, TileMods, TileRule};
+use crate::model::tile::{
+    AIR_TILE, Centre, Chance, InvalidChance, TILE_COUNT, TileMods, TileRule,
+};
 use crate::model::transform::{Orientations, Transform};
 
 const VERSION: u32 = 1;
@@ -96,6 +98,22 @@ pub struct BlueprintRule {
     pub orientations: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawn: Option<String>,
+    #[serde(default, skip_serializing_if = "BlueprintCentre::is_full")]
+    pub centre: BlueprintCentre,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BlueprintCentre {
+    #[default]
+    Full,
+    Empty,
+}
+
+impl BlueprintCentre {
+    fn is_full(&self) -> bool {
+        *self == Self::Full
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -261,6 +279,10 @@ fn store_rule(rule: &TileRule) -> BlueprintRule {
         chance: rule.chance.percent(),
         orientations: orientations.into_iter().map(orientation_name).collect(),
         drawn: (rule.drawn != Transform::IDENTITY).then(|| orientation_name(rule.drawn)),
+        centre: match rule.centre {
+            Centre::Full => BlueprintCentre::Full,
+            Centre::Empty => BlueprintCentre::Empty,
+        },
     }
 }
 
@@ -321,6 +343,10 @@ fn load_rule(tile: usize, rule: &BlueprintRule) -> Result<TileRule, BlueprintErr
 
     Ok(TileRule {
         neighborhood,
+        centre: match rule.centre {
+            BlueprintCentre::Full => Centre::Full,
+            BlueprintCentre::Empty => Centre::Empty,
+        },
         mods,
         custom,
         drawn,
