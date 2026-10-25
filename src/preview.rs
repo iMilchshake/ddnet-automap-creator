@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use thiserror::Error;
 use twmap::automapper::Automapper;
 use twmap::ndarray::Array2;
@@ -12,6 +14,9 @@ const GAME_LAYER_HOOKABLE: u8 = 1;
 const GAME_LAYER_UNHOOKABLE: u8 = 3;
 pub(crate) const FALLBACK_UNMATCHED_MARKER: u8 = 1;
 const SOLID: char = '#';
+const CUSTOM_DEFAULT_WIDTH: usize = 32;
+const CUSTOM_DEFAULT_HEIGHT: usize = 16;
+pub const CUSTOM_SIZE_RANGE: RangeInclusive<usize> = 4..=128;
 
 const SHAPES: [&str; 17] = [
     "................................",
@@ -90,14 +95,16 @@ pub enum Sample {
     DeBruijnTorus,
     Minimal,
     Dm1,
+    Custom,
 }
 
 impl Sample {
-    pub const ALL: [Sample; 4] = [
+    pub const ALL: [Sample; 5] = [
         Sample::Shapes,
         Sample::DeBruijnTorus,
         Sample::Minimal,
         Sample::Dm1,
+        Sample::Custom,
     ];
 
     pub fn name(self) -> &'static str {
@@ -106,16 +113,83 @@ impl Sample {
             Sample::DeBruijnTorus => "de Bruijn torus",
             Sample::Minimal => "Minimal",
             Sample::Dm1 => "dm1",
+            Sample::Custom => "Custom",
         }
     }
 
-    pub fn tiles(self, solid_id: u8) -> Result<Array2<Tile>, PreviewError> {
+    pub fn tiles(
+        self,
+        custom: &CustomShape,
+        solid_id: u8,
+    ) -> Result<Array2<Tile>, PreviewError> {
         match self {
             Sample::Shapes => Ok(drawn_tiles(&SHAPES, solid_id)),
             Sample::DeBruijnTorus => Ok(drawn_tiles(&DE_BRUIJN_TORUS, solid_id)),
             Sample::Minimal => Ok(drawn_tiles(&MINIMAL, solid_id)),
             Sample::Dm1 => game_layer_tiles(DM1, solid_id),
+            Sample::Custom => Ok(custom.tiles(solid_id)),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomShape {
+    width: usize,
+    height: usize,
+    solid: Vec<bool>,
+}
+
+impl Default for CustomShape {
+    fn default() -> Self {
+        Self::empty(CUSTOM_DEFAULT_WIDTH, CUSTOM_DEFAULT_HEIGHT)
+    }
+}
+
+impl CustomShape {
+    pub fn empty(width: usize, height: usize) -> Self {
+        Self {
+            width,
+            height,
+            solid: vec![false; width * height],
+        }
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn set(&mut self, column: usize, row: usize, solid: bool) -> bool {
+        let cell = &mut self.solid[row * self.width + column];
+        let changed = *cell != solid;
+        *cell = solid;
+        changed
+    }
+
+    pub fn resize(&mut self, width: usize, height: usize) {
+        let mut resized = Self::empty(width, height);
+        for row in 0..height.min(self.height) {
+            for column in 0..width.min(self.width) {
+                resized.set(column, row, self.solid[row * self.width + column]);
+            }
+        }
+        *self = resized;
+    }
+
+    pub fn clear(&mut self) {
+        self.solid.fill(false);
+    }
+
+    fn tiles(&self, solid_id: u8) -> Array2<Tile> {
+        Array2::from_shape_fn((self.height, self.width), |(row, column)| {
+            match self.solid[row * self.width + column] {
+                true => solid_tile(solid_id),
+                false => Tile::default(),
+            }
+        })
     }
 }
 
@@ -166,6 +240,7 @@ impl Automapped {
 pub fn automap(
     rules: &str,
     sample: Sample,
+    custom: &CustomShape,
     seed: u32,
     unmatched_marker: u8,
 ) -> Result<Automapped, PreviewError> {
@@ -181,7 +256,7 @@ pub fn automap(
         .map_err(|error| PreviewError::Syntax(error.to_string()))?;
     let rule_set = automapper.configs.first().ok_or(PreviewError::NoRuleSet)?;
 
-    let mut tiles = sample.tiles(unmatched_marker)?;
+    let mut tiles = sample.tiles(custom, unmatched_marker)?;
     rule_set.run(seed, &mut tiles);
 
     Ok(collect(&tiles, unmatched_marker))

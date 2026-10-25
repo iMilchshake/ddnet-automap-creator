@@ -14,6 +14,7 @@ const DUPLICATE_ICON: &str = "🗐";
 const REMOVE_ICON: &str = "🗑";
 const COPY_ICON: &str = "📋";
 const PASTE_ICON: &str = "📥";
+const DRAW_ICON: &str = "✏";
 
 fn icon_button(icon: &'static str) -> impl egui::Widget {
     move |ui: &mut egui::Ui| {

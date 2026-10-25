@@ -17,7 +17,7 @@ use crate::model::pool::{self, ChanceMode, Pool};
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{AIR_TILE, Chance, TILESET_SIDE, TileRule};
-use crate::preview::{self, Automapped, PlacedTile, Sample};
+use crate::preview::{self, Automapped, CUSTOM_SIZE_RANGE, CustomShape, PlacedTile, Sample};
 use crate::tileset::{self, Tileset};
 use crate::ui::grid::{self, GridResponse, GridView};
 use crate::ui::group_panel::{GroupPanel, mode_label};
@@ -28,7 +28,7 @@ use crate::ui::tile_panel::{
     CopiedRule, FlashKind, GridFlash, TileContext, TileEdit, TilePanel,
 };
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
-use crate::ui::{ADD_ICON, DUPLICATE_ICON, REMOVE_ICON, icon_button};
+use crate::ui::{ADD_ICON, DRAW_ICON, DUPLICATE_ICON, REMOVE_ICON, icon_button};
 
 const SIDE_PANEL_WIDTH: f32 = 260.0;
 const MIN_SIDE_PANEL_WIDTH: f32 = 220.0;
@@ -85,6 +85,7 @@ const KEYBINDS: [(&str, &str); 8] = [
 ];
 const AIR_WARNING: &str = "is reserved for air: DDNet treats it as empty.";
 const GENERATE_TOOLTIP: &str = "Roll the chances again with the next seed.";
+const DRAW_TOOLTIP: &str = "Left click paints blocks, right click erases them.";
 const PREVIEW_WAITING: &str = "Compiling the rules for the preview…";
 const PREVIEW_NO_RULES: &str = "No preview possible as this rule set has no rules yet. Go configure some in the Tileset tab :)";
 const GROUP_ORDER_NOTE: &str = "applied top to bottom";
@@ -272,6 +273,8 @@ pub struct AutomapperApp {
     preview_source: Option<String>,
     preview_seed: u32,
     preview_sample: Sample,
+    custom_shape: CustomShape,
+    draw_custom: bool,
     inspector: Inspector,
     clipboard: Option<CopiedRule>,
     flash: Option<Flash>,
@@ -304,6 +307,8 @@ impl Default for AutomapperApp {
             preview_source: None,
             preview_seed: FIRST_PREVIEW_SEED,
             preview_sample: Sample::default(),
+            custom_shape: CustomShape::default(),
+            draw_custom: true,
             inspector: Inspector::Empty,
             clipboard: None,
             flash: None,
@@ -695,6 +700,7 @@ impl AutomapperApp {
                 self.preview = preview_result(
                     rules,
                     self.preview_sample,
+                    &self.custom_shape,
                     self.preview_seed,
                     unmatched_marker,
                 );
@@ -925,6 +931,32 @@ impl AutomapperApp {
             self.regenerate_preview();
         }
         ui.weak(format!("seed {}", self.preview_seed));
+
+        if self.preview_sample == Sample::Custom {
+            ui.separator();
+            self.show_custom_controls(ui);
+        }
+    }
+
+    fn show_custom_controls(&mut self, ui: &mut Ui) {
+        let mut width = self.custom_shape.width();
+        let mut height = self.custom_shape.height();
+
+        ui.label("Size:");
+        ui.add(egui::DragValue::new(&mut width).range(CUSTOM_SIZE_RANGE));
+        ui.label("×");
+        ui.add(egui::DragValue::new(&mut height).range(CUSTOM_SIZE_RANGE));
+        if (width, height) != (self.custom_shape.width(), self.custom_shape.height()) {
+            self.custom_shape.resize(width, height);
+            self.reautomap();
+        }
+
+        if ui.button("Clear").clicked() {
+            self.custom_shape.clear();
+            self.reautomap();
+        }
+        ui.toggle_value(&mut self.draw_custom, format!("{DRAW_ICON} Draw"))
+            .on_hover_text(DRAW_TOOLTIP);
     }
 
     fn show_selection_picker(&mut self, ui: &mut Ui) {
@@ -1355,37 +1387,35 @@ impl AutomapperApp {
     }
 
     fn regenerate_preview(&mut self) {
-        let PreviewResult::Ready {
-            rules,
-            unmatched_marker,
-            ..
-        } = &self.preview
-        else {
-            return;
-        };
-
         self.preview_seed += 1;
-        self.preview = preview_result(
-            rules.clone(),
-            self.preview_sample,
-            self.preview_seed,
-            *unmatched_marker,
-        );
+        self.reautomap();
     }
 
     fn switch_sample(&mut self, sample: Sample) {
         self.preview_sample = sample;
+        if !matches!(self.preview, PreviewResult::Ready { .. }) {
+            self.preview_source = None;
+        }
+        self.reautomap();
+    }
 
+    fn reautomap(&mut self) {
         let PreviewResult::Ready {
             rules,
             unmatched_marker,
             ..
         } = &self.preview
         else {
-            self.preview_source = None;
             return;
         };
-        self.preview = preview_result(rules.clone(), sample, self.preview_seed, *unmatched_marker);
+
+        self.preview = preview_result(
+            rules.clone(),
+            self.preview_sample,
+            &self.custom_shape,
+            self.preview_seed,
+            *unmatched_marker,
+        );
     }
 
     fn show_preview(&mut self, ui: &mut Ui) {
@@ -1395,7 +1425,9 @@ impl AutomapperApp {
             return;
         };
 
-        let mut clicked = None;
+        let drawing = (self.preview_sample == Sample::Custom && self.draw_custom)
+            .then_some(&mut self.custom_shape);
+        let mut interaction = preview_view::Interaction::default();
         match &self.preview {
             PreviewResult::Waiting => {
                 ui.horizontal(|ui| {
@@ -1411,12 +1443,22 @@ impl AutomapperApp {
             }
             PreviewResult::Ready { automapped, .. } => {
                 ui.vertical_centered(|ui| {
-                    clicked = preview_view::show(ui, &loaded.tileset, &loaded.texture, automapped);
+                    interaction = preview_view::show(
+                        ui,
+                        &loaded.tileset,
+                        &loaded.texture,
+                        automapped,
+                        drawing,
+                    );
                 });
             }
         }
 
-        if let Some(placed) = clicked {
+        if interaction.edited {
+            self.reautomap();
+            ui.ctx().request_repaint();
+        }
+        if let Some(placed) = interaction.clicked {
             self.select_rule_of(placed);
         }
     }
@@ -2063,8 +2105,14 @@ fn describe_group(group: &TileGroup) -> String {
     text
 }
 
-fn preview_result(rules: String, sample: Sample, seed: u32, unmatched_marker: u8) -> PreviewResult {
-    match preview::automap(&rules, sample, seed, unmatched_marker) {
+fn preview_result(
+    rules: String,
+    sample: Sample,
+    custom: &CustomShape,
+    seed: u32,
+    unmatched_marker: u8,
+) -> PreviewResult {
+    match preview::automap(&rules, sample, custom, seed, unmatched_marker) {
         Ok(automapped) => PreviewResult::Ready {
             rules,
             unmatched_marker,

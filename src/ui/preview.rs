@@ -6,7 +6,7 @@ use egui::{
 };
 
 use crate::model::transform::Transform;
-use crate::preview::{Automapped, PlacedTile, PreviewCell};
+use crate::preview::{Automapped, CustomShape, PlacedTile, PreviewCell};
 use crate::tileset::{TileSlice, Tileset};
 
 const MIN_CELL_SIZE: f32 = 4.0;
@@ -17,13 +17,21 @@ const HOVER_STROKE_WIDTH: f32 = 2.0;
 const UNMATCHED_MARK: &str = "?";
 const UNMATCHED_MARK_SCALE: f32 = 0.7;
 const MIN_MARK_CELL_SIZE: f32 = 10.0;
+const PATH_SAMPLES_PER_CELL: f32 = 2.0;
+
+#[derive(Default)]
+pub struct Interaction {
+    pub clicked: Option<PlacedTile>,
+    pub edited: bool,
+}
 
 pub fn show(
     ui: &mut egui::Ui,
     tileset: &Tileset,
     texture: &TextureHandle,
     automapped: &Automapped,
-) -> Option<PlacedTile> {
+    drawing: Option<&mut CustomShape>,
+) -> Interaction {
     let pixels_per_point = ui.ctx().pixels_per_point();
     let cell_size = whole_pixel_cell_size(ui.available_size(), automapped, pixels_per_point);
     let size = Vec2::new(
@@ -31,7 +39,11 @@ pub fn show(
         cell_size * automapped.height as f32,
     );
 
-    let (allocated, response) = ui.allocate_exact_size(size, Sense::click());
+    let sense = match drawing {
+        Some(_) => Sense::click_and_drag(),
+        None => Sense::click(),
+    };
+    let (allocated, response) = ui.allocate_exact_size(size, sense);
     let rect = Rect::from_min_size(
         allocated.min.round_to_pixels(pixels_per_point),
         allocated.size(),
@@ -62,24 +74,101 @@ pub fn show(
         paint_unmatched(&painter, cell);
     }
 
+    match drawing {
+        Some(shape) => Interaction {
+            clicked: None,
+            edited: draw_cells(ui, &response, &painter, rect, cell_size, shape),
+        },
+        None => Interaction {
+            clicked: clicked_tile(ui, &response, &painter, rect, cell_size, automapped),
+            edited: false,
+        },
+    }
+}
+
+fn clicked_tile(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    painter: &egui::Painter,
+    rect: Rect,
+    cell_size: f32,
+    automapped: &Automapped,
+) -> Option<PlacedTile> {
     let (column, row) = response
         .hover_pos()
-        .and_then(|pos| cell_at(pos, rect, cell_size, automapped))?;
+        .and_then(|pos| cell_at(pos, rect, cell_size, automapped.width, automapped.height))?;
     let PreviewCell::Placed(placed) = automapped.cell(column, row) else {
         return None;
     };
 
     ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-    painter.rect_stroke(
-        cell_rect(rect, cell_size, column, row),
-        0.0,
-        Stroke::new(HOVER_STROKE_WIDTH, ui.visuals().selection.stroke.color),
-        StrokeKind::Inside,
-    );
+    outline_cell(ui, painter, cell_rect(rect, cell_size, column, row));
 
     response
         .clicked_by(PointerButton::Primary)
         .then_some(placed)
+}
+
+fn outline_cell(ui: &egui::Ui, painter: &egui::Painter, cell: Rect) {
+    painter.rect_stroke(
+        cell,
+        0.0,
+        Stroke::new(HOVER_STROKE_WIDTH, ui.visuals().selection.stroke.color),
+        StrokeKind::Inside,
+    );
+}
+
+fn draw_cells(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    painter: &egui::Painter,
+    rect: Rect,
+    cell_size: f32,
+    shape: &mut CustomShape,
+) -> bool {
+    if let Some((column, row)) = response
+        .hover_pos()
+        .and_then(|pos| cell_at(pos, rect, cell_size, shape.width(), shape.height()))
+    {
+        ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+        outline_cell(ui, painter, cell_rect(rect, cell_size, column, row));
+    }
+
+    let Some(to) = response.interact_pointer_pos() else {
+        return false;
+    };
+    let (primary_down, secondary_down) = ui.input(|input| {
+        (
+            input.pointer.primary_down(),
+            input.pointer.secondary_down(),
+        )
+    });
+    let solid = if primary_down {
+        true
+    } else if secondary_down {
+        false
+    } else {
+        return false;
+    };
+
+    let mut edited = false;
+    for pos in pointer_path(to - response.drag_delta(), to, cell_size) {
+        if let Some((column, row)) =
+            cell_at(pos, rect, cell_size, shape.width(), shape.height())
+        {
+            edited |= shape.set(column, row, solid);
+        }
+    }
+
+    edited
+}
+
+fn pointer_path(from: Pos2, to: Pos2, cell_size: f32) -> impl Iterator<Item = Pos2> {
+    let steps = ((to - from).length() / cell_size * PATH_SAMPLES_PER_CELL)
+        .ceil()
+        .max(1.0) as usize;
+
+    (0..=steps).map(move |step| from.lerp(to, step as f32 / steps as f32))
 }
 
 fn cell_rect(rect: Rect, cell_size: f32, column: usize, row: usize) -> Rect {
@@ -91,13 +180,14 @@ fn cell_at(
     pos: Pos2,
     rect: Rect,
     cell_size: f32,
-    automapped: &Automapped,
+    width: usize,
+    height: usize,
 ) -> Option<(usize, usize)> {
     let offset = pos - rect.min;
     let column = (offset.x / cell_size) as usize;
     let row = (offset.y / cell_size) as usize;
 
-    (offset.x >= 0.0 && offset.y >= 0.0 && column < automapped.width && row < automapped.height)
+    (offset.x >= 0.0 && offset.y >= 0.0 && column < width && row < height)
         .then_some((column, row))
 }
 
