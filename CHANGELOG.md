@@ -7,11 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-24
+
+### Added
+
+- Split view: tileset and preview side by side.
+- Click a tile in the preview to select its rule.
+- Rules can now require a specific neighbor tile (add via CTRL+Left Click on a neighbor tile).
+- Support for multiple individual rules per tile
+- Copy and paste rules (via UI or or C/V keys).
+- Hold Space to peek at the other view.
+
+### Changed
+
+- Rotate and flip buttons below the grid turn the neighbors. Buttons on the center tile change only the center tile.
+- Re-organized and improved some UI elements
+- New blueprint format. Older blueprints no longer load.
+
+### Fixed
+
+- Chances adding up to 100 % no longer show a wrong share.
+
 ## [0.2.0] - 2026-10-21
 
 ### Added
 
-- Custom orientation picker: serves both as a visualization and custom selection for tile for all possible orientations combining flips and rotations. Updated blueprint format accordingly.
+- Custom orientations: pick any combination of rotations and flips for a tile.
 - Zoom control in the Options menu (native only, the web uses browser zoom).
 - Keybinds overview in the Help window.
 
@@ -19,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Improve intuitiveness and robustness of various UI elements 
 - Right-click deactivates rule instead of deleting it (keeping the configuration).
-- Improve neighborhood editor: left and right click now toggle the states more intuitively. Initial rule is tiles being Any, this is no longer guessed so its more predicable to work with.
+- Clicks in the neighborhood editor toggle states more intuitively. New rules start with all neighbors set to Any.
 - Remove darkening of unused tiles, strongly reduce for deactivated tiles.
 - Tile 0 is reserved for air and can no longer get a rule.
 
