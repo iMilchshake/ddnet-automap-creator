@@ -80,18 +80,6 @@ impl Project {
         self.deactivated.iter().copied().collect()
     }
 
-    pub fn rule_count(&self) -> usize {
-        self.rules.values().map(Vec::len).sum()
-    }
-
-    pub fn deactivated_rule_count(&self) -> usize {
-        self.rules
-            .iter()
-            .filter(|(tile, _)| self.deactivated.contains(tile))
-            .map(|(_, rules)| rules.len())
-            .sum()
-    }
-
     pub fn rules(&self) -> Vec<(usize, TileRule)> {
         self.all_rules()
             .into_iter()

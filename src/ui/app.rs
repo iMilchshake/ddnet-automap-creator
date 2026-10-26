@@ -24,17 +24,22 @@ use crate::ui::group_panel::{GroupPanel, mode_label};
 use crate::ui::picking;
 use crate::ui::preview as preview_view;
 use crate::ui::status::StatusLine;
-use crate::ui::tile_panel::{CopiedRule, FlashKind, GridFlash, TileContext, TileEdit, TilePanel};
+use crate::ui::tile_panel::{
+    CopiedRule, FlashKind, GridFlash, TileContext, TileEdit, TilePanel, show_legend,
+};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
-use crate::ui::{ADD_ICON, DRAW_ICON, DUPLICATE_ICON, REMOVE_ICON, icon_button};
+use crate::ui::{
+    ADD_ICON, BUTTON_GAP, DRAW_ICON, DUPLICATE_ICON, REMOVE_ICON, SWITCH_ICON, compact_button,
+};
 
 const SIDE_PANEL_WIDTH: f32 = 260.0;
-const MIN_SIDE_PANEL_WIDTH: f32 = 220.0;
-const MAX_SIDE_PANEL_WIDTH: f32 = 520.0;
+const MIN_SIDE_PANEL_WIDTH: f32 = 240.0;
+const MAX_SIDE_PANEL_WIDTH: f32 = 360.0;
 const MIN_SPLIT_PANEL_WIDTH: f32 = 200.0;
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
 const SPLIT_PANEL_ID: &str = "tileset";
 const HELP_WIDTH: f32 = 360.0;
+const HELP_SECTION_SPACING: f32 = 8.0;
 const MERGE_WIDTH: f32 = 360.0;
 const EXPORT_WIDTH: f32 = 320.0;
 const GROUP_SWATCH: Vec2 = Vec2::new(12.0, 18.0);
@@ -1012,33 +1017,7 @@ impl AutomapperApp {
             .max_size(MAX_SIDE_PANEL_WIDTH)
             .show(ui, |ui| {
                 ui.add_enabled_ui(has_image, |ui| {
-                    show_rule_set_tabs(ui, &self.rule_sets, &mut rule_set_command);
-                    ui.horizontal(|ui| {
-                        ui.label("Name");
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let can_remove = self.rule_sets.len() > 1;
-                            if ui
-                                .add_enabled(can_remove, icon_button(REMOVE_ICON))
-                                .on_hover_text("Remove this rule set")
-                                .clicked()
-                            {
-                                rule_set_command = Some(RuleSetCommand::Remove);
-                            }
-                            if ui
-                                .add(icon_button(DUPLICATE_ICON))
-                                .on_hover_text("Duplicate this rule set")
-                                .clicked()
-                            {
-                                rule_set_command = Some(RuleSetCommand::Duplicate);
-                            }
-                            ui.add_sized(
-                                ui.available_size(),
-                                egui::TextEdit::singleline(self.rule_sets.active_name_mut()),
-                            );
-                        });
-                    });
-                    ui.label(describe_counts(self.rule_sets.active()));
-
+                    show_rule_set_row(ui, &mut self.rule_sets, &mut rule_set_command);
                     ui.separator();
 
                     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -1056,16 +1035,8 @@ impl AutomapperApp {
                                     copied: self.clipboard.as_ref(),
                                     flash,
                                 };
-                                let deactivated =
-                                    self.rule_sets.active().is_deactivated(panel.tile());
                                 tile_edit = panel
-                                    .show(
-                                        ui,
-                                        &loaded.tileset,
-                                        &loaded.texture,
-                                        &context,
-                                        deactivated,
-                                    )
+                                    .show(ui, &loaded.tileset, &loaded.texture, &context)
                                     .map(|edit| (panel.tile(), edit));
                             }
                             (_, Inspector::Group(panel)) => {
@@ -1697,13 +1668,17 @@ impl AutomapperApp {
             ));
             ui.label("Visual editor to easily create DDNet automappers.");
 
-            ui.add_space(8.0);
+            ui.add_space(HELP_SECTION_SPACING);
             ui.colored_label(ui.visuals().warn_fg_color, "TODO: <add tutorial here>");
 
-            ui.add_space(8.0);
+            ui.add_space(HELP_SECTION_SPACING);
+            ui.strong("Neighbor states");
+            show_legend(ui);
+
+            ui.add_space(HELP_SECTION_SPACING);
             show_keybinds(ui);
 
-            ui.add_space(8.0);
+            ui.add_space(HELP_SECTION_SPACING);
             show_acknowledgements(ui);
 
             ui.separator();
@@ -1886,34 +1861,70 @@ fn show_sentence(ui: &mut Ui, add_words: impl FnOnce(&mut Ui)) {
     });
 }
 
-fn show_rule_set_tabs(ui: &mut Ui, rule_sets: &RuleSets, command: &mut Option<RuleSetCommand>) {
-    ui.horizontal_wrapped(|ui| {
-        for index in 0..rule_sets.len() {
-            let name = rule_sets.name(index).unwrap_or_default();
-            let shared = rule_sets.is_name_shared(index);
-            let label = egui::RichText::new(name);
-            let label = if shared {
-                label.color(ui.visuals().error_fg_color)
-            } else {
-                label
-            };
-            let response = ui.selectable_label(index == rule_sets.active_index(), label);
-            if shared {
-                response.clone().on_hover_text(SHARED_NAME_HINT);
+fn show_rule_set_row(ui: &mut Ui, rule_sets: &mut RuleSets, command: &mut Option<RuleSetCommand>) {
+    let size = ui.spacing().interact_size.y;
+    let can_remove = rule_sets.len() > 1;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = BUTTON_GAP;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add_enabled(can_remove, compact_button(REMOVE_ICON, size))
+                .on_hover_text("Remove this rule set")
+                .clicked()
+            {
+                *command = Some(RuleSetCommand::Remove);
             }
-            if response.clicked() {
-                *command = Some(RuleSetCommand::Select(index));
+            if ui
+                .add(compact_button(DUPLICATE_ICON, size))
+                .on_hover_text("Duplicate this rule set")
+                .clicked()
+            {
+                *command = Some(RuleSetCommand::Duplicate);
             }
-        }
+            if ui
+                .add(compact_button(ADD_ICON, size))
+                .on_hover_text("Add rule set")
+                .clicked()
+            {
+                *command = Some(RuleSetCommand::Add);
+            }
 
-        if ui
-            .small_button(ADD_ICON)
-            .on_hover_text("Add rule set")
-            .clicked()
-        {
-            *command = Some(RuleSetCommand::Add);
-        }
+            ui.add_space(size);
+            let switch = ui
+                .add(compact_button(SWITCH_ICON, size))
+                .on_hover_text("Switch rule set");
+            egui::Popup::menu(&switch).show(|ui| show_rule_set_menu(ui, rule_sets, command));
+
+            let shared = rule_sets.is_name_shared(rule_sets.active_index());
+            let mut field = egui::TextEdit::singleline(rule_sets.active_name_mut());
+            if shared {
+                field = field.text_color(ui.visuals().error_fg_color);
+            }
+            let response = ui.add_sized(ui.available_size(), field);
+            if shared {
+                response.on_hover_text(SHARED_NAME_HINT);
+            }
+        });
     });
+}
+
+fn show_rule_set_menu(ui: &mut Ui, rule_sets: &RuleSets, command: &mut Option<RuleSetCommand>) {
+    for index in 0..rule_sets.len() {
+        let shared = rule_sets.is_name_shared(index);
+        let label = egui::RichText::new(rule_sets.name(index).unwrap_or_default());
+        let label = if shared {
+            label.color(ui.visuals().error_fg_color)
+        } else {
+            label
+        };
+        let response = ui.selectable_label(index == rule_sets.active_index(), label);
+        if shared {
+            response.clone().on_hover_text(SHARED_NAME_HINT);
+        }
+        if response.clicked() {
+            *command = Some(RuleSetCommand::Select(index));
+        }
+    }
 }
 
 fn show_group_list(
@@ -2029,15 +2040,6 @@ fn describe_tile(tileset: &Tileset, project: &Project, tile: usize) -> String {
         0 | 1 => text,
         count => format!("{text} · {count} rules"),
     }
-}
-
-fn describe_counts(project: &Project) -> String {
-    let rules = match project.deactivated_rule_count() {
-        0 => format!("{} rules", project.rule_count()),
-        deactivated => format!("{} rules ({deactivated} deactivated)", project.rule_count()),
-    };
-
-    format!("{rules}, {} groups configured", project.groups().len())
 }
 
 fn format_neighborhood(neighborhood: Neighborhood) -> String {

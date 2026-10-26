@@ -16,9 +16,17 @@ const COPY_ICON: &str = "📋";
 const PASTE_ICON: &str = "📥";
 const DRAW_ICON: &str = "✏";
 
-fn icon_button(icon: &'static str) -> impl egui::Widget {
+const SWITCH_ICON: &str = "⏷";
+const BUTTON_GAP: f32 = 2.0;
+const BUTTON_ICON_FRACTION: f32 = 0.8;
+
+fn compact_button(icon: &'static str, size: f32) -> impl egui::Widget {
     move |ui: &mut egui::Ui| {
-        let size = egui::Vec2::splat(ui.spacing().interact_size.y);
-        ui.add_sized(size, egui::Button::new(icon))
+        let text = egui::RichText::new(icon).size(size * BUTTON_ICON_FRACTION);
+        ui.scope(|ui| {
+            ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+            ui.add_sized(egui::Vec2::splat(size), egui::Button::new(text))
+        })
+        .inner
     }
 }

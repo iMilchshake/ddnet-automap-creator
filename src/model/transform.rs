@@ -132,6 +132,13 @@ impl Orientations {
             .find(|mods| Self::generated(*mods) == self)
     }
 
+    pub fn choice(self, mods: TileMods) -> (Option<Self>, TileMods) {
+        match self.preset() {
+            Some(preset) => (None, preset),
+            None => (Some(self), mods),
+        }
+    }
+
     pub fn generated(mods: TileMods) -> Self {
         subgroup(mods).into_iter().collect()
     }

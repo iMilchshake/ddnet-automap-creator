@@ -1,8 +1,8 @@
 use std::f32::consts::PI;
 
 use egui::{
-    Align2, Color32, FontId, Painter, PointerButton, Pos2, Rect, Response, Sense, Shape, Stroke,
-    StrokeKind, TextureHandle, Ui, Vec2,
+    Align2, Atom, Color32, FontId, Id, Painter, PointerButton, Pos2, Rect, Response, Sense, Shape,
+    Stroke, StrokeKind, TextureHandle, Ui, Vec2,
 };
 
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood, neighbor_index_at};
@@ -11,11 +11,11 @@ use crate::model::tile::{Centre, Chance, TileMods, TileRule};
 use crate::model::transform::{Orientations, Transform};
 use crate::tileset::Tileset;
 use crate::ui::{
-    ADD_ICON, COPY_ICON, DUPLICATE_ICON, PASTE_ICON, REMOVE_ICON, grid, icon_button, preview,
+    ADD_ICON, BUTTON_GAP, COPY_ICON, DUPLICATE_ICON, PASTE_ICON, REMOVE_ICON, compact_button, grid,
+    preview,
 };
 
 const MIN_CELL_SIZE: f32 = 32.0;
-const MAX_CELL_SIZE: f32 = 80.0;
 const CELL_GAP: f32 = 3.0;
 const GRID_SIDE: f32 = 3.0;
 const SWATCH_SIZE: f32 = 14.0;
@@ -32,6 +32,12 @@ const CORNER_RADIUS: f32 = 2.0;
 const MEMBER_SIZE: f32 = 20.0;
 const ORIENTATION_SIZE: f32 = 32.0;
 const ORIENTATION_COLUMNS: usize = 4;
+const FLAG_ICON_SIZE: f32 = 12.0;
+const FLAG_ICON_GAP: f32 = 4.0;
+const FLAG_GAP: f32 = 3.0;
+const FLAG_BOX_GAP: f32 = 4.0;
+const ROTATING_FLAG_COUNT: f32 = 2.0;
+const PLAIN_FLAG_COUNT: f32 = 3.0;
 const CROSS_WIDTH: f32 = 1.5;
 const CROSS_INSET_FRACTION: f32 = 0.2;
 const CROSS_ALPHA: u8 = 70;
@@ -42,7 +48,7 @@ const MIN_MARK_WIDTH: f32 = 1.0;
 const BUTTON_FRACTION: f32 = 0.27;
 const MIN_BUTTON_SIZE: f32 = 8.0;
 const BUTTON_MARGIN: f32 = 1.0;
-const BUTTON_GAP: f32 = 2.0;
+const HEADING_ROW_SPACING: f32 = 2.0 * BUTTON_GAP;
 const ICON_INSET_FRACTION: f32 = 0.22;
 const ICON_STROKE_FRACTION: f32 = 0.12;
 const MIN_ICON_STROKE: f32 = 1.0;
@@ -95,7 +101,16 @@ const ORIENTATION_HINT: &str = "Use the buttons to rotate or flip the tile only.
 const CENTRE_HINT: &str = "Left-click: full, right-click: empty (places into empty cells).";
 const RESET_GLYPH: &str = "↺";
 const UNCHANGED: &str = "unchanged";
+const SHARED_POOLS_HEADING: &str = "Shared with other tiles";
+const NO_MODS: TileMods = TileMods::new(false, false, false);
 const LAST_ORIENTATION: &str = "At least one orientation is required";
+const ORIENTATIONS_LABEL: &str = "Rotated & flipped copies";
+const ROTATE_FLAG_TOOLTIP: &str = "Also place it rotated by 90°, 180° and 270°";
+const X_FLIP_FLAG_TOOLTIP: &str = "Also place it mirrored left-right";
+const Y_FLIP_FLAG_TOOLTIP: &str = "Also place it mirrored top-bottom";
+const FLIP_FLAG_TOOLTIP: &str = "Also place the mirrored copies";
+const ORIENTATIONS_TOOLTIP: &str = "Each lit copy is placed too, wherever its neighbors \
+                                    match the same way rotated or flipped.";
 
 pub struct TileContext<'a> {
     pub pools: Vec<&'a Pool>,
@@ -165,6 +180,34 @@ const TURN_BUTTONS: [TurnButton; 3] = [
         turn: Transform::FLIP_VERTICALLY,
     },
 ];
+
+struct Flag {
+    label: &'static str,
+    icon: Icon,
+    tooltip: &'static str,
+}
+
+const ROTATE_FLAG: Flag = Flag {
+    label: "Rotate",
+    icon: Icon::Rotate,
+    tooltip: ROTATE_FLAG_TOOLTIP,
+};
+const FLIP_FLAG: Flag = Flag {
+    label: "Flip",
+    icon: Icon::FlipHorizontally,
+    tooltip: FLIP_FLAG_TOOLTIP,
+};
+const X_FLIP_FLAG: Flag = Flag {
+    label: "X-Flip",
+    icon: Icon::FlipHorizontally,
+    tooltip: X_FLIP_FLAG_TOOLTIP,
+};
+const Y_FLIP_FLAG: Flag = Flag {
+    label: "Y-Flip",
+    icon: Icon::FlipVertically,
+    tooltip: Y_FLIP_FLAG_TOOLTIP,
+};
+const FLAGS: [Flag; 4] = [ROTATE_FLAG, FLIP_FLAG, X_FLIP_FLAG, Y_FLIP_FLAG];
 
 struct PoolView<'a> {
     tileset: &'a Tileset,
@@ -249,9 +292,8 @@ impl TilePanel {
         tileset: &Tileset,
         texture: &TextureHandle,
         context: &TileContext,
-        deactivated: bool,
     ) -> Option<TileEdit> {
-        let heading_edit = self.show_heading(ui, context, deactivated);
+        let heading_edit = self.show_heading(ui, context);
         ui.add_space(HEADING_SPACING);
 
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
@@ -260,27 +302,15 @@ impl TilePanel {
 
         let changed = self.show_neighborhood(ui, tileset, texture, context);
         ui.add_space(SECTION_SPACING);
-        let tab_edit = self.show_rule_tabs(ui, context.rule_count);
-        ui.add_space(SECTION_SPACING);
-        show_legend(ui);
-
-        ui.add_space(SECTION_SPACING);
         let edit = self.show_options(ui, tileset, texture, changed);
 
         if let Some(error) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
 
-        if !context.pools.is_empty() {
-            ui.add_space(SECTION_SPACING);
-            ui.strong("Pools");
-            self.show_pools(ui, tileset, texture, context);
-        }
+        self.show_pools(ui, tileset, texture, context);
 
-        heading_edit
-            .or(tab_edit)
-            .or(edit)
-            .or(self.key_edit(ui, context))
+        heading_edit.or(edit).or(self.key_edit(ui, context))
     }
 
     fn key_edit(&self, ui: &Ui, context: &TileContext) -> Option<TileEdit> {
@@ -307,18 +337,15 @@ impl TilePanel {
 
     fn show_rule_tabs(&self, ui: &mut Ui, rule_count: usize) -> Option<TileEdit> {
         let mut edit = None;
-        ui.horizontal_wrapped(|ui| {
-            if rule_count == 0 {
-                ui.set_invisible();
-                let _placeholder = ui.selectable_label(false, "Rule 1");
+        ui.spacing_mut().item_spacing.x = tab_spacing(ui);
+        for index in 0..rule_count {
+            if ui
+                .selectable_label(index == self.index, rule_label(index))
+                .clicked()
+            {
+                edit = Some(TileEdit::Select(index));
             }
-            for index in 0..rule_count {
-                let label = format!("Rule {}", index + 1);
-                if ui.selectable_label(index == self.index, label).clicked() {
-                    edit = Some(TileEdit::Select(index));
-                }
-            }
-        });
+        }
 
         edit
     }
@@ -330,6 +357,16 @@ impl TilePanel {
         texture: &TextureHandle,
         context: &TileContext,
     ) {
+        let shared: Vec<&Pool> = context
+            .pools
+            .iter()
+            .copied()
+            .filter(|pool| pool.members.len() > 1)
+            .collect();
+        if shared.is_empty() {
+            return;
+        }
+
         let own_pool = context
             .pools
             .iter()
@@ -345,7 +382,9 @@ impl TilePanel {
             mode: context.mode,
             own_share: self.share_label(own_pool, context.mode),
         };
-        for (index, pool) in context.pools.iter().enumerate() {
+        ui.add_space(SECTION_SPACING);
+        ui.strong(SHARED_POOLS_HEADING);
+        for (index, pool) in shared.into_iter().enumerate() {
             self.show_pool(ui, &view, pool, index == 0);
         }
     }
@@ -415,31 +454,54 @@ impl TilePanel {
         self.apply()
     }
 
-    fn show_heading(
+    fn show_heading(&mut self, ui: &mut Ui, context: &TileContext) -> Option<TileEdit> {
+        let mut tab_edit = None;
+        let size = ui.spacing().interact_size.y;
+        let (button_edit, tabs_fit) = ui
+            .horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = HEADING_ROW_SPACING;
+                ui.heading(format!("Tile {}", self.tile));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let button_edit = ui
+                        .scope(|ui| self.show_rule_buttons(ui, context, size))
+                        .inner;
+                    let gap = ui.available_rect_before_wrap();
+                    let tabs_fit = rule_tabs_width(ui, context.rule_count) <= gap.width();
+                    if tabs_fit {
+                        let builder = egui::UiBuilder::new()
+                            .max_rect(gap)
+                            .layout(egui::Layout::left_to_right(egui::Align::Center));
+                        tab_edit = ui
+                            .scope_builder(builder, |ui| {
+                                self.show_rule_tabs(ui, context.rule_count)
+                            })
+                            .inner;
+                    }
+                    (button_edit, tabs_fit)
+                })
+                .inner
+            })
+            .inner;
+
+        if !tabs_fit {
+            ui.horizontal_wrapped(|ui| {
+                tab_edit = self.show_rule_tabs(ui, context.rule_count);
+            });
+        }
+
+        button_edit.or(tab_edit)
+    }
+
+    fn show_rule_buttons(
         &mut self,
         ui: &mut Ui,
         context: &TileContext,
-        deactivated: bool,
+        size: f32,
     ) -> Option<TileEdit> {
-        let title = match deactivated {
-            true => format!("Tile {} (deactivated)", self.tile),
-            false => format!("Tile {}", self.tile),
-        };
-
-        ui.horizontal(|ui| {
-            ui.heading(title);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                self.show_rule_buttons(ui, context)
-            })
-            .inner
-        })
-        .inner
-    }
-
-    fn show_rule_buttons(&mut self, ui: &mut Ui, context: &TileContext) -> Option<TileEdit> {
         let mut edit = None;
+        ui.spacing_mut().item_spacing.x = BUTTON_GAP;
 
-        let paste = ui.add_enabled(context.copied.is_some(), icon_button(PASTE_ICON));
+        let paste = ui.add_enabled(context.copied.is_some(), compact_button(PASTE_ICON, size));
         let paste = match context.copied {
             Some(copied) => paste.on_hover_text(copied.paste_tooltip()),
             None => paste.on_disabled_hover_text(NOTHING_COPIED_TOOLTIP),
@@ -448,26 +510,26 @@ impl TilePanel {
             edit = Some(TileEdit::Paste(self.index));
         }
 
-        let copy = ui.add_enabled(self.has_rule, icon_button(COPY_ICON));
+        let copy = ui.add_enabled(self.has_rule, compact_button(COPY_ICON, size));
         if copy.on_hover_text(COPY_RULE_TOOLTIP).clicked() {
             edit = Some(TileEdit::Copy(self.index));
         }
 
-        ui.separator();
+        ui.add(egui::Separator::default().spacing(HEADING_ROW_SPACING));
 
-        let remove = ui.add_enabled(self.has_rule, icon_button(REMOVE_ICON));
+        let remove = ui.add_enabled(self.has_rule, compact_button(REMOVE_ICON, size));
         if remove.on_hover_text(REMOVE_RULE_TOOLTIP).clicked() {
             self.error = None;
             edit = Some(TileEdit::Remove(self.index));
         }
 
-        let duplicate = ui.add_enabled(self.has_rule, icon_button(DUPLICATE_ICON));
+        let duplicate = ui.add_enabled(self.has_rule, compact_button(DUPLICATE_ICON, size));
         if duplicate.on_hover_text(DUPLICATE_RULE_TOOLTIP).clicked() {
             edit = Some(TileEdit::Duplicate(self.index));
         }
 
         if ui
-            .add(icon_button(ADD_ICON))
+            .add(compact_button(ADD_ICON, size))
             .on_hover_text(ADD_RULE_TOOLTIP)
             .clicked()
         {
@@ -558,7 +620,7 @@ impl TilePanel {
             }
 
             paint_flash(ui, grid_area, context.flash);
-            changed |= self.show_neighbor_turn_buttons(ui, size);
+            changed |= self.show_neighbor_turn_row(ui, size);
         });
 
         changed
@@ -569,21 +631,15 @@ impl TilePanel {
         self.picking = None;
     }
 
-    fn show_neighbor_turn_buttons(&mut self, ui: &mut Ui, size: f32) -> bool {
-        let button_size = button_size(size);
-        let (row, _response) =
-            ui.allocate_exact_size(Vec2::new(grid_extent(size), button_size), Sense::hover());
-
-        let mut turn = None;
-        for (index, button) in TURN_BUTTONS.into_iter().enumerate() {
-            let area = button_rect(row, Align2::CENTER_CENTER, index, button_size);
-            if turn_button(ui, area, button.icon, button.neighbors_tooltip) {
-                turn = Some(button.turn);
-            }
-        }
+    fn show_neighbor_turn_row(&mut self, ui: &mut Ui, size: f32) -> bool {
+        let (turn, chance_changed) = egui::containers::Sides::new().show(
+            ui,
+            |ui| show_neighbor_turn_buttons(ui, button_size(size)),
+            |ui| show_chance(ui, &mut self.chance_percent),
+        );
 
         let Some(by) = turn else {
-            return false;
+            return chance_changed;
         };
         self.turn(TileRule::turned_neighbors, by);
         true
@@ -732,27 +788,26 @@ impl TilePanel {
         Orientations::resolved(self.custom, self.mods)
     }
 
-    fn show_transform_flags(&mut self, ui: &mut Ui) -> bool {
-        let mut changed = false;
-
-        ui.add_enabled_ui(self.custom.is_none(), |ui| {
-            ui.horizontal(|ui| {
-                changed |= show_preset_flags(ui, &mut self.mods);
-            });
-        });
-        changed |= self.show_custom_toggle(ui);
-
-        changed
-    }
-
-    fn show_custom_toggle(&mut self, ui: &mut Ui) -> bool {
-        let mut custom = self.custom.is_some();
-        if !ui.checkbox(&mut custom, "Custom").changed() {
-            return false;
+    fn show_transform_flags(&mut self, ui: &mut Ui, orientation_box: Rect, width: f32) -> bool {
+        let mut shown = match self.custom {
+            Some(_) => NO_MODS,
+            None => self.mods,
+        };
+        let column = Rect::from_min_size(
+            orientation_box.right_top() + Vec2::X * FLAG_BOX_GAP,
+            Vec2::new(width, orientation_box.height()),
+        );
+        let changed = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
+                show_preset_flags(ui, &mut shown, column.height(), width)
+            })
+            .inner;
+        if changed {
+            self.mods = shown;
+            self.custom = None;
         }
 
-        self.custom = custom.then(|| Orientations::generated(self.mods));
-        true
+        changed
     }
 
     fn show_orientations(
@@ -761,37 +816,55 @@ impl TilePanel {
         tileset: &Tileset,
         texture: &TextureHandle,
     ) -> bool {
-        let mut changed = false;
+        let mut chosen = None;
+        let mut flags_changed = false;
 
-        let frame = orientation_frame(ui, self.custom.is_some());
-        egui::CollapsingHeader::new("Orientations")
-            .default_open(false)
-            .show(ui, |ui| {
-                frame.show(ui, |ui| {
-                    egui::Grid::new("orientations").show(ui, |ui| {
+        let frame = egui::Frame::group(ui.style()).fill(ui.visuals().extreme_bg_color);
+        let frame_width = orientation_grid_width() + frame.total_margin().sum().x;
+        let flag_width = flag_width(ui);
+        let row_width = frame_width + FLAG_BOX_GAP + flag_width;
+        let area = ui.available_rect_before_wrap();
+        let left = ((area.width() - row_width) / 2.0).max(0.0);
+        let centered = egui::UiBuilder::new()
+            .max_rect(Rect::from_min_max(area.min + Vec2::X * left, area.max));
+
+        ui.scope_builder(centered, |ui| {
+            let orientation_box = frame.show(ui, |ui| {
+                egui::Grid::new("orientations")
+                    .spacing(Vec2::splat(CELL_GAP))
+                    .min_col_width(ORIENTATION_SIZE)
+                    .show(ui, |ui| {
                         for row in Transform::ALL.chunks(ORIENTATION_COLUMNS) {
                             for &transform in row {
-                                changed |= self.show_orientation(ui, tileset, texture, transform);
+                                let clicked =
+                                    self.show_orientation(ui, tileset, texture, transform);
+                                chosen = clicked.or(chosen);
                             }
                             ui.end_row();
                         }
                     });
-                });
             });
+            flags_changed =
+                self.show_transform_flags(ui, orientation_box.response.rect, flag_width);
+        });
 
-        changed
+        let Some(orientations) = chosen else {
+            return flags_changed;
+        };
+        (self.custom, self.mods) = orientations.choice(self.mods);
+        true
     }
 
     fn show_orientation(
-        &mut self,
+        &self,
         ui: &mut Ui,
         tileset: &Tileset,
         texture: &TextureHandle,
         transform: Transform,
-    ) -> bool {
+    ) -> Option<Orientations> {
         let orientations = self.orientations();
         let enabled = orientations.contains(transform);
-        let locked = self.custom.is_some() && enabled && orientations.len() == 1;
+        let locked = enabled && orientations.len() == 1;
 
         let (rect, response) =
             ui.allocate_exact_size(Vec2::splat(ORIENTATION_SIZE), Sense::click());
@@ -800,32 +873,26 @@ impl TilePanel {
             ui.painter().rect_filled(rect, 0.0, DISABLED_DARKEN);
             paint_cross(ui.painter(), rect);
         }
-        if self.custom.is_some() && response.hovered() {
+        if response.hovered() {
             paint_hover_outline(ui, rect);
         }
 
         let enable = response.clicked_by(PointerButton::Primary);
         let disable = response.clicked_by(PointerButton::Secondary) && !locked;
-        let response = match self.custom {
-            Some(_) => response.on_hover_cursor(egui::CursorIcon::PointingHand),
-            None => response,
-        };
-        response.on_hover_text(match locked {
-            true => LAST_ORIENTATION,
-            false => transform_name(transform),
-        });
+        response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(match locked {
+                true => LAST_ORIENTATION,
+                false => transform_name(transform),
+            });
 
-        let Some(custom) = self.custom else {
-            return false;
-        };
         let updated = match (enable, disable) {
-            (true, _) => custom.with(transform),
-            (_, true) => custom.without(transform),
-            _ => return false,
+            (true, _) => orientations.with(transform),
+            (_, true) => orientations.without(transform),
+            _ => return None,
         };
-        self.custom = Some(updated);
 
-        updated != custom
+        (updated != orientations).then_some(updated)
     }
 
     fn show_options(
@@ -837,49 +904,148 @@ impl TilePanel {
     ) -> Option<TileEdit> {
         let mut changed = neighborhood_changed;
 
-        ui.label("Place these transforms:");
-        changed |= self.show_transform_flags(ui);
+        ui.label(ORIENTATIONS_LABEL)
+            .on_hover_text(ORIENTATIONS_TOOLTIP);
         changed |= self.show_orientations(ui, tileset, texture);
-
-        ui.add_space(HEADING_SPACING);
-
-        ui.horizontal(|ui| {
-            ui.label("Chance").on_hover_text(CHANCE_TOOLTIP);
-            let chance = egui::DragValue::new(&mut self.chance_percent)
-                .range(MIN_CHANCE_PERCENT..=MAX_CHANCE_PERCENT)
-                .speed(CHANCE_DRAG_SPEED)
-                .suffix(" %");
-            changed |= ui.add(chance).on_hover_text(CHANCE_TOOLTIP).changed();
-        });
 
         self.apply_if_changed(changed)
     }
 }
 
-fn show_preset_flags(ui: &mut Ui, mods: &mut TileMods) -> bool {
-    let mut changed = ui.checkbox(&mut mods.can_rotate, "Rotate").changed();
+fn show_preset_flags(ui: &mut Ui, mods: &mut TileMods, height: f32, width: f32) -> bool {
+    let count = match mods.can_rotate {
+        true => ROTATING_FLAG_COUNT,
+        false => PLAIN_FLAG_COUNT,
+    };
+    let button_height = (height - (count - 1.0) * FLAG_GAP) / count;
+    let size = Vec2::new(width, button_height);
+    ui.spacing_mut().item_spacing.y = FLAG_GAP;
+    ui.spacing_mut().icon_spacing = FLAG_ICON_GAP;
+
+    let mut changed = toggle_button(ui, size, &ROTATE_FLAG, &mut mods.can_rotate);
 
     if mods.can_rotate {
         let mut flip = mods.can_x_flip || mods.can_y_flip;
-        if ui.checkbox(&mut flip, "Flip").changed() {
+        if toggle_button(ui, size, &FLIP_FLAG, &mut flip) {
             mods.can_x_flip = flip;
             mods.can_y_flip = false;
             changed = true;
         }
     } else {
-        changed |= ui.checkbox(&mut mods.can_x_flip, "X-Flip").changed();
-        changed |= ui.checkbox(&mut mods.can_y_flip, "Y-Flip").changed();
+        changed |= toggle_button(ui, size, &X_FLIP_FLAG, &mut mods.can_x_flip);
+        changed |= toggle_button(ui, size, &Y_FLIP_FLAG, &mut mods.can_y_flip);
     }
 
     changed
 }
 
-fn orientation_frame(ui: &Ui, editable: bool) -> egui::Frame {
-    let frame = egui::Frame::group(ui.style());
-    match editable {
-        true => frame.fill(ui.visuals().extreme_bg_color),
-        false => frame.stroke(Stroke::new(frame.stroke.width, Color32::TRANSPARENT)),
+fn toggle_button(ui: &mut Ui, size: Vec2, flag: &Flag, active: &mut bool) -> bool {
+    let icon_id = Id::new(flag.label);
+    let icon_atom = Atom::custom(icon_id, Vec2::splat(FLAG_ICON_SIZE));
+    let layout = egui::Button::new((icon_atom, flag.label))
+        .selected(*active)
+        .min_size(size)
+        .atom_ui(ui);
+
+    if let Some(rect) = layout.rect(icon_id) {
+        let color = ui
+            .style()
+            .interact_selectable(&layout.response, *active)
+            .fg_stroke
+            .color;
+        paint_stroked_icon(ui.painter(), rect, color, flag.icon);
     }
+
+    let clicked = layout.response.on_hover_text(flag.tooltip).clicked();
+    if clicked {
+        *active = !*active;
+    }
+
+    clicked
+}
+
+fn flag_width(ui: &Ui) -> f32 {
+    let widest_label = FLAGS
+        .iter()
+        .map(|flag| {
+            egui::WidgetText::from(flag.label)
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Button,
+                )
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max);
+
+    FLAG_ICON_SIZE + FLAG_ICON_GAP + widest_label + 2.0 * ui.spacing().button_padding.x
+}
+
+fn show_neighbor_turn_buttons(ui: &mut Ui, button_size: f32) -> Option<Transform> {
+    let (row, _response) = ui.allocate_exact_size(
+        Vec2::new(turn_buttons_width(button_size), button_size),
+        Sense::hover(),
+    );
+
+    let mut turn = None;
+    for (index, button) in TURN_BUTTONS.into_iter().enumerate() {
+        let area = button_rect(row, Align2::LEFT_CENTER, index, button_size);
+        if turn_button(ui, area, button.icon, button.neighbors_tooltip) {
+            turn = Some(button.turn);
+        }
+    }
+
+    turn
+}
+
+fn show_chance(ui: &mut Ui, chance_percent: &mut f32) -> bool {
+    ui.spacing_mut().item_spacing = ui.ctx().global_style().spacing.item_spacing;
+    let chance = egui::DragValue::new(chance_percent)
+        .range(MIN_CHANCE_PERCENT..=MAX_CHANCE_PERCENT)
+        .speed(CHANCE_DRAG_SPEED)
+        .suffix(" %");
+    let changed = ui.add(chance).on_hover_text(CHANCE_TOOLTIP).changed();
+    ui.label("Chance").on_hover_text(CHANCE_TOOLTIP);
+
+    changed
+}
+
+fn rule_label(index: usize) -> String {
+    format!("Rule {}", index + 1)
+}
+
+fn rule_tabs_width(ui: &Ui, rule_count: usize) -> f32 {
+    let spacing = ui.spacing();
+    let tab_gap = tab_spacing(ui);
+    let tabs: f32 = (0..rule_count)
+        .map(|index| {
+            let text = egui::WidgetText::from(rule_label(index)).into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Button,
+            );
+            text.size().x + 2.0 * spacing.button_padding.x
+        })
+        .sum();
+
+    tabs + rule_count.saturating_sub(1) as f32 * tab_gap
+}
+
+fn tab_spacing(ui: &Ui) -> f32 {
+    ui.ctx().global_style().spacing.item_spacing.x
+}
+
+fn turn_buttons_width(button_size: f32) -> f32 {
+    let count = TURN_BUTTONS.len() as f32;
+    count * button_size + (count - 1.0) * BUTTON_GAP
+}
+
+fn orientation_grid_width() -> f32 {
+    let columns = ORIENTATION_COLUMNS as f32;
+    columns * ORIENTATION_SIZE + (columns - 1.0) * CELL_GAP
 }
 
 fn grid_extent(cell_size: f32) -> f32 {
@@ -904,8 +1070,7 @@ fn button_size(cell_size: f32) -> f32 {
 }
 
 fn button_rect(bounds: Rect, align: Align2, index: usize, size: f32) -> Rect {
-    let count = TURN_BUTTONS.len() as f32;
-    let row = Vec2::new(count * size + (count - 1.0) * BUTTON_GAP, size);
+    let row = Vec2::new(turn_buttons_width(size), size);
     let area = align.align_size_within_rect(row, bounds);
 
     Rect::from_min_size(
@@ -926,13 +1091,7 @@ fn turn_button(ui: &Ui, rect: Rect, icon: Icon, tooltip: &str) -> bool {
     );
 
     let icon_area = rect.shrink(rect.width() * ICON_INSET_FRACTION);
-    let width = (icon_area.width() * ICON_STROKE_FRACTION).max(MIN_ICON_STROKE);
-    paint_icon(
-        ui.painter(),
-        icon_area,
-        Stroke::new(width, visuals.fg_stroke.color),
-        icon,
-    );
+    paint_stroked_icon(ui.painter(), icon_area, visuals.fg_stroke.color, icon);
 
     let clicked = response.clicked();
     response
@@ -940,6 +1099,11 @@ fn turn_button(ui: &Ui, rect: Rect, icon: Icon, tooltip: &str) -> bool {
         .on_hover_text(tooltip);
 
     clicked
+}
+
+fn paint_stroked_icon(painter: &Painter, rect: Rect, color: Color32, icon: Icon) {
+    let width = (rect.width() * ICON_STROKE_FRACTION).max(MIN_ICON_STROKE);
+    paint_icon(painter, rect, Stroke::new(width, color), icon);
 }
 
 fn paint_icon(painter: &Painter, rect: Rect, stroke: Stroke, icon: Icon) {
@@ -1033,7 +1197,7 @@ fn transform_name(transform: Transform) -> &'static str {
 fn cell_size(ui: &Ui) -> f32 {
     ((ui.available_width() - (GRID_SIDE - 1.0) * CELL_GAP) / GRID_SIDE)
         .floor()
-        .clamp(MIN_CELL_SIZE, MAX_CELL_SIZE)
+        .max(MIN_CELL_SIZE)
 }
 
 fn released_on(ui: &Ui, response: &Response, rect: Rect, button: PointerButton) -> bool {
@@ -1109,7 +1273,7 @@ fn cell_tooltip(state: NeighborState) -> String {
     }
 }
 
-fn show_legend(ui: &mut Ui) {
+pub fn show_legend(ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = LEGEND_SPACING;
 

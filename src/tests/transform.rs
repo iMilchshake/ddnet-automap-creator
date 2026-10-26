@@ -160,6 +160,27 @@ fn a_set_no_preset_generates_has_no_preset() {
 }
 
 #[test]
+fn a_preset_set_is_chosen_as_its_mods_without_a_custom_set() {
+    let x_flip = mods(true, false, false);
+    let stale = mods(false, false, true);
+
+    assert_eq!(
+        Orientations::generated(x_flip).choice(stale),
+        (None, x_flip)
+    );
+}
+
+#[test]
+fn a_non_preset_set_is_chosen_as_custom_and_keeps_the_mods() {
+    let turn_only: Orientations = [Transform::IDENTITY, transform(false, false, true)]
+        .into_iter()
+        .collect();
+    let kept = mods(true, false, false);
+
+    assert_eq!(turn_only.choice(kept), (Some(turn_only), kept));
+}
+
+#[test]
 fn a_collected_set_holds_exactly_its_transforms() {
     let half_turn = half_turn();
 

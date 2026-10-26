@@ -100,7 +100,7 @@ fn configuring_a_deactivated_tile_keeps_it_deactivated() {
     project.add_rule(7, some_rule());
 
     assert!(project.is_deactivated(7));
-    assert_eq!(project.rule_count(), 1);
+    assert_eq!(project.all_rules().len(), 1);
 }
 
 #[test]
@@ -111,7 +111,6 @@ fn deactivating_a_tile_keeps_its_rule() {
 
     assert_eq!(project.rules_of(7), [some_rule()]);
     assert!(project.is_deactivated(7));
-    assert_eq!(project.deactivated_rule_count(), 1);
 }
 
 #[test]
@@ -257,7 +256,7 @@ fn removing_the_last_rule_frees_the_tile() {
 
     assert!(!project.has_rules(7));
     assert!(project.is_free(7));
-    assert_eq!(project.rule_count(), 0);
+    assert_eq!(project.all_rules().len(), 0);
 }
 
 #[test]
@@ -280,14 +279,13 @@ fn rules_are_flattened_in_tile_then_rule_order() {
 }
 
 #[test]
-fn counts_cover_every_rule_and_deactivation_stays_per_tile() {
+fn deactivation_hides_every_rule_of_the_tile_only() {
     let mut project = Project::default();
     project.add_rule(7, some_rule());
     project.add_rule(7, other_rule());
     project.add_rule(8, half_rule());
     project.deactivate(7);
 
-    assert_eq!(project.rule_count(), 3);
-    assert_eq!(project.deactivated_rule_count(), 2);
+    assert_eq!(project.all_rules().len(), 3);
     assert_eq!(project.rules(), [(8, half_rule())]);
 }
