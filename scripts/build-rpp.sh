@@ -20,6 +20,8 @@ link_flags="-O3 \
 -sEXPORTED_RUNTIME_METHODS=callMain,FS \
 -sEXIT_RUNTIME=0 \
 -sALLOW_MEMORY_GROWTH=1 \
+-sSTACK_SIZE=8MB \
+-sSTACK_OVERFLOW_CHECK=2 \
 --embed-file $source_dir/rules++/base.r@/rpp/base.r"
 
 if [[ ! -f "$source_dir/CMakeLists.txt" ]]; then
