@@ -137,12 +137,8 @@ fn draw_cells(
     let Some(to) = response.interact_pointer_pos() else {
         return false;
     };
-    let (primary_down, secondary_down) = ui.input(|input| {
-        (
-            input.pointer.primary_down(),
-            input.pointer.secondary_down(),
-        )
-    });
+    let (primary_down, secondary_down) =
+        ui.input(|input| (input.pointer.primary_down(), input.pointer.secondary_down()));
     let solid = if primary_down {
         true
     } else if secondary_down {
@@ -153,9 +149,7 @@ fn draw_cells(
 
     let mut edited = false;
     for pos in pointer_path(to - response.drag_delta(), to, cell_size) {
-        if let Some((column, row)) =
-            cell_at(pos, rect, cell_size, shape.width(), shape.height())
-        {
+        if let Some((column, row)) = cell_at(pos, rect, cell_size, shape.width(), shape.height()) {
             edited |= shape.set(column, row, solid);
         }
     }
@@ -187,8 +181,7 @@ fn cell_at(
     let column = (offset.x / cell_size) as usize;
     let row = (offset.y / cell_size) as usize;
 
-    (offset.x >= 0.0 && offset.y >= 0.0 && column < width && row < height)
-        .then_some((column, row))
+    (offset.x >= 0.0 && offset.y >= 0.0 && column < width && row < height).then_some((column, row))
 }
 
 fn paint_unmatched(painter: &egui::Painter, cell: Rect) {

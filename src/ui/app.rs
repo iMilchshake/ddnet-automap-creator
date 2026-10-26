@@ -24,9 +24,7 @@ use crate::ui::group_panel::{GroupPanel, mode_label};
 use crate::ui::picking;
 use crate::ui::preview as preview_view;
 use crate::ui::status::StatusLine;
-use crate::ui::tile_panel::{
-    CopiedRule, FlashKind, GridFlash, TileContext, TileEdit, TilePanel,
-};
+use crate::ui::tile_panel::{CopiedRule, FlashKind, GridFlash, TileContext, TileEdit, TilePanel};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 use crate::ui::{ADD_ICON, DRAW_ICON, DUPLICATE_ICON, REMOVE_ICON, icon_button};
 
@@ -1207,7 +1205,8 @@ impl AutomapperApp {
         self.store_rule(tile, target, rule);
         self.select_tile(tile, target);
         self.start_flash(ctx, FlashKind::Paste);
-        self.status.info(ctx, format!("Pasted tile {source} onto tile {tile}"));
+        self.status
+            .info(ctx, format!("Pasted tile {source} onto tile {tile}"));
     }
 
     fn store_rule(&mut self, tile: usize, index: usize, rule: TileRule) {

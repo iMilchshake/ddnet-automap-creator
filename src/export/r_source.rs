@@ -4,9 +4,7 @@ use crate::model::group::{self, GroupError, GroupMode, TileGroup};
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode, Pool, Variant};
 use crate::model::project::is_free_tile;
-use crate::model::tile::{
-    AIR_TILE, Centre, Chance, TileRule, highest_free_tile, referenced_tiles,
-};
+use crate::model::tile::{AIR_TILE, Centre, Chance, TileRule, highest_free_tile, referenced_tiles};
 use crate::model::transform::Transform;
 
 /// Group names live under a prefix of our own. rpp keywords and base.r globals
@@ -74,13 +72,11 @@ impl RuleSet<'_> {
     }
 
     fn needs_mask(&self) -> bool {
-        pool::pools(&self.active_tiles())
-            .iter()
-            .any(|pool| {
-                pool.centre == Centre::Full
-                    && !pool.neighborhood.is_tile_specific()
-                    && pool.members.len() > 1
-            })
+        pool::pools(&self.active_tiles()).iter().any(|pool| {
+            pool.centre == Centre::Full
+                && !pool.neighborhood.is_tile_specific()
+                && pool.members.len() > 1
+        })
     }
 
     fn mask_line(&self) -> Result<Option<String>, ExportError> {
@@ -454,22 +450,19 @@ fn index_rule_lines(member: &Variant, odds: Option<f32>) -> Vec<String> {
         index_name(member.tile, member.transform)
     );
 
-    let conditions = NEIGHBORS
-        .iter()
-        .enumerate()
-        .flat_map(|(index, neighbor)| {
-            let state = member.neighborhood.state(index);
-            let position = format!("util:NewPosRule([{}, {}]);", neighbor.dx, neighbor.dy);
-            let keep_inside = member.centre == Centre::Empty && state == NeighborState::Full;
+    let conditions = NEIGHBORS.iter().enumerate().flat_map(|(index, neighbor)| {
+        let state = member.neighborhood.state(index);
+        let position = format!("util:NewPosRule([{}, {}]);", neighbor.dx, neighbor.dy);
+        let keep_inside = member.centre == Centre::Empty && state == NeighborState::Full;
 
-            [
-                neighbor_condition(state),
-                keep_inside.then(|| INSIDE_MAP_CONDITION.to_owned()),
-            ]
-            .into_iter()
-            .flatten()
-            .map(move |condition| format!("{position} {condition}"))
-        });
+        [
+            neighbor_condition(state),
+            keep_inside.then(|| INSIDE_MAP_CONDITION.to_owned()),
+        ]
+        .into_iter()
+        .flatten()
+        .map(move |condition| format!("{position} {condition}"))
+    });
 
     std::iter::once(head)
         .chain(centre_condition)

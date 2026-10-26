@@ -115,9 +115,10 @@ pub fn pools(tiles: &[(usize, TileRule)]) -> Vec<Pool> {
     let mut pools: Vec<Pool> = Vec::new();
 
     for variant in expand(tiles) {
-        match pools.iter_mut().find(|pool| {
-            pool.neighborhood == variant.neighborhood && pool.centre == variant.centre
-        }) {
+        match pools
+            .iter_mut()
+            .find(|pool| pool.neighborhood == variant.neighborhood && pool.centre == variant.centre)
+        {
             Some(pool) => pool.members.push(variant),
             None => pools.push(Pool {
                 neighborhood: variant.neighborhood,

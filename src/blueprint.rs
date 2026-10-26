@@ -7,9 +7,7 @@ use crate::model::neighbor::{NEIGHBOR_COUNT, NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{
-    AIR_TILE, Centre, Chance, InvalidChance, TILE_COUNT, TileMods, TileRule,
-};
+use crate::model::tile::{AIR_TILE, Centre, Chance, InvalidChance, TILE_COUNT, TileMods, TileRule};
 use crate::model::transform::{Orientations, Transform};
 
 const VERSION: u32 = 1;

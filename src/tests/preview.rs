@@ -12,11 +12,11 @@ use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::tile::{Centre, Chance, TILE_COUNT, TileRule};
 use crate::model::transform::Transform;
-use crate::tests::support::index_of;
 use crate::preview::{
     Automapped, CustomShape, FALLBACK_UNMATCHED_MARKER, PlacedTile, PreviewCell, PreviewError,
     Sample, automap, unmatched_marker,
 };
+use crate::tests::support::index_of;
 
 const SEED: u32 = 42;
 const SOLID_ID: u8 = 200;
@@ -25,6 +25,9 @@ const GROUND_ROWS: Range<usize> = 2..SHAPE_SIZE;
 const DRAWN_COLUMN: usize = 1;
 const DRAWN_ROW: usize = 2;
 const LARGER_SIZE: usize = 6;
+const PADDED_TORUS_SIZE: (usize, usize) = (20, 36);
+const PADDED_MINIMAL_SIZE: (usize, usize) = (11, 11);
+const SHAPES_SIZE: (usize, usize) = (17, 32);
 const UNMATCHED_MARKER: u8 = SOLID_ID;
 const FLIPPED_EVERYWHERE: &str = "[Test]\nIndex 5 XFLIP\n";
 const TOP_EDGES: &str = "[Test]\nIndex 2\nIndex 7\nPos 0 -1 EMPTY\n";
@@ -64,7 +67,7 @@ fn compiled(source: String) -> String {
 
 fn empty_above_ground() -> String {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(index_of("bottom"),NeighborState::Full);
+    neighborhood.set_state(index_of("bottom"), NeighborState::Full);
     let tiles = [(
         AIR_DECORATION,
         TileRule {
@@ -154,6 +157,29 @@ fn every_sample_has_ground_and_air() {
         assert!(tiles.iter().any(|tile| tile.id != 0), "{}", sample.name());
         assert!(tiles.iter().any(|tile| tile.id == 0), "{}", sample.name());
     }
+}
+
+#[test]
+fn padded_samples_are_surrounded_by_air() {
+    for (sample, (height, width)) in [
+        (Sample::DeBruijnTorus, PADDED_TORUS_SIZE),
+        (Sample::Minimal, PADDED_MINIMAL_SIZE),
+    ] {
+        let tiles = sample.tiles(&ground_shape(), SOLID_ID).unwrap();
+
+        assert_eq!(tiles.dim(), (height, width), "{}", sample.name());
+        for ((row, column), tile) in tiles.indexed_iter() {
+            let border = row == 0 || column == 0 || row == height - 1 || column == width - 1;
+            assert!(!border || tile.id == 0, "{} {column},{row}", sample.name());
+        }
+    }
+}
+
+#[test]
+fn shapes_keep_their_size() {
+    let tiles = Sample::Shapes.tiles(&ground_shape(), SOLID_ID).unwrap();
+
+    assert_eq!(tiles.dim(), SHAPES_SIZE);
 }
 
 #[test]
@@ -261,8 +287,7 @@ fn another_seed_rolls_chances_differently() {
 fn solid_cells_no_rule_touched_are_unmatched() {
     for sample in Sample::ALL {
         let custom = ground_shape();
-        let automapped =
-            automap(ONLY_TOP_EDGES, sample, &custom, SEED, UNMATCHED_MARKER).unwrap();
+        let automapped = automap(ONLY_TOP_EDGES, sample, &custom, SEED, UNMATCHED_MARKER).unwrap();
         let tiles = sample.tiles(&custom, SOLID_ID).unwrap();
         let (edge_column, edge_row) = first_cell(sample, true, false);
         let (inner_column, inner_row) = first_cell(sample, true, true);

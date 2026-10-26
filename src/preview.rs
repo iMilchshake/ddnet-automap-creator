@@ -2,7 +2,7 @@ use std::ops::RangeInclusive;
 
 use thiserror::Error;
 use twmap::automapper::Automapper;
-use twmap::ndarray::Array2;
+use twmap::ndarray::{Array2, s};
 use twmap::{GameLayer, Tile, TileFlags, TwMap};
 
 use crate::model::project::Project;
@@ -14,6 +14,7 @@ const GAME_LAYER_HOOKABLE: u8 = 1;
 const GAME_LAYER_UNHOOKABLE: u8 = 3;
 pub(crate) const FALLBACK_UNMATCHED_MARKER: u8 = 1;
 const SOLID: char = '#';
+const AIR_PADDING: usize = 1;
 const CUSTOM_DEFAULT_WIDTH: usize = 32;
 const CUSTOM_DEFAULT_HEIGHT: usize = 16;
 pub const CUSTOM_SIZE_RANGE: RangeInclusive<usize> = 4..=128;
@@ -117,15 +118,11 @@ impl Sample {
         }
     }
 
-    pub fn tiles(
-        self,
-        custom: &CustomShape,
-        solid_id: u8,
-    ) -> Result<Array2<Tile>, PreviewError> {
+    pub fn tiles(self, custom: &CustomShape, solid_id: u8) -> Result<Array2<Tile>, PreviewError> {
         match self {
             Sample::Shapes => Ok(drawn_tiles(&SHAPES, solid_id)),
-            Sample::DeBruijnTorus => Ok(drawn_tiles(&DE_BRUIJN_TORUS, solid_id)),
-            Sample::Minimal => Ok(drawn_tiles(&MINIMAL, solid_id)),
+            Sample::DeBruijnTorus => Ok(padded(drawn_tiles(&DE_BRUIJN_TORUS, solid_id))),
+            Sample::Minimal => Ok(padded(drawn_tiles(&MINIMAL, solid_id))),
             Sample::Dm1 => game_layer_tiles(DM1, solid_id),
             Sample::Custom => Ok(custom.tiles(solid_id)),
         }
@@ -274,6 +271,21 @@ fn drawn_tiles(rows: &[&str], solid_id: u8) -> Array2<Tile> {
             false => Tile::default(),
         }
     })
+}
+
+fn padded(tiles: Array2<Tile>) -> Array2<Tile> {
+    let (height, width) = tiles.dim();
+    let mut result = Array2::from_elem(
+        (height + 2 * AIR_PADDING, width + 2 * AIR_PADDING),
+        Tile::default(),
+    );
+    result
+        .slice_mut(s![
+            AIR_PADDING..height + AIR_PADDING,
+            AIR_PADDING..width + AIR_PADDING
+        ])
+        .assign(&tiles);
+    result
 }
 
 fn game_layer_tiles(map: &[u8], solid_id: u8) -> Result<Array2<Tile>, PreviewError> {
