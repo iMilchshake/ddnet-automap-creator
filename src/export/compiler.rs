@@ -2,6 +2,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use thiserror::Error;
 
+use crate::export::r_source::credit;
+
 #[derive(Debug, Error)]
 pub enum CompileError {
     #[error("rpp rejected the rule set:\n{0}")]
@@ -14,6 +16,15 @@ pub enum CompileError {
 pub struct Compiled {
     pub file_name: String,
     pub rules: String,
+}
+
+impl Compiled {
+    fn with_credit(self) -> Self {
+        Self {
+            rules: format!("# {}\n{}", credit(), self.rules),
+            ..self
+        }
+    }
 }
 
 type CompileResult = Result<Compiled, CompileError>;
@@ -50,7 +61,7 @@ impl RulesCompiler {
     pub fn poll(&mut self) -> Option<CompileResult> {
         let result = self.receiver.try_recv().ok()?;
         self.running = false;
-        Some(result)
+        Some(result.map(Compiled::with_credit))
     }
 }
 

@@ -154,9 +154,10 @@ fn the_header_names_the_image_and_the_rule_set() {
     let tiles = [(1, rule(Neighborhood::default(), 100.0, false))];
     let source = emit(&tiles);
 
-    assert!(source.starts_with(
-        "// created with ddnet-automap-creator (https://github.com/iMilchshake/ddnet-automap-creator)\n"
-    ));
+    assert!(source.starts_with(&format!(
+        "// created with ddnet-automap-creator v{} (https://github.com/iMilchshake/ddnet-automap-creator)\n",
+        env!("CARGO_PKG_VERSION")
+    )));
     assert!(source.contains("#include \"base.r\""));
     assert!(source.contains("#output \"grass_main.rules\""));
     assert!(source.contains("AutoMapper(\"Grass_Main\");"));

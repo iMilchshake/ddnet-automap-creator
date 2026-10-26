@@ -123,6 +123,30 @@ fn first_cell(sample: Sample, solid: bool, solid_above: bool) -> (usize, usize) 
 }
 
 #[test]
+fn compiled_rules_start_with_a_comment_naming_the_version() {
+    let rules = compiled(empty_above_ground());
+
+    let header = rules.lines().next().unwrap();
+    assert!(header.starts_with("# "));
+    assert!(header.contains(env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn compiled_rules_with_the_header_still_parse() {
+    let rules = compiled(empty_above_ground());
+
+    let automapped = automap(
+        &rules,
+        Sample::default(),
+        &ground_shape(),
+        SEED,
+        UNMATCHED_MARKER,
+    );
+
+    automapped.unwrap();
+}
+
+#[test]
 fn every_sample_has_ground_and_air() {
     for sample in Sample::ALL {
         let tiles = sample.tiles(&ground_shape(), SOLID_ID).unwrap();

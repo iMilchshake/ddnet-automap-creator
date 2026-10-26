@@ -14,6 +14,9 @@ use crate::model::transform::Transform;
 /// emitted here can collide with them.
 const OBJECT_PREFIX: &str = "o:";
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const REPOSITORY_URL: &str = "https://github.com/iMilchshake/ddnet-automap-creator";
+
 const MASK: &str = "g:mask";
 const ON_MASK: &str = ".If(IndexAt([0, 0]).Is(g:mask))";
 const NO_DEFAULT_RULE: &str = "util:NoDefaultPosRule();";
@@ -92,6 +95,10 @@ impl RuleSet<'_> {
     }
 }
 
+pub fn credit() -> String {
+    format!("created with ddnet-automap-creator v{APP_VERSION} ({REPOSITORY_URL})")
+}
+
 pub fn output_file(image_stem: &str) -> String {
     format!("{image_stem}.rules")
 }
@@ -121,8 +128,7 @@ pub fn render(rule_sets: &[RuleSet]) -> Result<String, ExportError> {
     let namespaced = rule_sets.len() > 1;
 
     let mut lines = vec![
-        "// created with ddnet-automap-creator (https://github.com/iMilchshake/ddnet-automap-creator)"
-            .to_owned(),
+        format!("// {}", credit()),
         "// compile with rpp (https://github.com/Aerll/rpp), base.r has to sit next to this file"
             .to_owned(),
         "#include \"base.r\"".to_owned(),
