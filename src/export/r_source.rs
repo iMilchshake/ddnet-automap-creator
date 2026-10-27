@@ -17,9 +17,9 @@ const REPOSITORY_URL: &str = "https://github.com/iMilchshake/ddnet-automap-creat
 
 const MASK: &str = "g:mask";
 const ON_MASK: &str = ".If(IndexAt([0, 0]).Is(g:mask))";
-const NO_DEFAULT_RULE: &str = "util:NoDefaultPosRule();";
-const INSIDE_MAP_CONDITION: &str = "util:IsNotOut();";
-const EMPTY_CENTRE_CONDITION: &str = "util:NewPosRule([0, 0]); util:IsEmpty();";
+const CENTRE_TEST: &str = "IndexAt([0, 0])";
+const NO_DEFAULT_POS_RULE: &str = ".NoDefaultPosRule()";
+const FILL_OBJECTS: &str = "Run().FillObjects();";
 
 #[derive(Debug, Error)]
 pub enum ExportError {
@@ -184,9 +184,9 @@ fn render_rule_set(
         let objects = rule_set
             .groups
             .iter()
-            .map(|group| insert_object_block(index, namespaced, group, rule_set.groups));
+            .map(|group| insert_object_block(index, namespaced, group, rule_set.groups))
+            .chain([FILL_OBJECTS.to_owned()]);
         runs.push(new_run(true, objects));
-        runs.push(new_run(true, ["Run().FillObjects();".to_owned()]));
     }
     if !empty_centred.is_empty() {
         let rules = empty_centred
@@ -374,22 +374,79 @@ fn pool_chance(pool: &Pool) -> String {
 }
 
 fn test_clause(neighborhood: &Neighborhood) -> String {
+    centre_test(neighborhood, Centre::Full)
+        .map(|test| format!(".If({test})"))
+        .unwrap_or_default()
+}
+
+fn if_clause(tests: &[String]) -> String {
+    match tests.is_empty() {
+        true => String::new(),
+        false => format!(".If({})", tests.join(", ")),
+    }
+}
+
+fn centre_test(neighborhood: &Neighborhood, centre: Centre) -> Option<String> {
     let full = names_with(neighborhood, NeighborState::Full);
     let empty = names_with(neighborhood, NeighborState::Empty);
-    if full.is_empty() && empty.is_empty() {
-        return String::new();
+    let empty_centre = centre == Centre::Empty;
+    if !empty_centre && full.is_empty() && empty.is_empty() {
+        return None;
     }
 
-    let mut clause = String::from(".If(IndexAt([0, 0])");
+    let mut test = CENTRE_TEST.to_owned();
+    if empty_centre {
+        test.push_str(".IsEmpty()");
+    }
     if !full.is_empty() {
-        clause.push_str(&format!(".IsFullAt({})", full.join(", ")));
+        test.push_str(&format!(".IsFullAt({})", full.join(", ")));
     }
     if !empty.is_empty() {
-        clause.push_str(&format!(".IsEmptyAt({})", empty.join(", ")));
+        test.push_str(&format!(".IsEmptyAt({})", empty.join(", ")));
     }
-    clause.push(')');
 
-    clause
+    Some(test)
+}
+
+fn positions_where(
+    neighborhood: &Neighborhood,
+    matches: impl Fn(NeighborState) -> bool,
+) -> Vec<String> {
+    NEIGHBORS
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| matches(neighborhood.state(*index)))
+        .map(|(_, neighbor)| format!("[{}, {}]", neighbor.dx, neighbor.dy))
+        .collect()
+}
+
+fn picked_tests(neighborhood: &Neighborhood) -> Vec<String> {
+    let mut tiles: Vec<usize> = Vec::new();
+    for state in neighborhood.states() {
+        if let Some(tile) = state.tile()
+            && !tiles.contains(&tile)
+        {
+            tiles.push(tile);
+        }
+    }
+
+    tiles
+        .into_iter()
+        .map(|tile| {
+            let positions = positions_where(neighborhood, |state| state.tile() == Some(tile));
+            format!("IndexAt({}).Is({tile})", positions.join(", "))
+        })
+        .collect()
+}
+
+fn inside_map_test(member: &Variant) -> Option<String> {
+    if member.centre != Centre::Empty {
+        return None;
+    }
+
+    let positions = positions_where(&member.neighborhood, |state| state == NeighborState::Full);
+
+    (!positions.is_empty()).then(|| format!("IndexAt({}).IsNotOut()", positions.join(", ")))
 }
 
 fn names_with(neighborhood: &Neighborhood, state: NeighborState) -> Vec<&'static str> {
@@ -430,51 +487,27 @@ fn copy_run_lines(pool: &Pool, mode: ChanceMode) -> Vec<String> {
     pool.members
         .iter()
         .zip(odds)
-        .flat_map(|(member, odds)| index_rule_lines(member, odds))
+        .map(|(member, odds)| index_rule_line(member, odds))
         .collect()
 }
 
-fn index_rule_lines(member: &Variant, odds: Option<f32>) -> Vec<String> {
+fn index_rule_line(member: &Variant, odds: Option<f32>) -> String {
+    let no_default = match member.centre {
+        Centre::Full => "",
+        Centre::Empty => NO_DEFAULT_POS_RULE,
+    };
+    let tests: Vec<String> = centre_test(&member.neighborhood, member.centre)
+        .into_iter()
+        .chain(picked_tests(&member.neighborhood))
+        .chain(inside_map_test(member))
+        .collect();
     let chance = odds
         .map(|odds| format!(" util:Chance({odds});"))
         .unwrap_or_default();
-    let (no_default, centre_condition) = match member.centre {
-        Centre::Full => (String::new(), None),
-        Centre::Empty => (
-            format!(" {NO_DEFAULT_RULE}"),
-            Some(EMPTY_CENTRE_CONDITION.to_owned()),
-        ),
-    };
-    let head = format!(
-        "util:NewRule(); util:InsertIndex({});{chance}{no_default}",
-        index_name(member.tile, member.transform)
-    );
 
-    let conditions = NEIGHBORS.iter().enumerate().flat_map(|(index, neighbor)| {
-        let state = member.neighborhood.state(index);
-        let position = format!("util:NewPosRule([{}, {}]);", neighbor.dx, neighbor.dy);
-        let keep_inside = member.centre == Centre::Empty && state == NeighborState::Full;
-
-        [
-            neighbor_condition(state),
-            keep_inside.then(|| INSIDE_MAP_CONDITION.to_owned()),
-        ]
-        .into_iter()
-        .flatten()
-        .map(move |condition| format!("{position} {condition}"))
-    });
-
-    std::iter::once(head)
-        .chain(centre_condition)
-        .chain(conditions)
-        .collect()
-}
-
-fn neighbor_condition(state: NeighborState) -> Option<String> {
-    match state {
-        NeighborState::Any => None,
-        NeighborState::Full => Some("util:IsFull();".to_owned()),
-        NeighborState::Empty => Some("util:IsEmpty();".to_owned()),
-        NeighborState::Is(tile) => Some(format!("util:Is({tile});")),
-    }
+    format!(
+        "Insert({}){no_default}{};{chance}",
+        index_name(member.tile, member.transform),
+        if_clause(&tests)
+    )
 }

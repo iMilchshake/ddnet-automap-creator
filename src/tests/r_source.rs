@@ -479,14 +479,6 @@ fn every_group_is_told_not_to_overlap_any_group_including_itself() {
 }
 
 #[test]
-fn groups_add_a_closing_fill_objects_run() {
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
-    let source = emit_with_groups(&[], &groups).unwrap();
-
-    assert!(source.ends_with("NewRun();\nOverrideLayer();\nRun().FillObjects();\n"));
-}
-
-#[test]
 fn groups_alone_start_their_run_right_after_the_automapper_line() {
     let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
     let source = emit_with_groups(&[], &groups).unwrap();
@@ -506,7 +498,7 @@ fn runs_are_separated_by_one_blank_line() {
 
     let source = emit_with_groups(&tiles, &groups).unwrap();
 
-    assert_eq!(source.matches("\n\nNewRun();\n").count(), 3);
+    assert_eq!(source.matches("\n\nNewRun();\n").count(), 2);
 }
 
 #[test]
@@ -606,6 +598,9 @@ fn a_single_rule_set_keeps_unnamespaced_object_names() {
     assert!(source.contains("object o:bones = Rect(64, 81);"));
 }
 
+const SPECIFIC_TESTS: &str =
+    ".If(IndexAt([0, 0]).IsEmptyAt(bottom), IndexAt([0, -1]).Is(17), IndexAt([1, 0]).Is(18))";
+
 fn tile_specific() -> Neighborhood {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
     neighborhood.set_state(index_of("top"), NeighborState::Is(17));
@@ -625,37 +620,44 @@ fn tile_specific_pools_get_their_own_copy_run_after_the_plain_inserts() {
 
     let source = emit(&tiles);
 
-    assert_eq!(body(&source), ["Insert(1);"]);
+    assert_eq!(
+        body(&source),
+        [
+            "Insert(1);",
+            &format!("Insert(2){SPECIFIC_TESTS};"),
+            &format!("Insert(3){SPECIFIC_TESTS}; util:Chance(2);"),
+            "Insert(2.R).If(IndexAt([0, 0]).IsEmptyAt(left), IndexAt([1, 0]).Is(17), IndexAt([0, 1]).Is(18));",
+            "Insert(2.VH).If(IndexAt([0, 0]).IsEmptyAt(top), IndexAt([-1, 0]).Is(18), IndexAt([0, 1]).Is(17));",
+            "Insert(2.VHR).If(IndexAt([0, 0]).IsEmptyAt(right), IndexAt([0, -1]).Is(18), IndexAt([-1, 0]).Is(17));",
+        ]
+    );
     assert!(!source.contains("g:mask"));
     assert!(!source.contains("OverrideLayer"));
+    assert!(!source.contains("util:NewRule"));
     assert!(
-        source.ends_with(
+        source.ends_with(&format!(
             "Insert(1);\n\
              \n\
              NewRun();\n\
-             util:NewRule(); util:InsertIndex(2);\n\
-             util:NewPosRule([0, -1]); util:Is(17);\n\
-             util:NewPosRule([1, 0]); util:Is(18);\n\
-             util:NewPosRule([0, 1]); util:IsEmpty();\n\
-             util:NewRule(); util:InsertIndex(3); util:Chance(2);\n\
-             util:NewPosRule([0, -1]); util:Is(17);\n\
-             util:NewPosRule([1, 0]); util:Is(18);\n\
-             util:NewPosRule([0, 1]); util:IsEmpty();\n\
-             util:NewRule(); util:InsertIndex(2.R);\n\
-             util:NewPosRule([-1, 0]); util:IsEmpty();\n\
-             util:NewPosRule([1, 0]); util:Is(17);\n\
-             util:NewPosRule([0, 1]); util:Is(18);\n\
-             util:NewRule(); util:InsertIndex(2.VH);\n\
-             util:NewPosRule([0, -1]); util:IsEmpty();\n\
-             util:NewPosRule([-1, 0]); util:Is(18);\n\
-             util:NewPosRule([0, 1]); util:Is(17);\n\
-             util:NewRule(); util:InsertIndex(2.VHR);\n\
-             util:NewPosRule([0, -1]); util:Is(18);\n\
-             util:NewPosRule([-1, 0]); util:Is(17);\n\
-             util:NewPosRule([1, 0]); util:IsEmpty();\n"
-        ),
+             Insert(2){SPECIFIC_TESTS};\n\
+             Insert(3){SPECIFIC_TESTS}; util:Chance(2);\n\
+             Insert(2.R).If(IndexAt([0, 0]).IsEmptyAt(left), IndexAt([1, 0]).Is(17), IndexAt([0, 1]).Is(18));\n\
+             Insert(2.VH).If(IndexAt([0, 0]).IsEmptyAt(top), IndexAt([-1, 0]).Is(18), IndexAt([0, 1]).Is(17));\n\
+             Insert(2.VHR).If(IndexAt([0, 0]).IsEmptyAt(right), IndexAt([0, -1]).Is(18), IndexAt([-1, 0]).Is(17));\n"
+        )),
         "{source}"
     );
+}
+
+#[test]
+fn the_same_picked_tile_at_two_positions_shares_one_test() {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
+    neighborhood.set_state(index_of("topRight"), NeighborState::Is(16));
+    neighborhood.set_state(index_of("right"), NeighborState::Is(16));
+
+    let source = emit(&[(40, rule(neighborhood, 100.0, false))]);
+
+    assert!(source.contains("\nInsert(40).If(IndexAt([1, -1], [1, 0]).Is(16));\n"));
 }
 
 #[test]
@@ -669,16 +671,13 @@ fn a_rolled_regular_pool_is_followed_by_the_tile_specific_run() {
     let source = emit(&tiles);
 
     assert!(
-        source.ends_with(
+        source.ends_with(&format!(
             "Insert(g:mask);\n\
              Insert(5, 6).Roll().If(IndexAt([0, 0]).Is(g:mask));\n\
              \n\
              NewRun();\n\
-             util:NewRule(); util:InsertIndex(7);\n\
-             util:NewPosRule([0, -1]); util:Is(17);\n\
-             util:NewPosRule([1, 0]); util:Is(18);\n\
-             util:NewPosRule([0, 1]); util:IsEmpty();\n"
-        ),
+             Insert(7){SPECIFIC_TESTS};\n"
+        )),
         "{source}"
     );
 }
@@ -687,7 +686,7 @@ fn a_rolled_regular_pool_is_followed_by_the_tile_specific_run() {
 fn only_tile_specific_rules_start_with_the_copy_run() {
     let source = emit(&[(2, rule(tile_specific(), 100.0, false))]);
 
-    assert!(source.contains("AutoMapper(\"Grass_Main\");\nNewRun();\nutil:NewRule();"));
+    assert!(source.contains("AutoMapper(\"Grass_Main\");\nNewRun();\nInsert(2).If("));
     assert_eq!(source.matches("NewRun();").count(), 1);
 }
 
@@ -706,8 +705,19 @@ fn the_copy_run_sits_before_the_group_runs() {
 
     let source = emit_with_groups(&tiles, &groups).unwrap();
 
-    assert!(source.find("util:NewRule()") < source.find("InsertObject"));
-    assert!(source.contains("util:InsertIndex(2);\n"));
+    assert!(source.find("Insert(2).If(") < source.find("InsertObject"));
+    assert!(source.contains(&format!("Insert(2){SPECIFIC_TESTS};\n")));
+}
+
+#[test]
+fn fill_objects_directly_follows_the_last_insert_object_block() {
+    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let tiles = [(1, anywhere(100.0))];
+
+    let source = emit_with_groups(&tiles, &groups).unwrap();
+
+    assert!(source.contains("\n);\nRun().FillObjects();\n"));
+    assert!(!source.contains("OverrideLayer();\nRun().FillObjects();"));
 }
 
 fn full_at_right() -> Neighborhood {
@@ -716,6 +726,9 @@ fn full_at_right() -> Neighborhood {
 
     neighborhood
 }
+
+const EMPTY_CENTRE_AT_RIGHT: &str =
+    ".NoDefaultPosRule().If(IndexAt([0, 0]).IsEmpty().IsFullAt(right), IndexAt([1, 0]).IsNotOut())";
 
 fn empty_centred(neighborhood: Neighborhood, percent: f32) -> TileRule {
     TileRule {
@@ -736,14 +749,21 @@ fn empty_centre_rules_get_a_last_copy_run_after_the_group_runs() {
             "Run().FillObjects();\n\
              \n\
              NewRun();\n\
-             util:NewRule(); util:InsertIndex(2); util:NoDefaultPosRule();\n\
-             util:NewPosRule([0, 0]); util:IsEmpty();\n\
-             util:NewPosRule([1, 0]); util:IsFull();\n\
-             util:NewPosRule([1, 0]); util:IsNotOut();\n"
+             Insert(2).NoDefaultPosRule().If(IndexAt([0, 0]).IsEmpty().IsFullAt(right), IndexAt([1, 0]).IsNotOut());\n"
         ),
         "{source}"
     );
-    assert!(!source.contains("OverrideLayer();\nutil:"));
+    assert!(!source.contains("util:NewRule"));
+}
+
+#[test]
+fn an_empty_centre_rule_without_neighbors_tests_only_the_centre() {
+    let source = emit(&[(
+        52,
+        empty_centred(Neighborhood::uniform(NeighborState::Any), 100.0),
+    )]);
+
+    assert!(source.contains("\nInsert(52).NoDefaultPosRule().If(IndexAt([0, 0]).IsEmpty());\n"));
 }
 
 #[test]
@@ -755,8 +775,10 @@ fn empty_centre_pools_split_their_cells_like_other_copy_runs() {
 
     let source = emit(&tiles);
 
-    assert!(source.contains("util:InsertIndex(2); util:NoDefaultPosRule();\n"));
-    assert!(source.contains("util:InsertIndex(3); util:Chance(2); util:NoDefaultPosRule();\n"));
+    assert!(source.contains(&format!("Insert(2){EMPTY_CENTRE_AT_RIGHT};\n")));
+    assert!(source.contains(&format!(
+        "Insert(3){EMPTY_CENTRE_AT_RIGHT}; util:Chance(2);\n"
+    )));
     assert!(!source.contains("g:mask"));
 }
 
@@ -771,9 +793,11 @@ fn a_full_and_an_empty_centre_rule_on_one_neighborhood_do_not_compete() {
 
     assert_eq!(
         body(&source),
-        ["Insert(1).If(IndexAt([0, 0]).IsFullAt(right));"]
+        [
+            "Insert(1).If(IndexAt([0, 0]).IsFullAt(right));",
+            &format!("Insert(2){EMPTY_CENTRE_AT_RIGHT};"),
+        ]
     );
-    assert!(source.contains("util:InsertIndex(2); util:NoDefaultPosRule();\n"));
     assert!(!source.contains("g:mask"));
 }
 
@@ -833,8 +857,8 @@ fn an_exact_pool_above_100_is_scaled_before_the_copy_run() {
 
     let source = emit_exact(&tiles);
 
-    assert!(source.contains("util:InsertIndex(2);\n"));
-    assert!(source.contains("util:InsertIndex(3); util:Chance(2);\n"));
+    assert!(source.contains(&format!("Insert(2){SPECIFIC_TESTS};\n")));
+    assert!(source.contains(&format!("Insert(3){SPECIFIC_TESTS}; util:Chance(2);\n")));
 }
 
 const SUMMING_TO_100: [f32; 4] = [33.3, 33.3, 33.3, 0.1];
@@ -852,7 +876,7 @@ fn an_exact_pool_summing_to_100_with_float_noise_still_covers_every_cell() {
         .map(|(index, percent)| (index + 1, anywhere(*percent)))
         .collect();
 
-    assert!(emit_exact(&specific).contains("util:InsertIndex(1);\n"));
+    assert!(emit_exact(&specific).contains(&format!("Insert(1){SPECIFIC_TESTS};\n")));
     assert!(emit_exact(&plain).contains("Insert(g:mask);\n"));
 }
 
