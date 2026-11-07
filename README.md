@@ -31,9 +31,9 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 ## Planned Features 
 
 - keyboard navigation / shortcuts?
-- undo and redo for tile and group edits
 - autosave the project (in browser storage)
 - discard stale preview compiles after loading images
+- rotated and flipped copies for groups?
 
 ## Further Ideas
 

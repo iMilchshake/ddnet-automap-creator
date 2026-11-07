@@ -10,11 +10,11 @@ use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
-use crate::model::tile::{Centre, Chance, TILE_COUNT, TileRule};
+use crate::model::tile::{Centre, Chance, TILE_COUNT, TileMods, TileRule};
 use crate::model::transform::Transform;
 use crate::preview::{
     Automapped, CustomShape, FALLBACK_UNMATCHED_MARKER, PlacedTile, PreviewCell, PreviewError,
-    Sample, automap, unmatched_marker,
+    Sample, automap, placing_rule, unmatched_marker,
 };
 use crate::tests::support::index_of;
 
@@ -85,13 +85,6 @@ fn empty_above_ground() -> String {
         chance_mode: ChanceMode::Normalize,
     }])
     .unwrap()
-}
-
-fn unmatched_count(automapped: &Automapped) -> usize {
-    (0..automapped.height)
-        .flat_map(|row| (0..automapped.width).map(move |column| (column, row)))
-        .filter(|&(column, row)| automapped.cell(column, row) == PreviewCell::Unmatched)
-        .count()
 }
 
 fn some_rule() -> TileRule {
@@ -288,18 +281,9 @@ fn solid_cells_no_rule_touched_are_unmatched() {
     for sample in Sample::ALL {
         let custom = ground_shape();
         let automapped = automap(ONLY_TOP_EDGES, sample, &custom, SEED, UNMATCHED_MARKER).unwrap();
-        let tiles = sample.tiles(&custom, SOLID_ID).unwrap();
         let (edge_column, edge_row) = first_cell(sample, true, false);
         let (inner_column, inner_row) = first_cell(sample, true, true);
         let (air_column, air_row) = first_cell(sample, false, false);
-
-        let top_edges = tiles
-            .indexed_iter()
-            .filter(|((row, column), tile)| {
-                tile.id != 0 && *row > 0 && !is_solid(&tiles, *column, row - 1)
-            })
-            .count();
-        let solid = tiles.iter().filter(|tile| tile.id != 0).count();
 
         assert_eq!(automapped.cell(edge_column, edge_row), plain(7));
         assert_eq!(
@@ -307,7 +291,22 @@ fn solid_cells_no_rule_touched_are_unmatched() {
             PreviewCell::Unmatched
         );
         assert_eq!(automapped.cell(air_column, air_row), PreviewCell::Air);
-        assert_eq!(unmatched_count(&automapped), solid - top_edges);
+    }
+}
+
+#[test]
+fn an_unmapped_sample_marks_every_solid_cell_unmatched() {
+    for sample in Sample::ALL {
+        let custom = ground_shape();
+        let automapped = Automapped::unmapped(sample, &custom).unwrap();
+
+        for ((row, column), tile) in sample.tiles(&custom, SOLID_ID).unwrap().indexed_iter() {
+            let expected = match tile.id {
+                0 => PreviewCell::Air,
+                _ => PreviewCell::Unmatched,
+            };
+            assert_eq!(automapped.cell(column, row), expected, "{column},{row}");
+        }
     }
 }
 
@@ -424,6 +423,145 @@ fn shrinking_a_custom_map_keeps_the_overlap() {
     assert_eq!(tiles.dim(), (GROUND_ROWS.start + 1, SHAPE_SIZE - 1));
     assert!(is_solid(&tiles, 0, GROUND_ROWS.start));
     assert!(!is_solid(&tiles, 0, 0));
+}
+
+fn rule_with(states: &[(&str, NeighborState)]) -> TileRule {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
+    for (name, state) in states {
+        neighborhood.set_state(index_of(name), *state);
+    }
+
+    TileRule::new(neighborhood)
+}
+
+fn solid_at(names: &[&str]) -> Neighborhood {
+    let mut around = Neighborhood::uniform(NeighborState::Empty);
+    for name in names {
+        around.set_state(index_of(name), NeighborState::Full);
+    }
+
+    around
+}
+
+fn placed_tile(transform: Transform, centre: Centre) -> PlacedTile {
+    PlacedTile {
+        index: 1,
+        transform,
+        centre,
+    }
+}
+
+#[test]
+fn neighbors_at_reads_the_sample_and_counts_outside_cells_as_full() {
+    let automapped = Automapped::unmapped(Sample::Custom, &ground_shape()).unwrap();
+    let row = GROUND_ROWS.start;
+
+    assert_eq!(
+        automapped.neighbors_at(1, row),
+        solid_at(&["left", "right", "bottom", "bottomLeft", "bottomRight"])
+    );
+    assert_eq!(
+        automapped.neighbors_at(0, 0).state(index_of("left")),
+        NeighborState::Full
+    );
+    assert_eq!(
+        automapped.neighbors_at(0, 0).state(index_of("bottom")),
+        NeighborState::Empty
+    );
+}
+
+fn project_with(rules: &[TileRule]) -> Project {
+    let mut project = Project::default();
+    for rule in rules {
+        project.add_rule(1, *rule);
+    }
+
+    project
+}
+
+#[test]
+fn the_more_specific_rule_is_the_one_that_placed_the_tile() {
+    let project = project_with(&[rule_with(&[]), rule_with(&[("top", NeighborState::Empty)])]);
+    let placed = placed_tile(Transform::IDENTITY, Centre::Full);
+
+    assert_eq!(placing_rule(&project, placed, solid_at(&[])), Some(1));
+    assert_eq!(placing_rule(&project, placed, solid_at(&["top"])), Some(0));
+}
+
+#[test]
+fn a_rule_repeated_by_a_later_one_stays_with_the_earlier_one() {
+    let project = project_with(&[rule_with(&[]), rule_with(&[])]);
+    let placed = placed_tile(Transform::IDENTITY, Centre::Full);
+
+    assert_eq!(placing_rule(&project, placed, solid_at(&[])), Some(0));
+}
+
+#[test]
+fn a_specific_tile_neighbor_counts_as_solid() {
+    let project = project_with(&[rule_with(&[("top", NeighborState::Is(3))])]);
+    let placed = placed_tile(Transform::IDENTITY, Centre::Full);
+
+    assert_eq!(placing_rule(&project, placed, solid_at(&["top"])), Some(0));
+    assert_eq!(placing_rule(&project, placed, solid_at(&[])), None);
+}
+
+#[test]
+fn a_tile_specific_rule_beats_a_more_specific_plain_rule() {
+    let project = project_with(&[
+        rule_with(&[
+            ("top", NeighborState::Empty),
+            ("left", NeighborState::Empty),
+            ("right", NeighborState::Empty),
+        ]),
+        rule_with(&[("bottom", NeighborState::Is(3))]),
+    ]);
+    let placed = placed_tile(Transform::IDENTITY, Centre::Full);
+
+    assert_eq!(
+        placing_rule(&project, placed, solid_at(&["bottom"])),
+        Some(1)
+    );
+}
+
+#[test]
+fn a_rotated_variant_reads_the_turned_neighborhood() {
+    let rotating = TileRule {
+        mods: TileMods::new(false, false, true),
+        ..rule_with(&[
+            ("bottom", NeighborState::Full),
+            ("top", NeighborState::Empty),
+        ])
+    };
+    let project = project_with(&[rotating]);
+    let rotated = placed_tile(Transform::ROTATE_CLOCKWISE, Centre::Full);
+    let upright = placed_tile(Transform::IDENTITY, Centre::Full);
+
+    assert_eq!(
+        placing_rule(&project, rotated, solid_at(&["left"])),
+        Some(0)
+    );
+    assert_eq!(placing_rule(&project, rotated, solid_at(&["bottom"])), None);
+    assert_eq!(
+        placing_rule(&project, upright, solid_at(&["bottom"])),
+        Some(0)
+    );
+}
+
+#[test]
+fn only_rules_with_the_placed_centre_are_considered() {
+    let project = project_with(&[
+        rule_with(&[]),
+        TileRule {
+            centre: Centre::Empty,
+            ..rule_with(&[])
+        },
+    ]);
+
+    let empty = placed_tile(Transform::IDENTITY, Centre::Empty);
+    let full = placed_tile(Transform::IDENTITY, Centre::Full);
+
+    assert_eq!(placing_rule(&project, empty, solid_at(&[])), Some(1));
+    assert_eq!(placing_rule(&project, full, solid_at(&[])), Some(0));
 }
 
 #[test]

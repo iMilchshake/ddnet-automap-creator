@@ -9,12 +9,18 @@ const GLOW_STEP: f32 = 1.0;
 const GLOW_OPACITY: f32 = 0.5;
 const BANNER_MARGIN: f32 = 16.0;
 
-const BANNER_HINT: &str = "Click a tile · Esc or right-click: cancel";
+const BANNER_HINT: &str = "Click a tile in the tileset. Press Esc or right-click to cancel.";
 const BANNER_CANCEL: &str = "Cancel";
+const NEIGHBOR_HEADING: &str = "Pick the {label} neighbor";
+const LABEL_PLACEHOLDER: &str = "{label}";
 
-pub fn show(ctx: &Context, view: Rect, label: &str) -> bool {
+pub fn neighbor_heading(label: &str) -> String {
+    NEIGHBOR_HEADING.replace(LABEL_PLACEHOLDER, label)
+}
+
+pub fn show(ctx: &Context, view: Rect, heading: &str) -> bool {
     paint_glow(ctx, view);
-    show_banner(ctx, view, label)
+    show_banner(ctx, view, heading)
 }
 
 fn paint_glow(ctx: &Context, view: Rect) {
@@ -31,7 +37,7 @@ fn paint_glow(ctx: &Context, view: Rect) {
     }
 }
 
-fn show_banner(ctx: &Context, view: Rect, label: &str) -> bool {
+fn show_banner(ctx: &Context, view: Rect, heading: &str) -> bool {
     Area::new(Id::new("picking_banner"))
         .order(PICKING_ORDER)
         .fixed_pos(view.center_top() + Vec2::new(0.0, BANNER_MARGIN))
@@ -39,7 +45,7 @@ fn show_banner(ctx: &Context, view: Rect, label: &str) -> bool {
         .show(ctx, |ui| {
             Frame::popup(ui.style())
                 .show(ui, |ui| {
-                    ui.label(RichText::new(format!("Pick the {label} neighbor")).strong());
+                    ui.label(RichText::new(heading).strong());
                     ui.weak(BANNER_HINT);
                     ui.button(BANNER_CANCEL).clicked()
                 })

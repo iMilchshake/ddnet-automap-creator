@@ -5,13 +5,14 @@ use egui::{
     StrokeKind, TextureHandle, Vec2, pos2,
 };
 
+use crate::model::neighbor::Neighborhood;
 use crate::model::transform::Transform;
 use crate::preview::{Automapped, CustomShape, PlacedTile, PreviewCell};
 use crate::tileset::{TileSlice, Tileset};
+use crate::ui::allocate_centered;
 
 const MIN_CELL_SIZE: f32 = 4.0;
 const BACKGROUND: Color32 = Color32::from_gray(40);
-const UNMATCHED_COLOR: Color32 = Color32::RED;
 const UNMATCHED_STROKE_WIDTH: f32 = 1.0;
 const HOVER_STROKE_WIDTH: f32 = 2.0;
 const UNMATCHED_MARK: &str = "?";
@@ -19,9 +20,14 @@ const UNMATCHED_MARK_SCALE: f32 = 0.7;
 const MIN_MARK_CELL_SIZE: f32 = 10.0;
 const PATH_SAMPLES_PER_CELL: f32 = 2.0;
 
+pub struct ClickedTile {
+    pub placed: PlacedTile,
+    pub around: Neighborhood,
+}
+
 #[derive(Default)]
 pub struct Interaction {
-    pub clicked: Option<PlacedTile>,
+    pub clicked: Option<ClickedTile>,
     pub edited: bool,
 }
 
@@ -43,7 +49,7 @@ pub fn show(
         Some(_) => Sense::click_and_drag(),
         None => Sense::click(),
     };
-    let (allocated, response) = ui.allocate_exact_size(size, sense);
+    let (allocated, response) = allocate_centered(ui, size, sense);
     let rect = Rect::from_min_size(
         allocated.min.round_to_pixels(pixels_per_point),
         allocated.size(),
@@ -71,7 +77,7 @@ pub fn show(
 
     painter.add(egui::Shape::mesh(mesh));
     for cell in unmatched {
-        paint_unmatched(&painter, cell);
+        paint_unmatched(&painter, cell, ui.visuals().warn_fg_color);
     }
 
     match drawing {
@@ -80,20 +86,20 @@ pub fn show(
             edited: draw_cells(ui, &response, &painter, rect, cell_size, shape),
         },
         None => Interaction {
-            clicked: clicked_tile(ui, &response, &painter, rect, cell_size, automapped),
+            clicked: clicked_cell(ui, &response, &painter, rect, cell_size, automapped),
             edited: false,
         },
     }
 }
 
-fn clicked_tile(
+fn clicked_cell(
     ui: &egui::Ui,
     response: &egui::Response,
     painter: &egui::Painter,
     rect: Rect,
     cell_size: f32,
     automapped: &Automapped,
-) -> Option<PlacedTile> {
+) -> Option<ClickedTile> {
     let (column, row) = response
         .hover_pos()
         .and_then(|pos| cell_at(pos, rect, cell_size, automapped.width, automapped.height))?;
@@ -106,7 +112,10 @@ fn clicked_tile(
 
     response
         .clicked_by(PointerButton::Primary)
-        .then_some(placed)
+        .then(|| ClickedTile {
+            placed,
+            around: automapped.neighbors_at(column, row),
+        })
 }
 
 fn outline_cell(ui: &egui::Ui, painter: &egui::Painter, cell: Rect) {
@@ -184,8 +193,8 @@ fn cell_at(
     (offset.x >= 0.0 && offset.y >= 0.0 && column < width && row < height).then_some((column, row))
 }
 
-fn paint_unmatched(painter: &egui::Painter, cell: Rect) {
-    let stroke = Stroke::new(UNMATCHED_STROKE_WIDTH, UNMATCHED_COLOR);
+fn paint_unmatched(painter: &egui::Painter, cell: Rect, color: Color32) {
+    let stroke = Stroke::new(UNMATCHED_STROKE_WIDTH, color);
     painter.rect_stroke(cell, 0.0, stroke, StrokeKind::Inside);
 
     if cell.width() >= MIN_MARK_CELL_SIZE {
@@ -194,7 +203,7 @@ fn paint_unmatched(painter: &egui::Painter, cell: Rect) {
             Align2::CENTER_CENTER,
             UNMATCHED_MARK,
             FontId::proportional(cell.width() * UNMATCHED_MARK_SCALE),
-            UNMATCHED_COLOR,
+            color,
         );
     }
 }

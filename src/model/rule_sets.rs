@@ -23,6 +23,15 @@ impl RuleSets {
         &self.sets
     }
 
+    pub fn selected(&self, selection: &[bool]) -> Vec<(String, Project)> {
+        self.sets
+            .iter()
+            .zip(selection)
+            .filter(|(_, chosen)| **chosen)
+            .map(|(set, _)| set.clone())
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.sets.len()
     }

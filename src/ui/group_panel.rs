@@ -7,8 +7,8 @@ const MIN_CHANCE_PERCENT: f32 = 0.1;
 const MAX_CHANCE_PERCENT: f32 = 100.0;
 const CHANCE_DRAG_SPEED: f64 = 0.5;
 
-const FILL_HINT: &str = "Places the group wherever its own tiles are solid.";
-const DECORATE_HINT: &str = "Also needs the ring of tiles around the group to be solid.";
+const FILL_HINT: &str = "Placed wherever its own tiles are solid.";
+const DECORATE_HINT: &str = "Also needs a solid ring of tiles around it.";
 
 pub fn mode_label(mode: GroupMode) -> &'static str {
     match mode {
@@ -81,14 +81,12 @@ impl GroupPanel {
             ui.label("Mode");
             changed |= ui
                 .selectable_value(&mut self.mode, GroupMode::Fill, "Fill")
+                .on_hover_text(FILL_HINT)
                 .changed();
             changed |= ui
                 .selectable_value(&mut self.mode, GroupMode::Decorate, "Decorate")
+                .on_hover_text(DECORATE_HINT)
                 .changed();
-        });
-        ui.weak(match self.mode {
-            GroupMode::Fill => FILL_HINT,
-            GroupMode::Decorate => DECORATE_HINT,
         });
 
         ui.add_space(4.0);

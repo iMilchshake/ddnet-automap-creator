@@ -1,7 +1,9 @@
-use crate::export::r_source::{ExportError, RuleSet, last_wins_odds, render};
+use crate::export::r_source::{ExportError, RuleSet, last_wins_odds, render, render_rule_sets};
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
+use crate::model::project::Project;
+use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{AIR_TILE, Centre, Chance, TILE_COUNT, TileRule};
 use crate::tests::support::{HALF_TURN, index_of, mods, outer_corner};
 
@@ -95,6 +97,29 @@ fn a_rule_drawn_as_a_half_turn_emits_that_turn_with_the_drawn_neighborhood() {
             "Insert(32.VH).If(IndexAt([0, 0]).IsFullAt(right, bottom, bottomRight).IsEmptyAt(top, left));"
         ]
     );
+}
+
+#[test]
+fn exporting_a_subset_emits_only_the_chosen_rule_sets() {
+    let named_set = |name: &str, tile: usize| {
+        let mut project = Project::default();
+        project.add_rule(tile, anywhere(100.0));
+        (name.to_owned(), project)
+    };
+    let rule_sets = RuleSets::from_parts(
+        vec![
+            named_set("first", 1),
+            named_set("second", 2),
+            named_set("third", 3),
+        ],
+        0,
+    );
+
+    let source = render_rule_sets(&rule_sets.selected(&[true, false, true]), "grass_main").unwrap();
+
+    assert!(source.contains("AutoMapper(\"first\");"));
+    assert!(!source.contains("AutoMapper(\"second\");"));
+    assert!(source.contains("AutoMapper(\"third\");"));
 }
 
 fn emit_deactivated(

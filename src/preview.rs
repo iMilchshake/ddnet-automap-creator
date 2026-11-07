@@ -5,6 +5,8 @@ use twmap::automapper::Automapper;
 use twmap::ndarray::{Array2, s};
 use twmap::{GameLayer, Tile, TileFlags, TwMap};
 
+use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
+use crate::model::pool::{self, PoolRuns};
 use crate::model::project::Project;
 use crate::model::tile::{AIR_TILE, Centre, TILE_COUNT, referenced_tiles};
 use crate::model::transform::Transform;
@@ -91,9 +93,9 @@ pub enum PreviewError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Sample {
-    #[default]
     Shapes,
     DeBruijnTorus,
+    #[default]
     Minimal,
     Dm1,
     Custom,
@@ -227,12 +229,69 @@ pub struct Automapped {
     pub width: usize,
     pub height: usize,
     cells: Vec<PreviewCell>,
+    solid: Vec<bool>,
 }
 
 impl Automapped {
+    pub fn unmapped(sample: Sample, custom: &CustomShape) -> Result<Self, PreviewError> {
+        let tiles = sample.tiles(custom, FALLBACK_UNMATCHED_MARKER)?;
+        let was_solid = tiles.map(|tile| tile.id != 0);
+
+        Ok(collect(&tiles, &was_solid, FALLBACK_UNMATCHED_MARKER))
+    }
+
     pub fn cell(&self, column: usize, row: usize) -> PreviewCell {
         self.cells[row * self.width + column]
     }
+
+    pub fn neighbors_at(&self, column: usize, row: usize) -> Neighborhood {
+        let mut around = Neighborhood::default();
+        for (index, neighbor) in NEIGHBORS.iter().enumerate() {
+            let state = match self.is_solid(column as i32 + neighbor.dx, row as i32 + neighbor.dy) {
+                true => NeighborState::Full,
+                false => NeighborState::Empty,
+            };
+            around.set_state(index, state);
+        }
+
+        around
+    }
+
+    fn is_solid(&self, column: i32, row: i32) -> bool {
+        let inside =
+            (0..self.width as i32).contains(&column) && (0..self.height as i32).contains(&row);
+
+        !inside || self.solid[row as usize * self.width + column as usize]
+    }
+}
+
+pub fn placing_rule(project: &Project, placed: PlacedTile, around: Neighborhood) -> Option<usize> {
+    let pools = pool::pools(&project.rules());
+
+    PoolRuns::split(&pools)
+        .lowest_priority_first()
+        .filter(|pool| fits(&pool.neighborhood, &around))
+        .filter_map(|pool| {
+            pool.members.iter().find(|member| {
+                member.tile == placed.index
+                    && member.transform == placed.transform
+                    && member.centre == placed.centre
+            })
+        })
+        .last()
+        .map(|member| member.rule)
+}
+
+fn fits(wanted: &Neighborhood, around: &Neighborhood) -> bool {
+    wanted
+        .states()
+        .iter()
+        .zip(around.states())
+        .all(|(wanted, actual)| match wanted {
+            NeighborState::Any => true,
+            NeighborState::Empty => *actual == NeighborState::Empty,
+            NeighborState::Full | NeighborState::Is(_) => *actual == NeighborState::Full,
+        })
 }
 
 pub fn automap(
@@ -317,6 +376,7 @@ fn collect(tiles: &Array2<Tile>, was_solid: &Array2<bool>, unmatched_marker: u8)
             .zip(was_solid)
             .map(|(tile, was_solid)| cell(*tile, *was_solid, unmatched_marker))
             .collect(),
+        solid: was_solid.iter().copied().collect(),
     }
 }
 

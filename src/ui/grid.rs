@@ -10,7 +10,9 @@ use crate::model::group::TileGroup;
 use crate::model::project::Project;
 use crate::model::tile::{Chance, TILESET_SIDE};
 use crate::tileset::{TileSlice, Tileset};
+use crate::ui::allocate_centered;
 use crate::ui::group_panel::mode_label;
+use crate::ui::hover_card;
 use crate::ui::tile_state::{TileState, tile_state};
 
 const MIN_CELL_SIZE: f32 = 8.0;
@@ -20,7 +22,6 @@ const MIN_BADGE_CELL_SIZE: f32 = 16.0;
 const CHECKER_LIGHT: Color32 = Color32::from_gray(64);
 const CHECKER_DARK: Color32 = Color32::from_gray(48);
 
-const DEACTIVATED_COLOR: Color32 = Color32::from_rgb(220, 110, 110);
 const CONFIGURED_OUTLINE: Color32 = Color32::from_gray(205);
 const DEACTIVATED_OUTLINE: Color32 = Color32::from_gray(100);
 const SELECTED_OUTLINE: Color32 = Color32::from_rgb(255, 214, 102);
@@ -84,7 +85,7 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
     let grid_size = cell_size * TILESET_SIDE as f32;
 
     let (allocated, response) =
-        ui.allocate_exact_size(Vec2::splat(grid_size), Sense::click_and_drag());
+        allocate_centered(ui, Vec2::splat(grid_size), Sense::click_and_drag());
     let rect = Rect::from_min_size(
         allocated.min.round_to_pixels(pixels_per_point),
         allocated.size(),
@@ -157,10 +158,7 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         outliner.paint_centred_on_border(index, OUTLINE_WIDTH, ui.visuals().selection.stroke.color);
     }
 
-    let response = match hovered.and_then(|index| describe_group(view.project, index)) {
-        Some(text) => response.on_hover_text(text),
-        None => response,
-    };
+    let response = attach_tooltip(response, &view, hovered);
 
     if view.group_editing {
         return GridResponse {
@@ -184,10 +182,28 @@ fn released_by(response: &egui::Response, button: PointerButton) -> bool {
     response.clicked_by(button) || response.drag_stopped_by(button)
 }
 
-fn describe_group(project: &Project, tile: usize) -> Option<String> {
-    let group = project.groups().get(project.group_at(tile)?)?;
+fn attach_tooltip(
+    response: egui::Response,
+    view: &GridView<'_>,
+    hovered: Option<usize>,
+) -> egui::Response {
+    match hovered {
+        Some(tile) if view.group_editing => match group_of(view.project, tile) {
+            Some(group) => response.on_hover_text(describe_group(group)),
+            None => response,
+        },
+        Some(tile) => response.on_hover_ui_at_pointer(|ui| hover_card::show(ui, view, tile)),
+        None => response,
+    }
+}
+
+pub fn group_of(project: &Project, tile: usize) -> Option<&TileGroup> {
+    project.groups().get(project.group_at(tile)?)
+}
+
+pub fn describe_group(group: &TileGroup) -> String {
     let mut text = format!(
-        "{} — {}×{}, {}",
+        "{}: {}×{}, {}",
         group.name,
         group.width,
         group.height,
@@ -197,7 +213,7 @@ fn describe_group(project: &Project, tile: usize) -> Option<String> {
         text.push_str(&format!(", {}%", group.chance.percent()));
     }
 
-    Some(text)
+    text
 }
 
 fn paint_group(
@@ -433,6 +449,7 @@ fn paint_badge(
         TileState::Deactivated(_) => paint_cross(
             painter,
             Rect::from_center_size(cell.center(), Vec2::splat(cell_size * BADGE_MARK)),
+            visuals.warn_fg_color,
         ),
         TileState::Configured(_) => {
             if let Some(share) = share
@@ -450,9 +467,9 @@ fn paint_badge(
     }
 }
 
-fn paint_cross(painter: &egui::Painter, mark: Rect) {
+fn paint_cross(painter: &egui::Painter, mark: Rect, color: Color32) {
     let width = (mark.width() * CROSS_WIDTH).max(MIN_CROSS_WIDTH);
-    let stroke = Stroke::new(width, DEACTIVATED_COLOR);
+    let stroke = Stroke::new(width, color);
 
     painter.line_segment([mark.left_top(), mark.right_bottom()], stroke);
     painter.line_segment([mark.right_top(), mark.left_bottom()], stroke);

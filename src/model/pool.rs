@@ -131,6 +131,36 @@ pub fn pools(tiles: &[(usize, TileRule)]) -> Vec<Pool> {
     pools
 }
 
+pub struct PoolRuns<'a> {
+    pub plain: Vec<&'a Pool>,
+    pub specific: Vec<&'a Pool>,
+    pub empty_centred: Vec<&'a Pool>,
+}
+
+impl<'a> PoolRuns<'a> {
+    pub fn split(pools: &'a [Pool]) -> Self {
+        let (empty_centred, full_centred): (Vec<&Pool>, Vec<&Pool>) =
+            pools.iter().partition(|pool| pool.centre == Centre::Empty);
+        let (specific, plain) = full_centred
+            .into_iter()
+            .partition(|pool| pool.neighborhood.is_tile_specific());
+
+        Self {
+            plain,
+            specific,
+            empty_centred,
+        }
+    }
+
+    pub fn lowest_priority_first(&self) -> impl Iterator<Item = &'a Pool> {
+        self.plain
+            .iter()
+            .chain(&self.specific)
+            .chain(&self.empty_centred)
+            .copied()
+    }
+}
+
 fn expand(tiles: &[(usize, TileRule)]) -> Vec<Variant> {
     let mut variants = Vec::new();
 

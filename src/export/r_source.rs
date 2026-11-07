@@ -2,8 +2,8 @@ use thiserror::Error;
 
 use crate::model::group::{self, GroupError, GroupMode, TileGroup};
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
-use crate::model::pool::{self, ChanceMode, Pool, Variant};
-use crate::model::project::is_free_tile;
+use crate::model::pool::{self, ChanceMode, Pool, PoolRuns, Variant};
+use crate::model::project::{Project, is_free_tile};
 use crate::model::tile::{AIR_TILE, Centre, Chance, TileRule, highest_free_tile, referenced_tiles};
 use crate::model::transform::Transform;
 
@@ -99,6 +99,35 @@ pub fn output_file(image_stem: &str) -> String {
     format!("{image_stem}.rules")
 }
 
+pub fn render_rule_sets(
+    rule_sets: &[(String, Project)],
+    image_stem: &str,
+) -> Result<String, ExportError> {
+    let tiles: Vec<Vec<(usize, TileRule)>> = rule_sets
+        .iter()
+        .map(|(_, project)| project.all_rules())
+        .collect();
+    let deactivated: Vec<Vec<usize>> = rule_sets
+        .iter()
+        .map(|(_, project)| project.deactivated_tiles())
+        .collect();
+
+    let sets: Vec<RuleSet> = rule_sets
+        .iter()
+        .zip(tiles.iter().zip(&deactivated))
+        .map(|((name, project), (tiles, deactivated))| RuleSet {
+            image_stem,
+            name,
+            tiles,
+            deactivated,
+            groups: project.groups(),
+            chance_mode: project.chance_mode(),
+        })
+        .collect();
+
+    render(&sets)
+}
+
 pub fn render(rule_sets: &[RuleSet]) -> Result<String, ExportError> {
     for rule_set in rule_sets {
         if rule_set.active_tiles().is_empty() && rule_set.groups.is_empty() {
@@ -161,11 +190,11 @@ fn render_rule_set(
     lines.extend(mask_line);
 
     let pools = pool::pools(&rule_set.active_tiles());
-    let (empty_centred, full_centred): (Vec<&Pool>, Vec<&Pool>) =
-        pools.iter().partition(|pool| pool.centre == Centre::Empty);
-    let (specific, plain): (Vec<&Pool>, Vec<&Pool>) = full_centred
-        .into_iter()
-        .partition(|pool| pool.neighborhood.is_tile_specific());
+    let PoolRuns {
+        plain,
+        specific,
+        empty_centred,
+    } = PoolRuns::split(&pools);
 
     let mut runs: Vec<Vec<String>> = Vec::new();
     if !plain.is_empty() {

@@ -11,45 +11,47 @@ pub struct SaveError {
     pub message: String,
 }
 
-type SaveResult = Result<String, SaveError>;
+type SaveResult<Tag> = Result<(String, Tag), SaveError>;
 
 /// Cancelling sends nothing; it is not an outcome the UI reports.
-pub struct FileSaver {
-    sender: Sender<SaveResult>,
-    receiver: Receiver<SaveResult>,
+pub struct FileSaver<Tag> {
+    sender: Sender<SaveResult<Tag>>,
+    receiver: Receiver<SaveResult<Tag>>,
 }
 
-impl FileSaver {
+impl<Tag: Send + 'static> FileSaver<Tag> {
     pub fn new() -> Self {
         let (sender, receiver) = channel();
         Self { sender, receiver }
     }
 
-    pub fn save_text(&self, filter: FileFilter, file_name: &str, contents: String) {
-        self.save_bytes(filter, file_name, contents.into_bytes());
+    pub fn save_text(&self, filter: FileFilter, file_name: &str, contents: String, tag: Tag) {
+        self.save_bytes(filter, file_name, contents.into_bytes(), tag);
     }
 
-    pub fn save_bytes(&self, filter: FileFilter, file_name: &str, contents: Vec<u8>) {
-        spawn_dialog(self.sender.clone(), filter, file_name.to_owned(), contents);
+    pub fn save_bytes(&self, filter: FileFilter, file_name: &str, contents: Vec<u8>, tag: Tag) {
+        let sender = self.sender.clone();
+        spawn_dialog(sender, filter, file_name.to_owned(), contents, tag);
     }
 
-    pub fn poll(&self) -> Option<SaveResult> {
+    pub fn poll(&self) -> Option<SaveResult<Tag>> {
         self.receiver.try_recv().ok()
     }
 }
 
-impl Default for FileSaver {
+impl<Tag: Send + 'static> Default for FileSaver<Tag> {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_dialog(
-    sender: Sender<SaveResult>,
+fn spawn_dialog<Tag: Send + 'static>(
+    sender: Sender<SaveResult<Tag>>,
     filter: FileFilter,
     file_name: String,
     contents: Vec<u8>,
+    tag: Tag,
 ) {
     std::thread::spawn(move || {
         let dialog = rfd::FileDialog::new()
@@ -64,7 +66,7 @@ fn spawn_dialog(
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or(file_name);
         let result = match std::fs::write(&path, contents) {
-            Ok(()) => Ok(name),
+            Ok(()) => Ok((name, tag)),
             Err(error) => Err(SaveError {
                 name,
                 message: error.to_string(),
@@ -77,14 +79,15 @@ fn spawn_dialog(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn spawn_dialog(
-    sender: Sender<SaveResult>,
+fn spawn_dialog<Tag: Send + 'static>(
+    sender: Sender<SaveResult<Tag>>,
     _filter: FileFilter,
     file_name: String,
     contents: Vec<u8>,
+    tag: Tag,
 ) {
     let result = match download(&file_name, &contents) {
-        Ok(()) => Ok(file_name),
+        Ok(()) => Ok((file_name, tag)),
         Err(message) => Err(SaveError {
             name: file_name,
             message,
