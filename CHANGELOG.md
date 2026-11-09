@@ -9,8 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Custom preview map: draw your own shape to test the rules on.
-- Rules can place tiles into empty cells: right-click the center tile.
+- Opening a .rules file without an embedded blueprint explains why it can't be edited.
+- A new button in the rule sets section allows you to append the rule sets of an automapper file.
+- Custom preview map: draw your own shape to test your rules with.
+- Rules can now have an empty center tile. Right-click the center tile to turn this on, left-click to turn it off.
+- Undo and redo with Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z).
+- The app warns you before unsaved changes get lost on quit, doesn't work in the web version :(.
+- Preview is visible now, even without any active rules.
+- A power button next to the tile name turns a tile off or back on.
+- Hovering a tile in the tileset view shows all its rules.
+- Press Esc or click the selected tile again to deselect it and see a new overview sidebar.
+- Major rework of the welcome screen and help menu with many instructions.
+
+### Changed
+
+- Saving (Ctrl+S) and opening now use .rules files that also hold an embedded blueprint.
+- Various UI/UX improvements (export menu, popups, top bar, preview).
+- Moved rule actions (duplicate, delete, copy and paste) into an expandable menu.
+- Split view is now the default view.
+- Minimal is now the default preview map.
+- The first rule set is now called "default".
+
+### Removed
+
+- The bundle .zip export. Saving the automapper now ships with an embedded blueprint.
+- The "Always show orientation buttons" toggle. It was kinda useless.
+
+### Fixed
+
+- Clicking a tile in the preview now opens the correct rule, even if a tile has multiple rules.
+- In the browser, links open in a new tab.
 
 ## [0.3.0] - 2026-10-24
 
