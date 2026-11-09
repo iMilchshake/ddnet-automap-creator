@@ -87,6 +87,14 @@ fn show_vertically_centered<R>(
     shown.inner
 }
 
+fn external_link(
+    ui: &mut egui::Ui,
+    text: impl Into<egui::WidgetText>,
+    url: impl ToString,
+) -> egui::Response {
+    ui.add(egui::Hyperlink::from_label_and_url(text, url).open_in_new_tab(true))
+}
+
 fn text_width(ui: &egui::Ui, text: &str) -> f32 {
     egui::WidgetText::from(text)
         .into_galley(

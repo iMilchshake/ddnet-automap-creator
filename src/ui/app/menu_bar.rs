@@ -6,7 +6,7 @@ use super::{
 };
 use crate::file_filter::{AUTOMAPPER, TILESET_IMAGE};
 use crate::model::pool::ChanceMode;
-use crate::ui::{APP_NAME, GITHUB_ICON, REPOSITORY, text_width};
+use crate::ui::{APP_NAME, GITHUB_ICON, REPOSITORY, external_link, text_width};
 
 const SHORT_CREDIT: &str = "GitHub";
 const AUTHOR_CREDIT: &str = "by iMilchshake";
@@ -269,7 +269,7 @@ fn show_credit(ui: &mut Ui) {
     if let Some(signature) = form.signature() {
         ui.label(egui::RichText::new(signature).weak());
     }
-    let link = ui.hyperlink_to(form.link_text(), REPOSITORY);
+    let link = external_link(ui, form.link_text(), REPOSITORY);
     if matches!(form, CreditForm::Icon) {
         link.on_hover_text(APP_NAME);
     }

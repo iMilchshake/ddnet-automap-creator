@@ -8,7 +8,7 @@ use crate::ui::code_frame::{code_block, code_chip};
 use crate::ui::modal_header::{self, ModalHeader, TitleAlign, Tone};
 use crate::ui::modal_section::{self, paragraph_gap, show_section};
 use crate::ui::neighbor_paint::show_legend;
-use crate::ui::{DDNET_AUTOMAP_PATHS, GITHUB_ICON, REPOSITORY};
+use crate::ui::{DDNET_AUTOMAP_PATHS, GITHUB_ICON, REPOSITORY, external_link};
 
 const HELP_WIDTH: f32 = 520.0;
 const PATHS_GRID_ID: &str = "automap_paths";
@@ -355,7 +355,7 @@ fn show_keybinds(ui: &mut Ui) {
 fn show_about(ui: &mut Ui) {
     show_section(ui, ABOUT_HEADING, |ui| {
         ui.label(ABOUT_SUMMARY);
-        ui.hyperlink_to(format!("{GITHUB_ICON} {GITHUB_LABEL}"), REPOSITORY);
+        external_link(ui, format!("{GITHUB_ICON} {GITHUB_LABEL}"), REPOSITORY);
     });
     show_section(ui, ACKNOWLEDGEMENTS_HEADING, |ui| {
         for sentence in ACKNOWLEDGEMENTS {
@@ -370,7 +370,7 @@ fn show_sentence(ui: &mut Ui, parts: &[SentencePart]) {
         for part in parts {
             match part {
                 SentencePart::Text(text) => ui.label(*text),
-                SentencePart::Link(label, url) => ui.hyperlink_to(*label, *url),
+                SentencePart::Link(label, url) => external_link(ui, *label, *url),
             };
         }
     });
