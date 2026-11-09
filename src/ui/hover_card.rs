@@ -1,6 +1,6 @@
 use egui::Ui;
 
-use crate::model::tile::{AIR_TILE, TileRule};
+use crate::model::tile::TileRule;
 use crate::ui::grid::{GridView, describe_group, group_of};
 use crate::ui::neighbor_paint::{paint_centre, paint_neighbor, show_pattern};
 use crate::ui::tile_state::{TileState, tile_state};
@@ -8,8 +8,6 @@ use crate::ui::tile_state::{TileState, tile_state};
 const CARD_CELL_SIZE: f32 = 18.0;
 const RULES_PER_ROW: usize = 4;
 
-const ALWAYS_AIR: &str = "is always air";
-const LOCKED: &str = "is locked";
 const IN_GROUP: &str = "is in group";
 const TURNED_OFF: &str = "turned off";
 
@@ -71,17 +69,14 @@ fn caption(number: usize, rule: &TileRule) -> String {
 }
 
 fn summary(view: &GridView, tile: usize, state: TileState) -> String {
-    if tile == AIR_TILE {
-        return format!("Tile {tile} {ALWAYS_AIR}");
-    }
-
     match state {
-        TileState::Locked => format!("Tile {tile} {LOCKED}"),
         TileState::Grouped => {
             let name = group_of(view.project, tile).map_or("", |group| group.name.as_str());
             format!("Tile {tile} {IN_GROUP} {name}")
         }
         TileState::Deactivated(_) => format!("Tile {tile}, {TURNED_OFF}"),
-        TileState::Unconfigured | TileState::Configured(_) => format!("Tile {tile}"),
+        TileState::Locked | TileState::Unconfigured | TileState::Configured(_) => {
+            format!("Tile {tile}")
+        }
     }
 }

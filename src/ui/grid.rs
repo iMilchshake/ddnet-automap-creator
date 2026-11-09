@@ -192,6 +192,7 @@ fn attach_tooltip(
             Some(group) => response.on_hover_text(describe_group(group)),
             None => response,
         },
+        Some(tile) if tile_state(view.tileset, view.project, tile) == TileState::Locked => response,
         Some(tile) => response.on_hover_ui_at_pointer(|ui| hover_card::show(ui, view, tile)),
         None => response,
     }
