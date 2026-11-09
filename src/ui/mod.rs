@@ -10,6 +10,7 @@ mod hover_card;
 mod modal_header;
 mod modal_section;
 mod neighbor_paint;
+mod not_editable;
 pub mod overview;
 mod picking;
 mod preview;
@@ -23,6 +24,7 @@ pub use app::AutomapperApp;
 
 const APP_NAME: &str = env!("CARGO_PKG_NAME");
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
+const AUTHOR_CREDIT: &str = "by iMilchshake";
 
 const ADD_ICON: &str = "+";
 const DUPLICATE_ICON: &str = "🗐";

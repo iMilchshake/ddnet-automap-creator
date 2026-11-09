@@ -1,15 +1,14 @@
 use egui::Ui;
 
 use super::{
-    AutomapperApp, View, Workspace, export_shortcut, open_image_shortcut, redo_shortcut,
-    save_automapper_shortcut, undo_shortcut,
+    AutomapperApp, View, Workspace, export_shortcut, open_automapper_shortcut, open_image_shortcut,
+    redo_shortcut, save_automapper_shortcut, undo_shortcut,
 };
 use crate::file_filter::{AUTOMAPPER, TILESET_IMAGE};
 use crate::model::pool::ChanceMode;
-use crate::ui::{APP_NAME, GITHUB_ICON, REPOSITORY, external_link, text_width};
+use crate::ui::{APP_NAME, AUTHOR_CREDIT, GITHUB_ICON, REPOSITORY, external_link, text_width};
 
 const SHORT_CREDIT: &str = "GitHub";
-const AUTHOR_CREDIT: &str = "by iMilchshake";
 
 const UNDO_LABEL: &str = "Undo";
 const REDO_LABEL: &str = "Redo";
@@ -97,10 +96,9 @@ impl AutomapperApp {
                         ui.close();
                     }
 
-                    if ui
-                        .add_enabled(has_image, egui::Button::new(OPEN_AUTOMAPPER_LABEL))
-                        .clicked()
-                    {
+                    let open_automapper = egui::Button::new(OPEN_AUTOMAPPER_LABEL)
+                        .shortcut_text(ui.ctx().format_shortcut(&open_automapper_shortcut()));
+                    if ui.add_enabled(has_image, open_automapper).clicked() {
                         self.picker.open(AUTOMAPPER);
                         ui.close();
                     }

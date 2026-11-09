@@ -26,7 +26,8 @@ use crate::ui::group_panel::GroupPanel;
 use crate::ui::help;
 use crate::ui::history::History;
 use crate::ui::modal_header::{self, ModalHeader, TitleAlign, Tone};
-use crate::ui::modal_section::{self, paragraph_gap};
+use crate::ui::modal_section::{self, MODAL_BUTTON_SIZE, paragraph_gap};
+use crate::ui::not_editable;
 use crate::ui::overview::{self, Overview};
 use crate::ui::picking;
 use crate::ui::preview::ClickedTile;
@@ -88,7 +89,6 @@ const MISMATCH_MADE_FOR: &str = " was made for the tileset ";
 const MISMATCH_BUT_CURRENT: &str = ", but your current tileset is ";
 const MISMATCH_END: &str = ".";
 const MISMATCH_REASON: &str = "Rules are tied to explicit tile positions, so they only work if both tilesets have the same layout.";
-const BLUEPRINT_BUTTON_SIZE: Vec2 = Vec2::new(120.0, 28.0);
 const UNDONE: &str = "Undone";
 const REDONE: &str = "Redone";
 const NOTHING_TO_UNDO: &str = "Nothing to undo";
@@ -287,6 +287,7 @@ pub struct AutomapperApp {
     compile_target: Option<CompileTarget>,
     queued_save: Option<QueuedSave>,
     save_failure: Option<SaveFailure>,
+    not_editable: Option<String>,
     status: StatusLine,
     view: View,
     view_before_picking: Option<View>,
@@ -329,6 +330,7 @@ impl Default for AutomapperApp {
             compile_target: None,
             queued_save: None,
             save_failure: None,
+            not_editable: None,
             status: StatusLine::default(),
             view: View::Tileset,
             view_before_picking: None,
@@ -389,6 +391,7 @@ impl eframe::App for AutomapperApp {
         self.show_view(ui, &ctx, displayed_view);
         self.show_export(&ctx);
         self.show_save_failure(&ctx);
+        self.show_not_editable(&ctx);
         if self.help_open && help::show_until_closed(&ctx) {
             self.help_open = false;
         }
@@ -517,7 +520,7 @@ impl AutomapperApp {
         if !replaces || !(self.is_dirty() || self.pending_discard.is_some()) {
             return self.open_file(ctx, picked);
         }
-        if self.save_failure.is_some() {
+        if self.save_failure.is_some() || self.not_editable.is_some() {
             return self.status.warning(ctx, CLOSE_PENDING);
         }
 
@@ -530,6 +533,7 @@ impl AutomapperApp {
 
     fn open_file(&mut self, ctx: &Context, picked: PickedFile) {
         self.pending_blueprint = None;
+        self.not_editable = None;
         if TILESET_IMAGE.matches(&picked.name) {
             return self.load_tileset(ctx, picked);
         }
@@ -565,6 +569,10 @@ impl AutomapperApp {
         };
         let parsed = match parsed {
             Ok(parsed) => parsed,
+            Err(BlueprintError::NoEmbedded) => {
+                self.not_editable = Some(picked.name);
+                return;
+            }
             Err(error) => {
                 self.status
                     .warning(ctx, format!("{}: {error}", picked.name));
@@ -634,7 +642,9 @@ impl AutomapperApp {
         if close_requested && self.is_dirty() && !self.allow_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             match self.pending_discard {
-                _ if self.save_failure.is_some() => self.status.warning(ctx, OPEN_PENDING),
+                _ if self.save_failure.is_some() || self.not_editable.is_some() => {
+                    self.status.warning(ctx, OPEN_PENDING)
+                }
                 Some(Replacement::Files(_)) => self.status.warning(ctx, OPEN_PENDING),
                 _ => self.pending_discard = Some(Replacement::Close),
             }
@@ -817,6 +827,15 @@ impl AutomapperApp {
                 self.status.warning(ctx, format!("Didn't open {names}."))
             }
             (SaveFailureDecision::Close, None) => {}
+        }
+    }
+
+    fn show_not_editable(&mut self, ctx: &Context) {
+        let Some(file_name) = &self.not_editable else {
+            return;
+        };
+        if not_editable::show(ctx, file_name) {
+            self.not_editable = None;
         }
     }
 
@@ -1008,7 +1027,11 @@ impl AutomapperApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &Context) {
-        if pressed(ctx, &open_image_shortcut()) {
+        let open_automapper = pressed(ctx, &open_automapper_shortcut());
+        if open_automapper && !has_modal(ctx) && matches!(self.workspace, Workspace::Ready(_)) {
+            self.picker.open(AUTOMAPPER);
+        }
+        if !has_modal(ctx) && pressed(ctx, &open_image_shortcut()) {
             self.picker.open(TILESET_IMAGE);
         }
         if !has_modal(ctx) && pressed(ctx, &save_automapper_shortcut()) {
@@ -1639,7 +1662,7 @@ fn show_blueprint_mismatch(
     paragraph_gap(ui);
 
     ui.vertical_centered(|ui| {
-        ui.add_sized(BLUEPRINT_BUTTON_SIZE, Button::new(pending.action.confirm()))
+        ui.add_sized(MODAL_BUTTON_SIZE, Button::new(pending.action.confirm()))
             .clicked()
             .then_some(BlueprintDecision::Confirm)
     })
@@ -1821,6 +1844,13 @@ fn air_warning() -> String {
 
 pub(super) fn open_image_shortcut() -> egui::KeyboardShortcut {
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O)
+}
+
+pub(super) fn open_automapper_shortcut() -> egui::KeyboardShortcut {
+    egui::KeyboardShortcut::new(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::O,
+    )
 }
 
 pub(super) fn save_automapper_shortcut() -> egui::KeyboardShortcut {

@@ -1,15 +1,13 @@
-use egui::{Button, Color32, Context, RichText, Ui, vec2};
+use egui::{Button, Color32, Context, RichText, Ui};
 
 use crate::ui::modal_header::{self, ModalHeader, TitleAlign, Tone};
-use crate::ui::modal_section::{self, paragraph_gap};
+use crate::ui::modal_section::{self, MODAL_BUTTON_SIZE, paragraph_gap};
 
 const DISCARD_HEADING: &str = "You have unsaved changes";
 const SAVE_FIRST: &str = "Save";
 const QUIT: &str = "Quit";
 const DISCARD: &str = "Discard";
 const DISCARD_WIDTH: f32 = 320.0;
-const BUTTON_WIDTH: f32 = 120.0;
-const BUTTON_HEIGHT: f32 = 28.0;
 const MODAL_ID: &str = "discard";
 const DISCARD_TEXT_COLOR: Color32 = Color32::BLACK;
 
@@ -62,10 +60,10 @@ fn show_content(ui: &mut Ui, leaving: Leaving) -> Option<DiscardDecision> {
 
 fn show_buttons(ui: &mut Ui, leaving: Leaving) -> Option<DiscardDecision> {
     ui.horizontal(|ui| {
-        let used = 2.0 * BUTTON_WIDTH + ui.spacing().item_spacing.x;
+        let used = 2.0 * MODAL_BUTTON_SIZE.x + ui.spacing().item_spacing.x;
         ui.add_space((ui.available_width() - used) / 2.0);
 
-        let size = vec2(BUTTON_WIDTH, BUTTON_HEIGHT);
+        let size = MODAL_BUTTON_SIZE;
         let save = ui.add_sized(size, Button::new(SAVE_FIRST)).clicked();
 
         let label = RichText::new(leaving.discard_label()).color(DISCARD_TEXT_COLOR);

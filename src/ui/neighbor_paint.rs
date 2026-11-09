@@ -47,7 +47,7 @@ pub fn paint_state(ui: &Ui, rect: Rect, state: NeighborState) {
             let cross = rect.shrink(rect.width() * EMPTY_CROSS_INSET_FRACTION);
             painter.line_segment([cross.left_top(), cross.right_bottom()], mark);
             painter.line_segment([cross.right_top(), cross.left_bottom()], mark);
-            default_border
+            mark
         }
         NeighborState::Full => {
             painter.rect_filled(rect, CORNER_RADIUS, FULL_FILL);

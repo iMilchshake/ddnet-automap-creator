@@ -1,4 +1,6 @@
-use egui::{Context, Frame, Margin, Ui};
+use egui::{Context, Frame, Margin, Ui, Vec2};
+
+pub const MODAL_BUTTON_SIZE: Vec2 = Vec2::new(120.0, 28.0);
 
 const SPACING: i8 = 12;
 const SECTION_SPACING: f32 = SPACING as f32;
