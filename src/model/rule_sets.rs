@@ -32,6 +32,23 @@ impl RuleSets {
             .collect()
     }
 
+    pub fn selected_sets(&self, selection: &[bool]) -> Option<RuleSets> {
+        let sets = self.selected(selection);
+        if sets.is_empty() {
+            return None;
+        }
+
+        let active_is_selected = selection.get(self.active) == Some(&true);
+        let active = match active_is_selected {
+            true => selection[..self.active]
+                .iter()
+                .filter(|chosen| **chosen)
+                .count(),
+            false => 0,
+        };
+        Some(Self::from_parts(sets, active))
+    }
+
     pub fn len(&self) -> usize {
         self.sets.len()
     }

@@ -604,3 +604,68 @@ fn a_con_of_the_wrong_length_is_refused() {
         );
     }
 }
+
+const RULES_TEXT: &str = "# credit\n[Test]\nIndex 1\n";
+const BEGIN_MARKER: &str = "# ddnet-automap-creator blueprint begin";
+const END_MARKER: &str = "# ddnet-automap-creator blueprint end";
+
+fn furnished_sets() -> RuleSets {
+    RuleSets::from_parts(vec![("Grass Main".to_owned(), furnished())], 0)
+}
+
+fn embedded_rules() -> String {
+    let json = blueprint::to_json(&furnished_sets(), IMAGE).unwrap();
+    blueprint::embed(RULES_TEXT, &json)
+}
+
+#[test]
+fn an_embedded_blueprint_survives_a_round_trip() {
+    let loaded = blueprint::parse_embedded(&embedded_rules()).unwrap();
+
+    assert_eq!(loaded.rule_sets.sets(), furnished_sets().sets());
+    assert_eq!(loaded.image, IMAGE);
+}
+
+#[test]
+fn everything_after_the_rules_is_a_comment() {
+    let embedded = embedded_rules();
+    let appended = embedded.strip_prefix(RULES_TEXT).unwrap();
+
+    assert!(appended.ends_with(&format!("{END_MARKER}\n")));
+    assert!(appended.lines().all(|line| line.starts_with('#')));
+}
+
+#[test]
+fn embedding_keeps_exactly_one_newline_before_the_block() {
+    let json = blueprint::to_json(&furnished_sets(), IMAGE).unwrap();
+    let embedded = blueprint::embed("rules\n\n\n", &json);
+
+    assert!(embedded.starts_with(&format!("rules\n{BEGIN_MARKER}\n")));
+}
+
+#[test]
+fn an_embedded_blueprint_loads_from_a_crlf_file() {
+    let crlf = embedded_rules().replace('\n', "\r\n");
+
+    let loaded = blueprint::parse_embedded(&crlf).unwrap();
+
+    assert_eq!(loaded.rule_sets.sets(), furnished_sets().sets());
+}
+
+#[test]
+fn rules_without_a_block_have_no_embedded_blueprint() {
+    assert!(matches!(
+        blueprint::parse_embedded(RULES_TEXT),
+        Err(BlueprintError::NoEmbedded)
+    ));
+}
+
+#[test]
+fn a_block_without_an_end_is_incomplete() {
+    let truncated = embedded_rules().replace(END_MARKER, "");
+
+    assert!(matches!(
+        blueprint::parse_embedded(&truncated),
+        Err(BlueprintError::IncompleteEmbedded)
+    ));
+}

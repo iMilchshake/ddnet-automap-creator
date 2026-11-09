@@ -4,12 +4,14 @@ use std::time::{Duration, Instant};
 use twmap::Tile;
 use twmap::ndarray::Array2;
 
+use crate::blueprint;
 use crate::export::compiler::RulesCompiler;
 use crate::export::r_source::{RuleSet, output_file, render};
 use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
+use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{Centre, Chance, TILE_COUNT, TileMods, TileRule};
 use crate::model::transform::Transform;
 use crate::preview::{
@@ -615,4 +617,24 @@ fn the_unmatched_marker_falls_back_when_only_the_mask_is_free() {
 
     assert_eq!(marker, FALLBACK_UNMATCHED_MARKER);
     assert_ne!(Some(usize::from(marker)), project.mask_tile());
+}
+
+#[test]
+fn rules_with_an_embedded_blueprint_automap_like_the_plain_rules() {
+    let rules = compiled(empty_above_ground());
+    let sets = RuleSets::new("Test".to_owned());
+    let json = blueprint::to_json(&sets, IMAGE_STEM).unwrap();
+    let embedded = blueprint::embed(&rules, &json);
+    let automap_of = |text: &str| {
+        automap(
+            text,
+            Sample::default(),
+            &ground_shape(),
+            SEED,
+            UNMATCHED_MARKER,
+        )
+        .unwrap()
+    };
+
+    assert_eq!(automap_of(&embedded), automap_of(&rules));
 }

@@ -1,10 +1,10 @@
 use egui::Ui;
 
 use super::{
-    AutomapperApp, View, Workspace, open_image_shortcut, redo_shortcut, save_blueprint_shortcut,
-    undo_shortcut,
+    AutomapperApp, View, Workspace, export_shortcut, open_image_shortcut, redo_shortcut,
+    save_automapper_shortcut, undo_shortcut,
 };
-use crate::file_filter::{BLUEPRINT, TILESET_IMAGE};
+use crate::file_filter::{AUTOMAPPER, TILESET_IMAGE};
 use crate::model::pool::ChanceMode;
 use crate::ui::{APP_NAME, GITHUB_ICON, REPOSITORY, text_width};
 
@@ -17,11 +17,11 @@ const COPY_RULE_LABEL: &str = "Copy rule";
 const PASTE_RULE_LABEL: &str = "Paste rule";
 const FILE_MENU: &str = "File";
 const OPEN_IMAGE_LABEL: &str = "Open image…";
-const LOAD_BLUEPRINT_LABEL: &str = "Load blueprint…";
-const SAVE_BLUEPRINT_LABEL: &str = "Save blueprint…";
-const MERGE_BLUEPRINT_LABEL: &str = "Merge blueprint…";
+const OPEN_AUTOMAPPER_LABEL: &str = "Open automapper…";
+const SAVE_AUTOMAPPER_LABEL: &str = "Save automapper…";
+const MERGE_AUTOMAPPER_LABEL: &str = "Merge automapper…";
+const EXPORT_LABEL: &str = "Export…";
 const EDIT_MENU: &str = "Edit";
-const EXPORT_LABEL: &str = "Export";
 const OPTIONS_MENU: &str = "Options";
 const HELP_LABEL: &str = "Help";
 const TILESET_LABEL: &str = "Tileset";
@@ -86,7 +86,7 @@ impl AutomapperApp {
     pub(super) fn show_menu_bar(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         let has_image = matches!(self.workspace, Workspace::Ready(_));
-        let mut save_blueprint = false;
+        let mut save_automapper = false;
 
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
@@ -98,41 +98,40 @@ impl AutomapperApp {
                         ui.close();
                     }
 
-                    ui.separator();
-
                     if ui
-                        .add_enabled(has_image, egui::Button::new(LOAD_BLUEPRINT_LABEL))
+                        .add_enabled(has_image, egui::Button::new(OPEN_AUTOMAPPER_LABEL))
                         .clicked()
                     {
-                        self.picker.open(BLUEPRINT);
+                        self.picker.open(AUTOMAPPER);
                         ui.close();
                     }
-                    let save = egui::Button::new(SAVE_BLUEPRINT_LABEL)
-                        .shortcut_text(ui.ctx().format_shortcut(&save_blueprint_shortcut()));
+
+                    let save = egui::Button::new(SAVE_AUTOMAPPER_LABEL)
+                        .shortcut_text(ui.ctx().format_shortcut(&save_automapper_shortcut()));
                     if ui.add_enabled(has_image, save).clicked() {
-                        save_blueprint = true;
+                        save_automapper = true;
                         ui.close();
                     }
 
                     ui.separator();
 
                     if ui
-                        .add_enabled(has_image, egui::Button::new(MERGE_BLUEPRINT_LABEL))
+                        .add_enabled(has_image, egui::Button::new(MERGE_AUTOMAPPER_LABEL))
                         .clicked()
                     {
-                        self.merge_picker.open(BLUEPRINT);
+                        self.merge_picker.open(AUTOMAPPER);
+                        ui.close();
+                    }
+
+                    let export = egui::Button::new(EXPORT_LABEL)
+                        .shortcut_text(ui.ctx().format_shortcut(&export_shortcut()));
+                    if ui.add_enabled(has_image, export).clicked() {
+                        self.open_export();
                         ui.close();
                     }
                 });
 
                 ui.menu_button(EDIT_MENU, |ui| self.show_edit_menu(ui));
-
-                if ui
-                    .add_enabled(has_image, egui::Button::new(EXPORT_LABEL))
-                    .clicked()
-                {
-                    self.open_export();
-                }
 
                 let options_config = egui::containers::menu::MenuConfig::new()
                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
@@ -155,8 +154,8 @@ impl AutomapperApp {
             });
         });
 
-        if save_blueprint {
-            self.save_blueprint(&ctx, None);
+        if save_automapper {
+            self.save_automapper(&ctx, None);
         }
     }
 

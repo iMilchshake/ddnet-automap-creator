@@ -1,15 +1,19 @@
-use egui::{Context, Id, KeyboardShortcut, ScrollArea, Ui};
+use egui::{Context, Id, KeyboardShortcut, ScrollArea, Ui, vec2};
 
 use crate::ui::app::{
     export_shortcut, open_image_shortcut, redo_alt_shortcut, redo_shortcut,
-    save_blueprint_shortcut, undo_shortcut,
+    save_automapper_shortcut, undo_shortcut,
 };
+use crate::ui::code_frame::{code_block, code_chip};
 use crate::ui::modal_header::{self, ModalHeader, TitleAlign, Tone};
-use crate::ui::modal_section::{self, show_section};
+use crate::ui::modal_section::{self, paragraph_gap, show_section};
 use crate::ui::neighbor_paint::show_legend;
-use crate::ui::{GITHUB_ICON, REPOSITORY};
+use crate::ui::{DDNET_AUTOMAP_PATHS, GITHUB_ICON, REPOSITORY};
 
 const HELP_WIDTH: f32 = 520.0;
+const PATHS_GRID_ID: &str = "automap_paths";
+const PATHS_COLUMN_GAP: f32 = 12.0;
+const PATHS_ROW_GAP: f32 = 8.0;
 const MAX_HEIGHT_FRACTION: f32 = 0.6;
 const MODAL_ID: &str = "help";
 const TAB_ID: &str = "help_tab";
@@ -32,7 +36,18 @@ const RPP: &str = "https://github.com/Aerll/rpp";
 const DM1_SOURCE: &str = "https://github.com/teeworlds/teeworlds-maps";
 const DM1_LICENSE: &str = "http://creativecommons.org/licenses/by-sa/3.0/";
 
-const GETTING_STARTED: [(&str, &str); 7] = [
+const DESTINATION_HEADING: &str = "Where to put the automapper?";
+const DESTINATION: &str =
+    "Put the .rules file into your local automapper folder, depending on your system.";
+const NAME_NOTE_START: &str = "For DDNet to recognise the automapper, it ";
+const NAME_NOTE_EMPHASIS: &str = "must";
+const NAME_NOTE_MIDDLE: &str = " be named like the tileset image, e.g. ";
+const NAME_NOTE_EXAMPLE_RULES: &str = "grass_main.rules";
+const NAME_NOTE_FOR: &str = " for ";
+const NAME_NOTE_EXAMPLE_IMAGE: &str = "grass_main.png";
+const NAME_NOTE_END: &str = ".";
+
+const GETTING_STARTED: [(&str, &str); 6] = [
     (
         "1. Open a tileset",
         "Open a tileset image with 16×16 tiles ({open}).",
@@ -55,11 +70,7 @@ const GETTING_STARTED: [(&str, &str); 7] = [
     ),
     (
         "6. Save your work",
-        "Save a blueprint ({save}) so you can continue later.",
-    ),
-    (
-        "7. Export",
-        "Export the .rules file and put it into the editor/automap folder of your DDNet user folder. It needs the same name as the image, for example grass_main.rules. The export window shows where that folder is.",
+        "Save the automapper ({save}) as a .rules file. It also holds your work, so you can open it again to continue later.",
     ),
 ];
 
@@ -101,8 +112,8 @@ const OTHER_CONCEPTS: [(&str, &str); 7] = [
 
 const ALTERNATIVE_KEYS: &str = " / ";
 const OPEN_ACTION: &str = "Open image";
-const SAVE_ACTION: &str = "Save blueprint";
-const EXPORT_ACTION: &str = "Open the export dialog";
+const SAVE_ACTION: &str = "Save automapper";
+const EXPORT_ACTION: &str = "Advanced export";
 const UNDO_ACTION: &str = "Undo";
 const REDO_ACTION: &str = "Redo";
 
@@ -229,7 +240,7 @@ fn show_tab(ui: &mut Ui, tab: Tab) {
 
 fn show_getting_started(ui: &mut Ui) {
     let open = ui.ctx().format_shortcut(&open_image_shortcut());
-    let save = ui.ctx().format_shortcut(&save_blueprint_shortcut());
+    let save = ui.ctx().format_shortcut(&save_automapper_shortcut());
 
     for (title, text) in GETTING_STARTED {
         let text = text
@@ -239,6 +250,33 @@ fn show_getting_started(ui: &mut Ui) {
             ui.label(text);
         });
     }
+    let heading = format!("{}. {DESTINATION_HEADING}", GETTING_STARTED.len() + 1);
+    show_section(ui, &heading, show_destination);
+}
+
+fn show_destination(ui: &mut Ui) {
+    ui.label(DESTINATION);
+    paragraph_gap(ui);
+    egui::Grid::new(PATHS_GRID_ID)
+        .spacing(vec2(PATHS_COLUMN_GAP, PATHS_ROW_GAP))
+        .show(ui, |ui| {
+            for (system, path) in DDNET_AUTOMAP_PATHS {
+                ui.label(system);
+                code_block(ui, path);
+                ui.end_row();
+            }
+        });
+    paragraph_gap(ui);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.label(NAME_NOTE_START);
+        ui.strong(NAME_NOTE_EMPHASIS);
+        ui.label(NAME_NOTE_MIDDLE);
+        code_chip(ui, NAME_NOTE_EXAMPLE_RULES);
+        ui.label(NAME_NOTE_FOR);
+        code_chip(ui, NAME_NOTE_EXAMPLE_IMAGE);
+        ui.label(NAME_NOTE_END);
+    });
 }
 
 fn show_concepts(ui: &mut Ui) {
@@ -271,7 +309,7 @@ fn keybind_sections(ctx: &Context) -> [(&'static str, Vec<(String, &'static str)
             FILES_HEADING,
             vec![
                 (keys(&[open_image_shortcut()]), OPEN_ACTION),
-                (keys(&[save_blueprint_shortcut()]), SAVE_ACTION),
+                (keys(&[save_automapper_shortcut()]), SAVE_ACTION),
                 (keys(&[export_shortcut()]), EXPORT_ACTION),
             ],
         ),

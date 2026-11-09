@@ -23,7 +23,7 @@ struct Args {
     #[arg(value_parser = read_file)]
     image: Option<file_picker::PickedFile>,
 
-    /// Blueprint to load onto the image
+    /// Automapper (.rules or .json) to open onto the image
     #[arg(short, long, requires = "image", value_parser = read_file)]
     blueprint: Option<file_picker::PickedFile>,
 }

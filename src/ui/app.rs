@@ -6,11 +6,10 @@ use egui::{
     Vec2,
 };
 
-use crate::blueprint;
-use crate::export::bundle::{self, Bundle};
+use crate::blueprint::{self, BlueprintError};
 use crate::export::compiler::{Compiled, RulesCompiler};
 use crate::export::r_source::{self, ExportError, RuleSet};
-use crate::file_filter::{BLUEPRINT, BUNDLE, RPP_SOURCE, RULES, TILESET_IMAGE};
+use crate::file_filter::{AUTOMAPPER, BLUEPRINT, RPP_SOURCE, RULES, TILESET_IMAGE};
 use crate::file_picker::{FilePicker, PickedFile};
 use crate::file_saver::FileSaver;
 use crate::model::group::{GroupMode, TileGroup};
@@ -28,6 +27,7 @@ use crate::ui::history::History;
 use crate::ui::overview::{self, Overview};
 use crate::ui::picking;
 use crate::ui::preview::ClickedTile;
+use crate::ui::save_failure::{self, SaveFailureDecision};
 use crate::ui::status::StatusLine;
 use crate::ui::tile_panel::{CopiedRule, FlashKind, GridFlash, TileContext, TileEdit, TilePanel};
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
@@ -69,16 +69,19 @@ const TILE_SECTION: &str = "Tile";
 const GROUP_SECTION: &str = "Group";
 const GROUPS_SECTION: &str = "Groups";
 const GROUP_ORDER_NOTE: &str = "top one is applied first";
-const DROP_HINT: &str = "Drop a tileset image or a blueprint";
-const NO_IMAGE_FOR_BLUEPRINT: &str = "Open a tileset image first, then load the blueprint.";
-const MERGE_HEADING: &str = "Merge blueprint";
+const DROP_HINT: &str = "Drop a tileset image or an automapper";
+const NO_IMAGE_FOR_BLUEPRINT: &str = "Open a tileset image first, then open the automapper.";
+const MERGE_HEADING: &str = "Merge automapper";
 const MERGE_WARNING: &str = "Tile numbers are taken over as they are.";
 const MERGE_CONFIRM: &str = "Merge anyway";
 const MERGE_CANCELLED: &str = "Merge cancelled";
-const LOAD_HEADING: &str = "Load blueprint";
+const LOAD_HEADING: &str = "Open automapper";
 const LOAD_WARNING: &str = "Tile numbers are taken over as they are.";
-const LOAD_CONFIRM: &str = "Load anyway";
-const LOAD_CANCELLED: &str = "Load cancelled";
+const LOAD_CONFIRM: &str = "Open anyway";
+const LOAD_CANCELLED: &str = "Open cancelled";
+const SAVE_QUEUED: &str = "Saving as soon as the current compile is done.";
+const COMPILING: &str = "Compiling with rpp…";
+const PLACEMENT_HINT: &str = " Help shows where DDNet looks for it.";
 const BLUEPRINT_CANCEL: &str = "Cancel";
 const UNDONE: &str = "Undone";
 const REDONE: &str = "Redone";
@@ -177,8 +180,8 @@ enum View {
 }
 
 enum CompileTarget {
-    Rules,
-    Bundle(PendingBundle),
+    Rules(Option<String>),
+    Save(PendingSave),
     Preview(u8),
 }
 
@@ -186,6 +189,23 @@ enum CompileTarget {
 struct SaveTag {
     snapshot: Option<RuleSets>,
     not_opened: Option<String>,
+    automapper: bool,
+}
+
+struct PendingSave {
+    stem: String,
+    blueprint: String,
+    tag: SaveTag,
+}
+
+struct QueuedSave {
+    source: String,
+    pending: PendingSave,
+}
+
+struct SaveFailure {
+    pending: PendingSave,
+    error: String,
 }
 
 enum BlueprintDecision {
@@ -246,13 +266,6 @@ enum Workspace {
     Ready(LoadedTileset),
 }
 
-struct PendingBundle {
-    image_stem: String,
-    source: String,
-    blueprint: String,
-    rule_sets: RuleSets,
-}
-
 struct LoadedTileset {
     tileset: Tileset,
     texture: TextureHandle,
@@ -272,6 +285,8 @@ pub struct AutomapperApp {
     saver: FileSaver<SaveTag>,
     compiler: RulesCompiler,
     compile_target: Option<CompileTarget>,
+    queued_save: Option<QueuedSave>,
+    save_failure: Option<SaveFailure>,
     status: StatusLine,
     view: View,
     view_before_picking: Option<View>,
@@ -292,6 +307,7 @@ pub struct AutomapperApp {
     hovered_tile: Option<usize>,
     export_open: bool,
     export_selection: Vec<bool>,
+    embed_blueprint: bool,
     help_open: bool,
 }
 
@@ -311,6 +327,8 @@ impl Default for AutomapperApp {
             saver: FileSaver::new(),
             compiler: RulesCompiler::new(),
             compile_target: None,
+            queued_save: None,
+            save_failure: None,
             status: StatusLine::default(),
             view: View::Tileset,
             view_before_picking: None,
@@ -331,6 +349,7 @@ impl Default for AutomapperApp {
             hovered_tile: None,
             export_open: false,
             export_selection: Vec::new(),
+            embed_blueprint: true,
             help_open: false,
         }
     }
@@ -369,6 +388,7 @@ impl eframe::App for AutomapperApp {
         self.show_side_panel(ui);
         self.show_view(ui, &ctx, displayed_view);
         self.show_export(&ctx);
+        self.show_save_failure(&ctx);
         if self.help_open && help::show_until_closed(&ctx) {
             self.help_open = false;
         }
@@ -474,7 +494,7 @@ impl AutomapperApp {
 
     fn receive_files(&mut self, ctx: &Context) {
         let mut dropped = ctx.input(|input| input.raw.dropped_files.clone());
-        dropped.sort_by_key(|file| BLUEPRINT.matches(&file.path().to_string_lossy()));
+        dropped.sort_by_key(|file| AUTOMAPPER.matches(&file.path().to_string_lossy()));
         self.picker.read_dropped(ctx, dropped);
 
         while let Some(result) = self.picker.poll() {
@@ -493,9 +513,12 @@ impl AutomapperApp {
     }
 
     fn load_file(&mut self, ctx: &Context, picked: PickedFile) {
-        let replaces = TILESET_IMAGE.matches(&picked.name) || BLUEPRINT.matches(&picked.name);
+        let replaces = TILESET_IMAGE.matches(&picked.name) || AUTOMAPPER.matches(&picked.name);
         if !replaces || !(self.is_dirty() || self.pending_discard.is_some()) {
             return self.open_file(ctx, picked);
+        }
+        if self.save_failure.is_some() {
+            return self.status.warning(ctx, CLOSE_PENDING);
         }
 
         match &mut self.pending_discard {
@@ -510,12 +533,15 @@ impl AutomapperApp {
         if TILESET_IMAGE.matches(&picked.name) {
             return self.load_tileset(ctx, picked);
         }
-        if BLUEPRINT.matches(&picked.name) {
+        if AUTOMAPPER.matches(&picked.name) {
             return self.load_blueprint(ctx, picked);
         }
         self.status.warning(
             ctx,
-            format!("{} is neither a tileset image nor a blueprint", picked.name),
+            format!(
+                "{} is neither a tileset image nor an automapper",
+                picked.name
+            ),
         );
     }
 
@@ -533,7 +559,11 @@ impl AutomapperApp {
             Err(warning) => return self.status.warning(ctx, warning),
         };
 
-        let parsed = match blueprint::parse(text) {
+        let parsed = match RULES.matches(&picked.name) {
+            true => blueprint::parse_embedded(text),
+            false => blueprint::parse(text),
+        };
+        let parsed = match parsed {
             Ok(parsed) => parsed,
             Err(error) => {
                 self.status
@@ -604,6 +634,7 @@ impl AutomapperApp {
         if close_requested && self.is_dirty() && !self.allow_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             match self.pending_discard {
+                _ if self.save_failure.is_some() => self.status.warning(ctx, OPEN_PENDING),
                 Some(Replacement::Files(_)) => self.status.warning(ctx, OPEN_PENDING),
                 _ => self.pending_discard = Some(Replacement::Close),
             }
@@ -623,9 +654,9 @@ impl AutomapperApp {
         match (decision, self.pending_discard.take()) {
             (DiscardDecision::Save, Some(Replacement::Files(files))) => {
                 let names: Vec<&str> = files.iter().map(|picked| picked.name.as_str()).collect();
-                self.save_blueprint(ctx, Some(names.join(", ")));
+                self.save_automapper(ctx, Some(names.join(", ")));
             }
-            (DiscardDecision::Save, _) => self.save_blueprint(ctx, None),
+            (DiscardDecision::Save, _) => self.save_automapper(ctx, None),
             (DiscardDecision::Discard, Some(Replacement::Files(files))) => {
                 for picked in files {
                     self.open_file(ctx, picked);
@@ -734,22 +765,92 @@ impl AutomapperApp {
         }
     }
 
-    fn save_blueprint(&mut self, ctx: &Context, not_opened: Option<String>) {
+    fn save_automapper(&mut self, ctx: &Context, not_opened: Option<String>) {
         let Workspace::Ready(loaded) = &self.workspace else {
             return;
         };
 
-        let stem = &loaded.tileset.stem;
-        let tag = SaveTag {
-            snapshot: Some(self.rule_sets.clone()),
-            not_opened,
+        let stem = loaded.tileset.stem.clone();
+        let blueprint = match blueprint::to_json(&self.rule_sets, &stem) {
+            Ok(blueprint) => blueprint,
+            Err(error) => return self.status.warning(ctx, error.to_string()),
         };
-        match blueprint::to_json(&self.rule_sets, stem) {
-            Ok(text) => self
-                .saver
-                .save_text(BLUEPRINT, &format!("{stem}.json"), text, tag),
-            Err(error) => self.status.warning(ctx, error.to_string()),
+        let pending = PendingSave {
+            stem: stem.clone(),
+            blueprint,
+            tag: SaveTag {
+                snapshot: Some(self.rule_sets.clone()),
+                not_opened,
+                automapper: true,
+            },
+        };
+
+        match r_source::render_rule_sets(self.rule_sets.sets(), &stem) {
+            Ok(source) => self.submit_save(ctx, QueuedSave { source, pending }),
+            Err(error) => {
+                self.save_failure = Some(SaveFailure {
+                    pending,
+                    error: error.to_string(),
+                });
+            }
         }
+    }
+
+    fn submit_save(&mut self, ctx: &Context, mut save: QueuedSave) {
+        if !self.compiler.is_running() {
+            return self.start_save(ctx, save);
+        }
+
+        let earlier = self
+            .queued_save
+            .take()
+            .and_then(|queued| queued.pending.tag.not_opened);
+        let not_opened: Vec<String> = [earlier, save.pending.tag.not_opened.take()]
+            .into_iter()
+            .flatten()
+            .collect();
+        save.pending.tag.not_opened = (!not_opened.is_empty()).then(|| not_opened.join(", "));
+        self.queued_save = Some(save);
+        self.status.info(ctx, SAVE_QUEUED);
+    }
+
+    fn start_save(&mut self, ctx: &Context, save: QueuedSave) {
+        let stem = save.pending.stem.clone();
+        self.start_compile(save.source, &stem, CompileTarget::Save(save.pending));
+        self.status.info(ctx, COMPILING);
+    }
+
+    fn show_save_failure(&mut self, ctx: &Context) {
+        let Some(failure) = &self.save_failure else {
+            return;
+        };
+        let Some(decision) = save_failure::show(ctx, &failure.error) else {
+            return;
+        };
+        let Some(failure) = self.save_failure.take() else {
+            return;
+        };
+
+        match (decision, failure.pending.tag.not_opened.as_ref()) {
+            (SaveFailureDecision::SaveBlueprint, _) => self.save_raw_blueprint(failure.pending),
+            (SaveFailureDecision::Close, Some(names)) => {
+                self.status.warning(ctx, format!("Didn't open {names}."))
+            }
+            (SaveFailureDecision::Close, None) => {}
+        }
+    }
+
+    fn save_raw_blueprint(&self, pending: PendingSave) {
+        let tag = SaveTag {
+            automapper: false,
+            ..pending.tag
+        };
+        self.saver.save_text(
+            BLUEPRINT,
+            &format!("{}.json", pending.stem),
+            pending.blueprint,
+            tag,
+        );
     }
 
     fn receive_saved_file(&mut self, ctx: &Context) {
@@ -762,11 +863,13 @@ impl AutomapperApp {
                 if let Some(snapshot) = tag.snapshot {
                     self.saved = snapshot;
                 }
-                match tag.not_opened {
-                    Some(names) => self
+                let hint = if tag.automapper { PLACEMENT_HINT } else { "" };
+                match (tag.not_opened, tag.automapper) {
+                    (Some(names), _) => self
                         .status
-                        .warning(ctx, format!("Saved {name}, but didn't open {names}.")),
-                    None => self.status.info(ctx, format!("Saved {name}")),
+                        .warning(ctx, format!("Saved {name}, but didn't open {names}.{hint}")),
+                    (None, true) => self.status.info(ctx, format!("Saved {name}.{hint}")),
+                    (None, false) => self.status.info(ctx, format!("Saved {name}")),
                 }
             }
             Err(error) => self.status.warning(ctx, error.to_string()),
@@ -788,22 +891,26 @@ impl AutomapperApp {
         }
     }
 
-    fn compile_rules(&mut self, ctx: &Context) {
+    fn export_blueprint(&mut self, ctx: &Context) {
         let Workspace::Ready(loaded) = &self.workspace else {
             return;
         };
 
-        let stem = loaded.tileset.stem.clone();
-        match render_selected_source(&self.rule_sets, &self.export_selection, &stem) {
-            Ok(source) => {
-                self.start_compile(source, &stem, CompileTarget::Rules);
-                self.status.info(ctx, "Compiling with rpp…");
+        let Some(selected) = self.rule_sets.selected_sets(&self.export_selection) else {
+            return;
+        };
+
+        let stem = &loaded.tileset.stem;
+        match blueprint::to_json(&selected, stem) {
+            Ok(text) => {
+                self.saver
+                    .save_text(BLUEPRINT, &format!("{stem}.json"), text, SaveTag::default())
             }
             Err(error) => self.status.warning(ctx, error.to_string()),
         }
     }
 
-    fn compile_bundle(&mut self, ctx: &Context) {
+    fn compile_rules(&mut self, ctx: &Context) {
         let Workspace::Ready(loaded) = &self.workspace else {
             return;
         };
@@ -811,27 +918,23 @@ impl AutomapperApp {
         let stem = loaded.tileset.stem.clone();
         let source = match render_selected_source(&self.rule_sets, &self.export_selection, &stem) {
             Ok(source) => source,
-            Err(error) => {
-                self.status.warning(ctx, error.to_string());
-                return;
-            }
+            Err(error) => return self.status.warning(ctx, error.to_string()),
         };
-        let blueprint = match blueprint::to_json(&self.rule_sets, &stem) {
-            Ok(blueprint) => blueprint,
-            Err(error) => {
-                self.status.warning(ctx, error.to_string());
-                return;
-            }
+        let embedded = match self.embedded_blueprint(&stem) {
+            Ok(embedded) => embedded,
+            Err(error) => return self.status.warning(ctx, error.to_string()),
         };
 
-        let pending = PendingBundle {
-            image_stem: stem.clone(),
-            source: source.clone(),
-            blueprint,
-            rule_sets: self.rule_sets.clone(),
-        };
-        self.start_compile(source, &stem, CompileTarget::Bundle(pending));
-        self.status.info(ctx, "Compiling with rpp…");
+        self.start_compile(source, &stem, CompileTarget::Rules(embedded));
+        self.status.info(ctx, COMPILING);
+    }
+
+    fn embedded_blueprint(&self, stem: &str) -> Result<Option<String>, BlueprintError> {
+        self.embed_blueprint
+            .then(|| self.rule_sets.selected_sets(&self.export_selection))
+            .flatten()
+            .map(|selected| blueprint::to_json(&selected, stem))
+            .transpose()
     }
 
     fn start_compile(&mut self, source: String, stem: &str, target: CompileTarget) {
@@ -860,37 +963,28 @@ impl AutomapperApp {
             (CompileTarget::Preview(_), Err(error)) => {
                 self.preview = PreviewResult::Failed(error.to_string());
             }
-            (CompileTarget::Rules, Ok(Compiled { file_name, rules })) => {
+            (CompileTarget::Rules(embedded), Ok(Compiled { file_name, rules })) => {
+                let rules = with_blueprint(rules, embedded.as_deref());
                 self.saver
                     .save_text(RULES, &file_name, rules, SaveTag::default());
             }
-            (CompileTarget::Bundle(pending), Ok(Compiled { rules, .. })) => {
-                self.save_bundle(ctx, pending, &rules);
+            (CompileTarget::Save(pending), Ok(Compiled { file_name, rules })) => {
+                let rules = blueprint::embed(&rules, &pending.blueprint);
+                self.saver.save_text(RULES, &file_name, rules, pending.tag);
             }
-            (CompileTarget::Rules | CompileTarget::Bundle(_), Err(error)) => {
+            (CompileTarget::Save(pending), Err(error)) => {
+                self.save_failure = Some(SaveFailure {
+                    pending,
+                    error: error.to_string(),
+                });
+            }
+            (CompileTarget::Rules(_), Err(error)) => {
                 self.status.warning(ctx, error.to_string());
             }
         }
-    }
 
-    fn save_bundle(&mut self, ctx: &Context, pending: PendingBundle, rules: &str) {
-        let bundle = Bundle {
-            image_stem: &pending.image_stem,
-            rules,
-            source: &pending.source,
-            blueprint: &pending.blueprint,
-        };
-
-        match bundle::archive(&bundle) {
-            Ok(archive) => {
-                let name = bundle::file_name(&pending.image_stem);
-                let tag = SaveTag {
-                    snapshot: Some(pending.rule_sets),
-                    ..SaveTag::default()
-                };
-                self.saver.save_bytes(BUNDLE, &name, archive, tag);
-            }
-            Err(error) => self.status.warning(ctx, error.to_string()),
+        if let Some(save) = self.queued_save.take() {
+            self.start_save(ctx, save);
         }
     }
 
@@ -937,8 +1031,8 @@ impl AutomapperApp {
         if pressed(ctx, &open_image_shortcut()) {
             self.picker.open(TILESET_IMAGE);
         }
-        if pressed(ctx, &save_blueprint_shortcut()) {
-            self.save_blueprint(ctx, None);
+        if !has_modal(ctx) && pressed(ctx, &save_automapper_shortcut()) {
+            self.save_automapper(ctx, None);
         }
         if pressed(ctx, &export_shortcut())
             && matches!(self.workspace, Workspace::Ready(_))
@@ -1199,15 +1293,15 @@ impl AutomapperApp {
             return;
         }
 
-        let Workspace::Ready(loaded) = &self.workspace else {
+        if !matches!(self.workspace, Workspace::Ready(_)) {
             return;
-        };
+        }
         self.export_selection.resize(self.rule_sets.len(), true);
         let mut export = ExportContext {
             rule_sets: &self.rule_sets,
             selection: &mut self.export_selection,
-            image_stem: &loaded.tileset.stem,
             compiling: self.compiler.is_running(),
+            embed_blueprint: &mut self.embed_blueprint,
         };
         let Some(request) = export::show(ctx, &mut export) else {
             return;
@@ -1217,7 +1311,7 @@ impl AutomapperApp {
         match request {
             ExportRequest::Rules => self.compile_rules(ctx),
             ExportRequest::Source => self.export_source(ctx),
-            ExportRequest::Bundle => self.compile_bundle(ctx),
+            ExportRequest::Blueprint => self.export_blueprint(ctx),
             ExportRequest::Close => {}
         }
     }
@@ -1696,7 +1790,7 @@ pub(super) fn open_image_shortcut() -> egui::KeyboardShortcut {
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O)
 }
 
-pub(super) fn save_blueprint_shortcut() -> egui::KeyboardShortcut {
+pub(super) fn save_automapper_shortcut() -> egui::KeyboardShortcut {
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S)
 }
 
@@ -1756,6 +1850,13 @@ fn drop_target(ui: &Ui, row: &egui::Response, index: usize) -> Option<usize> {
     ui.painter().hline(row.rect.x_range(), edge, stroke);
 
     Some(index + usize::from(!above))
+}
+
+fn with_blueprint(rules: String, blueprint_json: Option<&str>) -> String {
+    match blueprint_json {
+        Some(json) => blueprint::embed(&rules, json),
+        None => rules,
+    }
 }
 
 fn render_selected_source(

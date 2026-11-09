@@ -21,6 +21,11 @@ const ROTATE_LETTER: char = 'R';
 /// Wide enough to keep one rule on one line; the default 120 breaks them up.
 const MAX_LINE: u32 = 150;
 
+const BEGIN_MARKER: &str = "# ddnet-automap-creator blueprint begin";
+const END_MARKER: &str = "# ddnet-automap-creator blueprint end";
+const COMMENT_PREFIX: &str = "# ";
+const BARE_COMMENT: &str = "#";
+
 #[derive(Debug, Error)]
 pub enum BlueprintError {
     #[error("not a readable blueprint: {0}")]
@@ -64,6 +69,12 @@ pub enum BlueprintError {
 
     #[error("blueprint holds no rule sets")]
     NoRuleSets,
+
+    #[error("the file has no embedded blueprint")]
+    NoEmbedded,
+
+    #[error("the embedded blueprint is incomplete")]
+    IncompleteEmbedded,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -167,6 +178,45 @@ pub fn to_json(rule_sets: &RuleSets, image: &str) -> Result<String, BlueprintErr
 
 pub fn parse(text: &str) -> Result<Loaded, BlueprintError> {
     build(read(text)?)
+}
+
+pub fn embed(rules: &str, blueprint_json: &str) -> String {
+    let commented: String = blueprint_json
+        .lines()
+        .map(|line| format!("{COMMENT_PREFIX}{line}\n"))
+        .collect();
+
+    format!(
+        "{}\n{BEGIN_MARKER}\n{commented}{END_MARKER}\n",
+        rules.trim_end()
+    )
+}
+
+pub fn parse_embedded(rules: &str) -> Result<Loaded, BlueprintError> {
+    let lines: Vec<&str> = rules.lines().map(str::trim_end).collect();
+    let begin = lines
+        .iter()
+        .position(|line| *line == BEGIN_MARKER)
+        .ok_or(BlueprintError::NoEmbedded)?;
+    let body = &lines[begin + 1..];
+    let end = body
+        .iter()
+        .position(|line| *line == END_MARKER)
+        .ok_or(BlueprintError::IncompleteEmbedded)?;
+
+    parse(&uncommented(&body[..end]))
+}
+
+fn uncommented(lines: &[&str]) -> String {
+    lines
+        .iter()
+        .map(|line| {
+            line.strip_prefix(COMMENT_PREFIX)
+                .or_else(|| line.strip_prefix(BARE_COMMENT))
+                .unwrap_or(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn read(text: &str) -> Result<Blueprint, BlueprintError> {

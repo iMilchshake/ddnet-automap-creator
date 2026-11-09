@@ -137,6 +137,42 @@ fn only_sets_sharing_a_name_are_reported_as_shared() {
 }
 
 #[test]
+fn selecting_every_set_keeps_everything_and_the_active_set() {
+    let sets = named_sets(&["grass", "rock", "sand"], 1);
+
+    let subset = sets.selected_sets(&[true, true, true]).unwrap();
+
+    assert_eq!(subset, sets);
+}
+
+#[test]
+fn a_selected_active_set_stays_active_in_the_subset() {
+    let sets = named_sets(&["grass", "rock", "sand"], 2);
+
+    let subset = sets.selected_sets(&[false, true, true]).unwrap();
+
+    assert_eq!(names(&subset), ["rock", "sand"]);
+    assert_eq!(subset.active_index(), 1);
+}
+
+#[test]
+fn an_unselected_active_set_makes_the_first_selected_one_active() {
+    let sets = named_sets(&["grass", "rock", "sand"], 0);
+
+    let subset = sets.selected_sets(&[false, true, true]).unwrap();
+
+    assert_eq!(names(&subset), ["rock", "sand"]);
+    assert_eq!(subset.active_index(), 0);
+}
+
+#[test]
+fn selecting_no_set_gives_nothing() {
+    let sets = named_sets(&["grass", "rock"], 0);
+
+    assert_eq!(sets.selected_sets(&[false, false]), None);
+}
+
+#[test]
 fn merging_appends_in_order_and_keeps_the_active_selection() {
     let mut sets = named_sets(&["grass", "rock"], 1);
 

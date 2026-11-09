@@ -1,4 +1,5 @@
 mod app;
+mod code_frame;
 mod discard;
 mod export;
 mod grid;
@@ -12,6 +13,7 @@ mod neighbor_paint;
 pub mod overview;
 mod picking;
 mod preview;
+mod save_failure;
 mod status;
 mod tile_panel;
 mod tile_state;

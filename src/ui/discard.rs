@@ -4,7 +4,7 @@ use crate::ui::modal_header::{self, ModalHeader, TitleAlign, Tone};
 use crate::ui::modal_section::{self, paragraph_gap};
 
 const DISCARD_HEADING: &str = "You have unsaved changes";
-const SAVE_FIRST: &str = "Save blueprint";
+const SAVE_FIRST: &str = "Save";
 const QUIT: &str = "Quit";
 const DISCARD: &str = "Discard";
 const DISCARD_WIDTH: f32 = 320.0;
