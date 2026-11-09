@@ -173,30 +173,30 @@ fn selecting_no_set_gives_nothing() {
 }
 
 #[test]
-fn merging_appends_in_order_and_keeps_the_active_selection() {
+fn appending_adds_in_order_and_keeps_the_active_selection() {
     let mut sets = named_sets(&["grass", "rock"], 1);
 
-    let merged = sets.merge(named_sets(&["sand", "snow"], 0));
+    let appended = sets.append(named_sets(&["sand", "snow"], 0));
 
-    assert_eq!(merged, 2);
+    assert_eq!(appended, 2);
     assert_eq!(names(&sets), ["grass", "rock", "sand", "snow"]);
     assert_eq!(sets.active_index(), 1);
 }
 
 #[test]
-fn merging_a_colliding_name_appends_the_smallest_free_number() {
+fn appending_a_colliding_name_adds_the_smallest_free_number() {
     let mut sets = named_sets(&["grass"], 0);
 
-    sets.merge(named_sets(&["grass", "grass"], 0));
+    sets.append(named_sets(&["grass", "grass"], 0));
 
     assert_eq!(names(&sets), ["grass", "grass2", "grass3"]);
 }
 
 #[test]
-fn merging_skips_numbered_names_that_already_exist() {
+fn appending_skips_numbered_names_that_already_exist() {
     let mut sets = named_sets(&["grass", "grass2"], 0);
 
-    sets.merge(named_sets(&["grass"], 0));
+    sets.append(named_sets(&["grass"], 0));
 
     assert_eq!(names(&sets), ["grass", "grass2", "grass3"]);
 }

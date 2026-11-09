@@ -26,6 +26,7 @@ const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 
 const ADD_ICON: &str = "+";
 const DUPLICATE_ICON: &str = "🗐";
+const APPEND_ICON: &str = "📥";
 const REMOVE_ICON: &str = "🗑";
 const DRAW_ICON: &str = "✏";
 const MENU_ICON: &str = "☰";

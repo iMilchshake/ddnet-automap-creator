@@ -19,7 +19,6 @@ const FILE_MENU: &str = "File";
 const OPEN_IMAGE_LABEL: &str = "Open image…";
 const OPEN_AUTOMAPPER_LABEL: &str = "Open automapper…";
 const SAVE_AUTOMAPPER_LABEL: &str = "Save automapper…";
-const MERGE_AUTOMAPPER_LABEL: &str = "Merge automapper…";
 const EXPORT_LABEL: &str = "Export…";
 const EDIT_MENU: &str = "Edit";
 const OPTIONS_MENU: &str = "Options";
@@ -114,14 +113,6 @@ impl AutomapperApp {
                     }
 
                     ui.separator();
-
-                    if ui
-                        .add_enabled(has_image, egui::Button::new(MERGE_AUTOMAPPER_LABEL))
-                        .clicked()
-                    {
-                        self.merge_picker.open(AUTOMAPPER);
-                        ui.close();
-                    }
 
                     let export = egui::Button::new(EXPORT_LABEL)
                         .shortcut_text(ui.ctx().format_shortcut(&export_shortcut()));

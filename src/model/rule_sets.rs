@@ -121,13 +121,13 @@ impl RuleSets {
         Some(insert_at)
     }
 
-    pub fn merge(&mut self, incoming: RuleSets) -> usize {
-        let merged = incoming.sets.len();
+    pub fn append(&mut self, incoming: RuleSets) -> usize {
+        let appended = incoming.sets.len();
         for (name, project) in incoming.sets {
             let name = self.distinct_name(name);
             self.sets.push((name, project));
         }
-        merged
+        appended
     }
 
     fn has_name(&self, name: &str) -> bool {

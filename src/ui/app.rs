@@ -2,8 +2,8 @@ use std::mem;
 
 use egui::containers::panel::PanelState;
 use egui::{
-    Align2, Color32, Context, FontId, Id, LayerId, Order, Rect, TextureHandle, TextureOptions, Ui,
-    Vec2,
+    Align2, Button, Color32, Context, FontId, Id, LayerId, Order, Rect, TextureHandle,
+    TextureOptions, Ui, Vec2,
 };
 
 use crate::blueprint::{self, BlueprintError};
@@ -18,12 +18,15 @@ use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{AIR_TILE, Chance, TILESET_SIDE, TileRule};
 use crate::preview::{CustomShape, Sample, placing_rule};
 use crate::tileset::{self, Tileset};
+use crate::ui::code_frame::code_chip;
 use crate::ui::discard::{self, DiscardDecision, Leaving};
 use crate::ui::export::{self, ExportContext, ExportRequest};
 use crate::ui::grid::{self, GridResponse, GridView};
 use crate::ui::group_panel::GroupPanel;
 use crate::ui::help;
 use crate::ui::history::History;
+use crate::ui::modal_header::{self, ModalHeader, TitleAlign, Tone};
+use crate::ui::modal_section::{self, paragraph_gap};
 use crate::ui::overview::{self, Overview};
 use crate::ui::picking;
 use crate::ui::preview::ClickedTile;
@@ -33,8 +36,8 @@ use crate::ui::tile_panel::{CopiedRule, FlashKind, GridFlash, TileContext, TileE
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 use crate::ui::welcome::{self, WelcomeAction};
 use crate::ui::{
-    ADD_ICON, APP_NAME, BUTTON_GAP, DUPLICATE_ICON, REMOVE_ICON, SWITCH_ICON, compact_button,
-    icon_button_size, section_header, section_header_with,
+    ADD_ICON, APP_NAME, APPEND_ICON, BUTTON_GAP, DUPLICATE_ICON, REMOVE_ICON, SWITCH_ICON,
+    compact_button, icon_button_size, section_header, section_header_with,
 };
 
 mod menu_bar;
@@ -49,7 +52,7 @@ const MAX_SIDE_PANEL_WIDTH: f32 = 360.0;
 const MIN_SPLIT_PANEL_WIDTH: f32 = 200.0;
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
 const SPLIT_PANEL_ID: &str = "tileset";
-const MERGE_WIDTH: f32 = 360.0;
+const BLUEPRINT_MODAL_WIDTH: f32 = 360.0;
 const GROUP_SWATCH: Vec2 = Vec2::new(12.0, 18.0);
 const GROUP_SWATCH_CORNER_RADIUS: f32 = 2.0;
 const GROUP_ROW_SPACING: f32 = 2.0;
@@ -71,18 +74,21 @@ const GROUPS_SECTION: &str = "Groups";
 const GROUP_ORDER_NOTE: &str = "top one is applied first";
 const DROP_HINT: &str = "Drop a tileset image or an automapper";
 const NO_IMAGE_FOR_BLUEPRINT: &str = "Open a tileset image first, then open the automapper.";
-const MERGE_HEADING: &str = "Merge automapper";
-const MERGE_WARNING: &str = "Tile numbers are taken over as they are.";
-const MERGE_CONFIRM: &str = "Merge anyway";
-const MERGE_CANCELLED: &str = "Merge cancelled";
+const APPEND_HOVER: &str = "Append rule sets from an automapper file";
+const APPEND_HEADING: &str = "Append automapper";
+const APPEND_CONFIRM: &str = "Append anyway";
+const APPEND_CANCELLED: &str = "Append cancelled";
 const LOAD_HEADING: &str = "Open automapper";
-const LOAD_WARNING: &str = "Tile numbers are taken over as they are.";
 const LOAD_CONFIRM: &str = "Open anyway";
 const LOAD_CANCELLED: &str = "Open cancelled";
 const SAVE_QUEUED: &str = "Saving as soon as the current compile is done.";
 const COMPILING: &str = "Compiling with rpp…";
 const PLACEMENT_HINT: &str = " Help shows where DDNet looks for it.";
-const BLUEPRINT_CANCEL: &str = "Cancel";
+const MISMATCH_MADE_FOR: &str = " was made for the tileset ";
+const MISMATCH_BUT_CURRENT: &str = ", but your current tileset is ";
+const MISMATCH_END: &str = ".";
+const MISMATCH_REASON: &str = "Rules are tied to explicit tile positions, so they only work if both tilesets have the same layout.";
+const BLUEPRINT_BUTTON_SIZE: Vec2 = Vec2::new(120.0, 28.0);
 const UNDONE: &str = "Undone";
 const REDONE: &str = "Redone";
 const NOTHING_TO_UNDO: &str = "Nothing to undo";
@@ -105,6 +111,7 @@ enum GroupCommand {
 enum RuleSetCommand {
     Select(usize),
     Add,
+    Append,
     Duplicate,
     Remove,
 }
@@ -216,35 +223,28 @@ enum BlueprintDecision {
 #[derive(Clone, Copy)]
 enum BlueprintAction {
     Load,
-    Merge,
+    Append,
 }
 
 impl BlueprintAction {
     fn heading(self) -> &'static str {
         match self {
             Self::Load => LOAD_HEADING,
-            Self::Merge => MERGE_HEADING,
-        }
-    }
-
-    fn warning(self) -> &'static str {
-        match self {
-            Self::Load => LOAD_WARNING,
-            Self::Merge => MERGE_WARNING,
+            Self::Append => APPEND_HEADING,
         }
     }
 
     fn confirm(self) -> &'static str {
         match self {
             Self::Load => LOAD_CONFIRM,
-            Self::Merge => MERGE_CONFIRM,
+            Self::Append => APPEND_CONFIRM,
         }
     }
 
     fn cancelled(self) -> &'static str {
         match self {
             Self::Load => LOAD_CANCELLED,
-            Self::Merge => MERGE_CANCELLED,
+            Self::Append => APPEND_CANCELLED,
         }
     }
 }
@@ -278,7 +278,7 @@ pub struct AutomapperApp {
     saved: RuleSets,
     title: String,
     picker: FilePicker,
-    merge_picker: FilePicker,
+    append_picker: FilePicker,
     pending_blueprint: Option<PendingBlueprint>,
     pending_discard: Option<Replacement>,
     allow_close: bool,
@@ -320,7 +320,7 @@ impl Default for AutomapperApp {
             saved: RuleSets::default(),
             title: String::new(),
             picker: FilePicker::new(),
-            merge_picker: FilePicker::new(),
+            append_picker: FilePicker::new(),
             pending_blueprint: None,
             pending_discard: None,
             allow_close: false,
@@ -504,9 +504,9 @@ impl AutomapperApp {
             }
         }
 
-        while let Some(result) = self.merge_picker.poll() {
+        while let Some(result) = self.append_picker.poll() {
             match result {
-                Ok(picked) => self.merge_blueprint(ctx, picked),
+                Ok(picked) => self.append_blueprint(ctx, picked),
                 Err(error) => self.status.warning(ctx, error.to_string()),
             }
         }
@@ -549,8 +549,8 @@ impl AutomapperApp {
         self.submit_blueprint(ctx, picked, BlueprintAction::Load);
     }
 
-    fn merge_blueprint(&mut self, ctx: &Context, picked: PickedFile) {
-        self.submit_blueprint(ctx, picked, BlueprintAction::Merge);
+    fn append_blueprint(&mut self, ctx: &Context, picked: PickedFile) {
+        self.submit_blueprint(ctx, picked, BlueprintAction::Append);
     }
 
     fn submit_blueprint(&mut self, ctx: &Context, picked: PickedFile, action: BlueprintAction) {
@@ -594,7 +594,7 @@ impl AutomapperApp {
     ) {
         match action {
             BlueprintAction::Load => self.apply_load(ctx, file_name, rule_sets),
-            BlueprintAction::Merge => self.apply_merge(ctx, file_name, rule_sets),
+            BlueprintAction::Append => self.apply_append(ctx, file_name, rule_sets),
         }
     }
 
@@ -709,10 +709,12 @@ impl AutomapperApp {
         }
     }
 
-    fn apply_merge(&mut self, ctx: &Context, file_name: &str, rule_sets: RuleSets) {
-        let merged = self.rule_sets.merge(rule_sets);
-        self.status
-            .info(ctx, format!("Merged {merged} rule sets from {file_name}"));
+    fn apply_append(&mut self, ctx: &Context, file_name: &str, rule_sets: RuleSets) {
+        let appended = self.rule_sets.append(rule_sets);
+        self.status.info(
+            ctx,
+            format!("Appended {appended} rule sets from {file_name}"),
+        );
     }
 
     fn show_blueprint_confirmation(&mut self, ctx: &Context) {
@@ -721,37 +723,15 @@ impl AutomapperApp {
             return;
         };
 
-        let mut decision = None;
-        let modal = egui::Modal::new(egui::Id::new("blueprint")).show(ctx, |ui| {
-            ui.set_max_width(MERGE_WIDTH);
-            ui.heading(pending.action.heading());
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                format!(
-                    "{} was made for {}, but {} is open. {}",
-                    pending.file_name,
-                    pending.wanted_image,
-                    loaded.tileset.stem,
-                    pending.action.warning()
-                ),
-            );
-
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui.button(pending.action.confirm()).clicked() {
-                    decision = Some(BlueprintDecision::Confirm);
-                }
-                if ui.button(BLUEPRINT_CANCEL).clicked() {
-                    decision = Some(BlueprintDecision::Cancel);
-                }
+        let modal = egui::Modal::new(egui::Id::new("blueprint"))
+            .frame(modal_section::modal_frame(ctx))
+            .show(ctx, |ui| {
+                ui.set_width(BLUEPRINT_MODAL_WIDTH);
+                show_blueprint_mismatch(ui, pending, &loaded.tileset.stem)
             });
-        });
 
-        if modal.should_close() {
-            decision = decision.or(Some(BlueprintDecision::Cancel));
-        }
-
-        let Some(decision) = decision else {
+        let dismissed = modal.should_close().then_some(BlueprintDecision::Cancel);
+        let Some(decision) = modal.inner.or(dismissed) else {
             return;
         };
         let Some(pending) = self.pending_blueprint.take() else {
@@ -1158,6 +1138,7 @@ impl AutomapperApp {
                 let index = self.rule_sets.add();
                 self.select_rule_set(index);
             }
+            Some(RuleSetCommand::Append) => self.append_picker.open(AUTOMAPPER),
             Some(RuleSetCommand::Duplicate) => {
                 let index = self.rule_sets.active_index();
                 if let Some(index) = self.rule_sets.duplicate(index) {
@@ -1630,12 +1611,54 @@ fn has_modal(ctx: &Context) -> bool {
     ctx.memory(|memory| memory.top_modal_layer().is_some())
 }
 
+fn show_blueprint_mismatch(
+    ui: &mut Ui,
+    pending: &PendingBlueprint,
+    current_stem: &str,
+) -> Option<BlueprintDecision> {
+    let header = ModalHeader {
+        title: pending.action.heading(),
+        align: TitleAlign::Center,
+        tone: Tone::Warning,
+    };
+    if modal_header::show(ui, &header) {
+        return Some(BlueprintDecision::Cancel);
+    }
+
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        code_chip(ui, &pending.file_name);
+        ui.label(MISMATCH_MADE_FOR);
+        code_chip(ui, &pending.wanted_image);
+        ui.label(MISMATCH_BUT_CURRENT);
+        code_chip(ui, current_stem);
+        ui.label(MISMATCH_END);
+    });
+    paragraph_gap(ui);
+    ui.label(MISMATCH_REASON);
+    paragraph_gap(ui);
+
+    ui.vertical_centered(|ui| {
+        ui.add_sized(BLUEPRINT_BUTTON_SIZE, Button::new(pending.action.confirm()))
+            .clicked()
+            .then_some(BlueprintDecision::Confirm)
+    })
+    .inner
+}
+
 fn show_rule_set_row(ui: &mut Ui, rule_sets: &mut RuleSets, command: &mut Option<RuleSetCommand>) {
     let size = icon_button_size(ui);
     let can_remove = rule_sets.len() > 1;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BUTTON_GAP;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add(compact_button(APPEND_ICON, size))
+                .on_hover_text(APPEND_HOVER)
+                .clicked()
+            {
+                *command = Some(RuleSetCommand::Append);
+            }
             if ui
                 .add_enabled(can_remove, compact_button(REMOVE_ICON, size))
                 .on_hover_text("Remove this rule set")
@@ -1652,7 +1675,7 @@ fn show_rule_set_row(ui: &mut Ui, rule_sets: &mut RuleSets, command: &mut Option
             }
             if ui
                 .add(compact_button(ADD_ICON, size))
-                .on_hover_text("Add rule set")
+                .on_hover_text("Add new empty rule set")
                 .clicked()
             {
                 *command = Some(RuleSetCommand::Add);
@@ -1662,7 +1685,6 @@ fn show_rule_set_row(ui: &mut Ui, rule_sets: &mut RuleSets, command: &mut Option
             let switch = ui
                 .add(compact_button(SWITCH_ICON, size))
                 .on_hover_text("Switch rule set");
-            egui::Popup::menu(&switch).show(|ui| show_rule_set_menu(ui, rule_sets, command));
 
             let shared = rule_sets.is_name_shared(rule_sets.active_index());
             let mut field = egui::TextEdit::singleline(rule_sets.active_name_mut());
@@ -1670,9 +1692,20 @@ fn show_rule_set_row(ui: &mut Ui, rule_sets: &mut RuleSets, command: &mut Option
                 field = field.text_color(ui.visuals().error_fg_color);
             }
             let response = ui.add_sized(ui.available_size(), field);
+            let anchor = response.rect.union(switch.rect);
             if shared {
                 response.on_hover_text(SHARED_NAME_HINT);
             }
+
+            egui::Popup::menu(&switch)
+                .anchor(anchor)
+                .align(egui::RectAlign::BOTTOM_START)
+                .show(|ui| {
+                    ui.set_min_width(anchor.width() - ui.spacing().menu_margin.sum().x);
+                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                        show_rule_set_menu(ui, rule_sets, command);
+                    });
+                });
         });
     });
 }
