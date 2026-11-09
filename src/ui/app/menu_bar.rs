@@ -2,11 +2,13 @@ use egui::Ui;
 
 use super::{
     AutomapperApp, View, Workspace, export_shortcut, open_automapper_shortcut, open_image_shortcut,
-    redo_shortcut, save_automapper_shortcut, undo_shortcut,
+    redo_alt_shortcut, redo_shortcut, save_automapper_shortcut, undo_shortcut,
 };
 use crate::file_filter::{AUTOMAPPER, TILESET_IMAGE};
 use crate::model::pool::ChanceMode;
-use crate::ui::{APP_NAME, AUTHOR_CREDIT, GITHUB_ICON, REPOSITORY, external_link, text_width};
+use crate::ui::{
+    ALTERNATIVE_KEYS, APP_NAME, AUTHOR_CREDIT, GITHUB_ICON, REPOSITORY, external_link, text_width,
+};
 
 const SHORT_CREDIT: &str = "GitHub";
 
@@ -51,8 +53,12 @@ impl AutomapperApp {
             ui.close();
         }
 
-        let redo =
-            egui::Button::new(REDO_LABEL).shortcut_text(ctx.format_shortcut(&redo_shortcut()));
+        let redo_keys = format!(
+            "{}{ALTERNATIVE_KEYS}{}",
+            ctx.format_shortcut(&redo_shortcut()),
+            ctx.format_shortcut(&redo_alt_shortcut())
+        );
+        let redo = egui::Button::new(REDO_LABEL).shortcut_text(redo_keys);
         let can_redo = self.history.can_redo(&self.rule_sets);
         if ui.add_enabled(can_redo, redo).clicked() {
             self.redo(&ctx);

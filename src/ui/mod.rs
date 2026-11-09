@@ -25,6 +25,7 @@ pub use app::AutomapperApp;
 const APP_NAME: &str = env!("CARGO_PKG_NAME");
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const AUTHOR_CREDIT: &str = "by iMilchshake";
+const ALTERNATIVE_KEYS: &str = " / ";
 
 const ADD_ICON: &str = "+";
 const DUPLICATE_ICON: &str = "🗐";

@@ -8,7 +8,9 @@ use crate::ui::code_frame::{code_block, code_chip};
 use crate::ui::modal_header::{self, ModalHeader, TitleAlign, Tone};
 use crate::ui::modal_section::{self, paragraph_gap, show_section};
 use crate::ui::neighbor_paint::show_legend;
-use crate::ui::{AUTHOR_CREDIT, DDNET_AUTOMAP_PATHS, GITHUB_ICON, REPOSITORY, external_link};
+use crate::ui::{
+    ALTERNATIVE_KEYS, AUTHOR_CREDIT, DDNET_AUTOMAP_PATHS, GITHUB_ICON, REPOSITORY, external_link,
+};
 
 const HELP_WIDTH: f32 = 520.0;
 const PATHS_GRID_ID: &str = "automap_paths";
@@ -107,7 +109,6 @@ const OTHER_CONCEPTS: [(&str, &str); 8] = [
     ),
 ];
 
-const ALTERNATIVE_KEYS: &str = " / ";
 const OPEN_ACTION: &str = "Open image";
 const OPEN_AUTOMAPPER_ACTION: &str = "Open automapper";
 const SAVE_ACTION: &str = "Save automapper";
