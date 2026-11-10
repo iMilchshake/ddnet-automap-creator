@@ -13,9 +13,7 @@ const IMAGE: &str = "grass_main";
 fn group(name: &str, top_left: usize, mode: GroupMode, percent: f32) -> TileGroup {
     TileGroup {
         name: name.to_owned(),
-        top_left,
-        width: 2,
-        height: 2,
+        tiles: TileGroup::rect_tiles(top_left, top_left + 17),
         mode,
         chance: Chance::new(percent).unwrap(),
     }
@@ -326,6 +324,18 @@ fn group_priority_order_survives_a_round_trip() {
 }
 
 #[test]
+fn a_group_of_any_shape_survives_a_round_trip() {
+    let l_shape = TileGroup {
+        tiles: [65, 81, 82].into_iter().collect(),
+        ..group("bones", 64, GroupMode::Fill, 100.0)
+    };
+    let mut project = Project::default();
+    project.append_group(l_shape.clone());
+
+    assert_eq!(round_trip(&project).groups(), [l_shape]);
+}
+
+#[test]
 fn the_rule_set_name_is_carried_along() {
     let rule_sets = RuleSets::from_parts(vec![("Grass Main".to_owned(), furnished())], 0);
     let text = blueprint::to_json(&rule_sets, IMAGE).unwrap();
@@ -483,10 +493,25 @@ fn an_invalid_group_is_refused() {
     let json = document(
         "",
         "",
-        r#"{"name": "bones", "top_left": 64, "width": 1, "height": 1,
+        r#"{"name": "bones", "tiles": [64],
             "mode": "fill", "chance": 100.0}"#,
     );
     assert!(matches!(load(&json).unwrap_err(), BlueprintError::Group(_)));
+}
+
+#[test]
+fn group_tiles_must_ascend_without_repeats() {
+    for tiles in ["64, 64, 65", "65, 64"] {
+        let json = document(
+            "",
+            "",
+            &format!(r#"{{"name": "bones", "tiles": [{tiles}], "mode": "fill", "chance": 100.0}}"#),
+        );
+        assert!(matches!(
+            load(&json).unwrap_err(),
+            BlueprintError::GroupTiles(_)
+        ));
+    }
 }
 
 #[test]
@@ -494,9 +519,9 @@ fn two_groups_sharing_a_name_are_refused() {
     let json = document(
         "",
         "",
-        r#"{"name": "bones", "top_left": 64, "width": 2, "height": 2,
+        r#"{"name": "bones", "tiles": [64, 65, 80, 81],
             "mode": "fill", "chance": 100.0},
-           {"name": "bones", "top_left": 100, "width": 2, "height": 2,
+           {"name": "bones", "tiles": [100, 101, 116, 117],
             "mode": "fill", "chance": 100.0}"#,
     );
     assert!(matches!(load(&json).unwrap_err(), BlueprintError::Group(_)));
@@ -507,7 +532,7 @@ fn a_group_over_a_configured_tile_is_refused() {
     let json = document(
         &plain_tile(65),
         "",
-        r#"{"name": "bones", "top_left": 64, "width": 2, "height": 2,
+        r#"{"name": "bones", "tiles": [64, 65, 80, 81],
             "mode": "fill", "chance": 100.0}"#,
     );
     assert!(matches!(

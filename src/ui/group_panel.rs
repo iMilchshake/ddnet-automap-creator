@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use egui::Ui;
 
 use crate::model::group::{GroupMode, TileGroup};
@@ -9,6 +11,7 @@ const CHANCE_DRAG_SPEED: f64 = 0.5;
 
 const FILL_HINT: &str = "Placed wherever its own tiles are solid.";
 const DECORATE_HINT: &str = "Also needs a solid ring of tiles around it.";
+const SHAPE_HINT: &str = "Shift+drag adds tiles, Ctrl+drag removes tiles.";
 
 pub fn mode_label(mode: GroupMode) -> &'static str {
     match mode {
@@ -23,22 +26,25 @@ pub struct GroupPanel {
     mode: GroupMode,
     /// A plain percentage while editing; only a valid one becomes a `Chance`.
     chance_percent: f32,
-    top_left: usize,
-    width: usize,
-    height: usize,
+    tiles: BTreeSet<usize>,
+    subtitle: String,
     error: Option<String>,
 }
 
 impl GroupPanel {
     pub fn new(index: usize, group: &TileGroup) -> Self {
+        let subtitle = match group.as_rect() {
+            Some((top_left, _)) => format!("Tile {top_left}, {}", group.size_label()),
+            None => group.size_label(),
+        };
+
         Self {
             index,
             name: group.name.clone(),
             mode: group.mode,
             chance_percent: group.chance.percent(),
-            top_left: group.top_left,
-            width: group.width,
-            height: group.height,
+            tiles: group.tiles.clone(),
+            subtitle,
             error: None,
         }
     }
@@ -49,10 +55,8 @@ impl GroupPanel {
 
     pub fn show(&mut self, ui: &mut Ui, groups: &[TileGroup]) -> Option<TileGroup> {
         ui.heading("Group");
-        ui.weak(format!(
-            "Tile {}, {}×{}",
-            self.top_left, self.width, self.height
-        ));
+        ui.weak(&self.subtitle);
+        ui.weak(SHAPE_HINT);
         ui.add_space(4.0);
 
         let edit = match self.show_options(ui) {
@@ -116,9 +120,7 @@ impl GroupPanel {
 
         let group = TileGroup {
             name: self.name.trim().to_owned(),
-            top_left: self.top_left,
-            width: self.width,
-            height: self.height,
+            tiles: self.tiles.clone(),
             mode: self.mode,
             chance,
         };

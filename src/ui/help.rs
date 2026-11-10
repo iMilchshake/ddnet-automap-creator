@@ -119,7 +119,7 @@ const REDO_ACTION: &str = "Redo";
 const COPY_ACTION: &str = "Copy the selected rule";
 const PASTE_ACTION: &str = "Paste over the selected rule";
 const NEIGHBOR_STATE_ACTION: &str = "Set the neighbor under the mouse to empty, solid or any";
-const MOUSE_ROWS: [(&str, &str); 9] = [
+const MOUSE_ROWS: [(&str, &str); 11] = [
     ("Left-click a tile", "Select it, click again to deselect"),
     ("Right-click a tile", "Turn the tile off or back on"),
     ("Left-click a neighbor", "Switch between solid and any"),
@@ -134,6 +134,14 @@ const MOUSE_ROWS: [(&str, &str); 9] = [
     (
         "Click in the preview",
         "Jump to the rule that placed the tile",
+    ),
+    (
+        "Shift+drag over tiles",
+        "Add the tiles to the selected group",
+    ),
+    (
+        "Ctrl+drag over tiles",
+        "Remove the tiles from the selected group",
     ),
 ];
 const DESELECT_ACTION: &str = "Deselect, back to the overview";

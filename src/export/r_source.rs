@@ -4,7 +4,9 @@ use crate::model::group::{self, GroupError, GroupMode, TileGroup};
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode, Pool, PoolRuns, Variant};
 use crate::model::project::{Project, is_free_tile};
-use crate::model::tile::{AIR_TILE, Centre, Chance, TileRule, highest_free_tile, referenced_tiles};
+use crate::model::tile::{
+    AIR_TILE, Centre, Chance, TILESET_SIDE, TileRule, highest_free_tile, referenced_tiles,
+};
 use crate::model::transform::Transform;
 
 /// Group names live under a prefix of our own. rpp keywords and base.r globals
@@ -181,7 +183,7 @@ fn render_rule_set(
             rule_set
                 .groups
                 .iter()
-                .map(|group| object_line(index, namespaced, group)),
+                .flat_map(|group| object_lines(index, namespaced, group)),
         );
         lines.push(String::new());
     }
@@ -280,19 +282,46 @@ fn reject_claimed_tiles(
 /// Construct a globally unique object name which does not conflict with rpp's
 /// reserved keywords or names of different rule sets by adding unique prefixes
 fn object_name(index: usize, namespaced: bool, group: &TileGroup) -> String {
+    format!("{OBJECT_PREFIX}{}", scoped_name(index, namespaced, group))
+}
+
+fn scoped_name(index: usize, namespaced: bool, group: &TileGroup) -> String {
     match namespaced {
-        true => format!("{OBJECT_PREFIX}{index}{}", group.name),
-        false => format!("{OBJECT_PREFIX}{}", group.name),
+        true => format!("{index}{}", group.name),
+        false => group.name.clone(),
     }
 }
 
-fn object_line(index: usize, namespaced: bool, group: &TileGroup) -> String {
-    format!(
-        "object {} = Rect({}, {});",
-        object_name(index, namespaced, group),
-        group.top_left,
-        group.bottom_right()
-    )
+fn object_lines(index: usize, namespaced: bool, group: &TileGroup) -> Vec<String> {
+    let object = object_name(index, namespaced, group);
+    if let Some((top_left, bottom_right)) = group.as_rect() {
+        return vec![format!(
+            "object {object} = Rect({top_left}, {bottom_right});"
+        )];
+    }
+
+    let entries: Vec<String> = row_runs(&group.footprint())
+        .into_iter()
+        .map(|(first, last)| match first == last {
+            true => first.to_string(),
+            false => format!("{first}_{last}"),
+        })
+        .collect();
+
+    vec![format!(
+        "object {object} = Indices({});",
+        entries.join(", ")
+    )]
+}
+
+fn row_runs(sorted_tiles: &[usize]) -> Vec<(usize, usize)> {
+    sorted_tiles.iter().fold(Vec::new(), |mut runs, &tile| {
+        match runs.last_mut() {
+            Some((_, last)) if *last + 1 == tile && tile % TILESET_SIDE != 0 => *last = tile,
+            _ => runs.push((tile, tile)),
+        }
+        runs
+    })
 }
 
 fn insert_object_block(

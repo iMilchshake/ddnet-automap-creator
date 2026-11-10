@@ -45,9 +45,7 @@ fn the_mask_skips_tiles_inside_a_group() {
     let mut project = Project::default();
     project.add_group(TileGroup {
         name: "bones".to_owned(),
-        top_left: TILE_COUNT - 18,
-        width: 2,
-        height: 2,
+        tiles: TileGroup::rect_tiles(TILE_COUNT - 18, TILE_COUNT - 1),
         mode: GroupMode::Fill,
         chance: Chance::FULL,
     });
@@ -193,9 +191,7 @@ fn a_tile_is_free_only_when_no_rule_and_no_group_claim_it() {
     let mut grouped = Project::default();
     grouped.add_group(TileGroup {
         name: "bones".to_owned(),
-        top_left: 64,
-        width: 2,
-        height: 2,
+        tiles: TileGroup::rect_tiles(64, 81),
         mode: GroupMode::Fill,
         chance: Chance::FULL,
     });

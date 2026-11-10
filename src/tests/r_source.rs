@@ -160,9 +160,7 @@ fn a_rule_set_with_only_deactivated_rules_is_empty() {
 fn a_deactivated_rule_under_a_group_still_stops_the_export() {
     let group = TileGroup {
         name: "bones".to_owned(),
-        top_left: 64,
-        width: 2,
-        height: 2,
+        tiles: TileGroup::rect_tiles(64, 81),
         mode: GroupMode::Fill,
         chance: Chance::FULL,
     };
@@ -421,9 +419,7 @@ fn an_empty_rule_set_is_refused() {
 fn tile_group(name: &str, top_left: usize, mode: GroupMode, percent: f32) -> TileGroup {
     TileGroup {
         name: name.to_owned(),
-        top_left,
-        width: 2,
-        height: 2,
+        tiles: TileGroup::rect_tiles(top_left, top_left + 17),
         mode,
         chance: Chance::new(percent).unwrap(),
     }
@@ -452,6 +448,34 @@ fn groups_become_objects_declared_before_the_automapper() {
     assert!(objects < automapper);
     assert_eq!(lines[objects], "object o:bones = Rect(64, 81);");
     assert_eq!(lines[objects + 1], "object o:pipes = Rect(100, 117);");
+}
+
+#[test]
+fn a_group_that_is_not_a_rectangle_is_declared_through_indices() {
+    let group = TileGroup {
+        tiles: [65, 66, 81, 97, 98, 99].into_iter().collect(),
+        ..tile_group("bones", 64, GroupMode::Fill, 100.0)
+    };
+    let source = emit_with_groups(&[], &[group]).unwrap();
+
+    assert!(
+        source.contains("object o:bones = Indices(65_66, 81, 97_99);\n"),
+        "{source}"
+    );
+}
+
+#[test]
+fn a_run_of_indices_does_not_wrap_across_tileset_rows() {
+    let group = TileGroup {
+        tiles: [15, 16, 40].into_iter().collect(),
+        ..tile_group("bones", 64, GroupMode::Fill, 100.0)
+    };
+    let source = emit_with_groups(&[], &[group]).unwrap();
+
+    assert!(
+        source.contains("object o:bones = Indices(15, 16, 40);\n"),
+        "{source}"
+    );
 }
 
 #[test]

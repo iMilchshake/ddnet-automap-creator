@@ -43,6 +43,9 @@ pub enum BlueprintError {
     #[error("tile {AIR_TILE} is reserved for air and cannot hold a rule")]
     AirTile,
 
+    #[error("group `{0}` must list its tiles in ascending order, each once")]
+    GroupTiles(String),
+
     #[error("`{0}` is not a neighbor state, expected 0 (empty), 1 (full) or 2 (any)")]
     NeighborCode(u8),
 
@@ -135,9 +138,7 @@ pub enum BlueprintState {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlueprintGroup {
     pub name: String,
-    pub top_left: usize,
-    pub width: usize,
-    pub height: usize,
+    pub tiles: Vec<usize>,
     pub mode: BlueprintMode,
     pub chance: f32,
 }
@@ -405,9 +406,7 @@ fn load_rule(tile: usize, rule: &BlueprintRule) -> Result<TileRule, BlueprintErr
 fn store_group(group: &TileGroup) -> BlueprintGroup {
     BlueprintGroup {
         name: group.name.clone(),
-        top_left: group.top_left,
-        width: group.width,
-        height: group.height,
+        tiles: group.footprint(),
         mode: match group.mode {
             GroupMode::Fill => BlueprintMode::Fill,
             GroupMode::Decorate => BlueprintMode::Decorate,
@@ -417,11 +416,13 @@ fn store_group(group: &TileGroup) -> BlueprintGroup {
 }
 
 fn load_group(group: &BlueprintGroup) -> Result<TileGroup, BlueprintError> {
+    if group.tiles.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(BlueprintError::GroupTiles(group.name.clone()));
+    }
+
     Ok(TileGroup {
         name: group.name.clone(),
-        top_left: group.top_left,
-        width: group.width,
-        height: group.height,
+        tiles: group.tiles.iter().copied().collect(),
         mode: match group.mode {
             BlueprintMode::Fill => GroupMode::Fill,
             BlueprintMode::Decorate => GroupMode::Decorate,

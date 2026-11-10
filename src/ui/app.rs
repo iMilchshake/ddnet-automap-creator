@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::mem;
 
 use egui::containers::panel::PanelState;
@@ -12,16 +13,16 @@ use crate::export::r_source::{self, ExportError, RuleSet};
 use crate::file_filter::{AUTOMAPPER, BLUEPRINT, RPP_SOURCE, RULES, TILESET_IMAGE};
 use crate::file_picker::{FilePicker, PickedFile};
 use crate::file_saver::FileSaver;
-use crate::model::group::{GroupMode, TileGroup};
+use crate::model::group::{GroupError, GroupMode, TileGroup};
 use crate::model::pool::{self, Pool};
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{AIR_TILE, Chance, TILESET_SIDE, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, TileRule};
 use crate::preview::{CustomShape, Sample, placing_rule};
 use crate::tileset::{self, Tileset};
 use crate::ui::code_frame::code_chip;
 use crate::ui::discard::{self, DiscardDecision, Leaving};
 use crate::ui::export::{self, ExportContext, ExportRequest};
-use crate::ui::grid::{self, GridResponse, GridView};
+use crate::ui::grid::{self, DragEdit, GridResponse, GridView, ShapeEdit};
 use crate::ui::group_panel::GroupPanel;
 use crate::ui::help;
 use crate::ui::history::History;
@@ -1372,6 +1373,7 @@ impl AutomapperApp {
                     group_editing: self.define_groups,
                     drag_anchor: self.drag_anchor,
                     selected: self.inspector.tile(),
+                    selected_group: self.inspector.group(),
                     pool_mates: &pool_mates,
                     picked: self.inspector.picked(),
                 },
@@ -1496,15 +1498,24 @@ impl AutomapperApp {
     }
 
     fn handle_group_grid(&mut self, ctx: &Context, response: GridResponse) {
+        let edit = DragEdit::of(ctx.input(|input| input.modifiers));
+
         if let Some(tile) = response.drag_started {
             self.drag_anchor = Some(tile);
         }
 
-        if let Some(index) = response
-            .clicked
-            .and_then(|tile| self.rule_sets.active().group_at(tile))
+        if edit == DragEdit::Create
+            && let Some(index) = response
+                .clicked
+                .and_then(|tile| self.rule_sets.active().group_at(tile))
         {
             self.toggle_group_selection(index);
+        }
+
+        if let Some(tile) = response.clicked
+            && let DragEdit::Shape(shape) = edit
+        {
+            self.edit_selected_group(ctx, shape, &BTreeSet::from([tile]));
         }
 
         if let Some(tile) = response.secondary_clicked
@@ -1526,22 +1537,72 @@ impl AutomapperApp {
             return;
         };
 
-        match self.rule_sets.active().group_at(anchor) {
-            Some(index) if anchor == corner => self.toggle_group_selection(index),
-            Some(_) => self
+        let (top_left, bottom_right) = grid::corners(anchor, corner);
+        let tiles = TileGroup::rect_tiles(top_left, bottom_right);
+
+        match (edit, self.rule_sets.active().group_at(anchor)) {
+            (DragEdit::Create, Some(index)) if anchor == corner => {
+                self.toggle_group_selection(index)
+            }
+            (DragEdit::Create, Some(_)) => self
                 .status
                 .warning(ctx, "That rectangle starts inside another group"),
-            None => self.create_group(ctx, anchor, corner),
+            (DragEdit::Create, None) => self.create_group(ctx, tiles),
+            (DragEdit::Shape(shape), _) => self.edit_selected_group(ctx, shape, &tiles),
         }
     }
 
-    fn create_group(&mut self, ctx: &Context, anchor: usize, corner: usize) {
-        let (top_left, bottom_right) = grid::corners(anchor, corner);
+    fn selected_group(&self) -> Option<(usize, TileGroup)> {
+        let index = self.inspector.group()?;
+
+        Some((index, self.rule_sets.active().groups().get(index)?.clone()))
+    }
+
+    fn edit_selected_group(&mut self, ctx: &Context, shape: ShapeEdit, tiles: &BTreeSet<usize>) {
+        let Some((index, original)) = self.selected_group() else {
+            self.status.warning(ctx, "Select a group first");
+            return;
+        };
+        let mut group = original.clone();
+
+        match shape {
+            ShapeEdit::Remove => group.tiles.retain(|tile| !tiles.contains(tile)),
+            ShapeEdit::Add => {
+                let project = self.rule_sets.active();
+                if !tiles
+                    .iter()
+                    .all(|&tile| group.covers(tile) || project.is_free(tile))
+                {
+                    self.status
+                        .warning(ctx, "Those tiles are air, in another group or have a rule");
+                    return;
+                }
+                group.tiles.extend(tiles);
+            }
+        }
+
+        if group.tiles == original.tiles {
+            return;
+        }
+        if let Err(error) = group.validate() {
+            let message = match error {
+                GroupError::TooSmall => {
+                    "A group needs two tiles, right-click removes the whole group".to_owned()
+                }
+                other => other.to_string(),
+            };
+            self.status.warning(ctx, message);
+            return;
+        }
+
+        self.rule_sets.active_mut().replace_group(index, group);
+        self.select_group(index);
+    }
+
+    fn create_group(&mut self, ctx: &Context, tiles: BTreeSet<usize>) {
         let group = TileGroup {
             name: self.rule_sets.active().unused_group_name(),
-            top_left,
-            width: bottom_right % TILESET_SIDE - top_left % TILESET_SIDE + 1,
-            height: bottom_right / TILESET_SIDE - top_left / TILESET_SIDE + 1,
+            tiles,
             mode: GroupMode::Fill,
             chance: Chance::FULL,
         };

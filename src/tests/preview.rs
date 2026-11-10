@@ -577,9 +577,7 @@ fn the_unmatched_marker_skips_active_rules_and_group_footprints() {
     project.add_rule(1, some_rule());
     project.add_group(TileGroup {
         name: "bones".to_owned(),
-        top_left: 2,
-        width: 2,
-        height: 1,
+        tiles: TileGroup::rect_tiles(2, 3),
         mode: GroupMode::Fill,
         chance: Chance::FULL,
     });
@@ -617,6 +615,27 @@ fn the_unmatched_marker_falls_back_when_only_the_mask_is_free() {
 
     assert_eq!(marker, FALLBACK_UNMATCHED_MARKER);
     assert_ne!(Some(usize::from(marker)), project.mask_tile());
+}
+
+#[test]
+fn a_group_of_any_shape_compiles() {
+    let group = TileGroup {
+        name: "bones".to_owned(),
+        tiles: [65, 81, 82].into_iter().collect(),
+        mode: GroupMode::Decorate,
+        chance: Chance::FULL,
+    };
+    let source = render(&[RuleSet {
+        image_stem: IMAGE_STEM,
+        name: "Test",
+        tiles: &[],
+        deactivated: &[],
+        groups: &[group],
+        chance_mode: ChanceMode::Normalize,
+    }])
+    .unwrap();
+
+    assert!(!compiled(source).is_empty());
 }
 
 #[test]

@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
+
 use thiserror::Error;
 
-use crate::model::tile::{AIR_TILE, Chance, TILESET_SIDE};
+use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TILESET_SIDE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupMode {
@@ -11,9 +13,7 @@ pub enum GroupMode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TileGroup {
     pub name: String,
-    pub top_left: usize,
-    pub width: usize,
-    pub height: usize,
+    pub tiles: BTreeSet<usize>,
     pub mode: GroupMode,
     pub chance: Chance,
 }
@@ -29,12 +29,8 @@ pub enum GroupError {
     #[error("a group cannot cover tile {AIR_TILE}, which is reserved for air")]
     CoversAirTile,
 
-    #[error("a {width}×{height} group at tile {top_left} runs off the tileset")]
-    OutOfBounds {
-        top_left: usize,
-        width: usize,
-        height: usize,
-    },
+    #[error("tile {0} lies outside the tileset")]
+    OutOfBounds(usize),
 
     #[error("`{0}` names more than one group")]
     DuplicateName(String),
@@ -43,44 +39,103 @@ pub enum GroupError {
     Overlap { first: String, second: String },
 }
 
+pub const MIN_GROUP_TILES: usize = 2;
+
+const RING_REACH: i32 = 1;
+
+fn column_of(tile: usize) -> usize {
+    tile % TILESET_SIDE
+}
+
+fn row_of(tile: usize) -> usize {
+    tile / TILESET_SIDE
+}
+
+fn rect_size(top_left: usize, bottom_right: usize) -> (usize, usize) {
+    (
+        column_of(bottom_right) - column_of(top_left) + 1,
+        row_of(bottom_right) - row_of(top_left) + 1,
+    )
+}
+
 impl TileGroup {
-    pub fn column(&self) -> usize {
-        self.top_left % TILESET_SIDE
-    }
-
-    pub fn row(&self) -> usize {
-        self.top_left / TILESET_SIDE
-    }
-
-    pub fn bottom_right(&self) -> usize {
-        self.top_left + (self.height - 1) * TILESET_SIDE + (self.width - 1)
-    }
-
-    pub fn footprint(&self) -> Vec<usize> {
-        (0..self.height)
+    pub fn rect_tiles(top_left: usize, bottom_right: usize) -> BTreeSet<usize> {
+        (row_of(top_left)..=row_of(bottom_right))
             .flat_map(|row| {
-                (0..self.width).map(move |column| self.top_left + row * TILESET_SIDE + column)
+                (column_of(top_left)..=column_of(bottom_right))
+                    .map(move |column| row * TILESET_SIDE + column)
             })
             .collect()
     }
 
-    pub fn covers(&self, tile: usize) -> bool {
-        let column = tile % TILESET_SIDE;
-        let row = tile / TILESET_SIDE;
-
-        (self.column()..self.column() + self.width).contains(&column)
-            && (self.row()..self.row() + self.height).contains(&row)
+    pub fn footprint(&self) -> Vec<usize> {
+        self.tiles.iter().copied().collect()
     }
 
-    /// The ring of tiles that `Decorate` additionally requires to be solid,
-    /// in reading order.
-    pub fn ring_offsets(&self) -> Vec<(i32, i32)> {
-        let width = self.width as i32;
-        let height = self.height as i32;
+    pub fn covers(&self, tile: usize) -> bool {
+        self.tiles.contains(&tile)
+    }
 
-        (-1..=height)
-            .flat_map(|y| (-1..=width).map(move |x| (x, y)))
-            .filter(|&(x, y)| !(0..width).contains(&x) || !(0..height).contains(&y))
+    pub fn anchor(&self) -> Option<usize> {
+        self.tiles.first().copied()
+    }
+
+    pub fn bottom_left_tile(&self) -> Option<usize> {
+        let bottom_row = row_of(*self.tiles.last()?);
+
+        self.tiles
+            .range(bottom_row * TILESET_SIDE..)
+            .next()
+            .copied()
+    }
+
+    pub fn bounding_corners(&self) -> Option<(usize, usize)> {
+        let columns = || self.tiles.iter().map(|&tile| column_of(tile));
+        let top = row_of(self.anchor()?);
+        let bottom = row_of(*self.tiles.last()?);
+
+        Some((
+            top * TILESET_SIDE + columns().min()?,
+            bottom * TILESET_SIDE + columns().max()?,
+        ))
+    }
+
+    pub fn as_rect(&self) -> Option<(usize, usize)> {
+        let (top_left, bottom_right) = self.bounding_corners()?;
+
+        (self.tiles == Self::rect_tiles(top_left, bottom_right)).then_some((top_left, bottom_right))
+    }
+
+    pub fn size_label(&self) -> String {
+        match self.as_rect() {
+            Some((top_left, bottom_right)) => {
+                let (width, height) = rect_size(top_left, bottom_right);
+                format!("{width}×{height}")
+            }
+            None => format!("{} tiles", self.tiles.len()),
+        }
+    }
+
+    pub fn ring_offsets(&self) -> Vec<(i32, i32)> {
+        let cells: BTreeSet<(i32, i32)> = self
+            .tiles
+            .iter()
+            .map(|&tile| (row_of(tile) as i32, column_of(tile) as i32))
+            .collect();
+        let Some(&(anchor_y, anchor_x)) = cells.first() else {
+            return Vec::new();
+        };
+
+        cells
+            .iter()
+            .flat_map(|&(y, x)| {
+                (-RING_REACH..=RING_REACH)
+                    .flat_map(move |dy| (-RING_REACH..=RING_REACH).map(move |dx| (y + dy, x + dx)))
+            })
+            .filter(|cell| !cells.contains(cell))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|(y, x)| (x - anchor_x, y - anchor_y))
             .collect()
     }
 
@@ -88,18 +143,14 @@ impl TileGroup {
         if !is_identifier(&self.name) {
             return Err(GroupError::Name(self.name.clone()));
         }
-        if self.width * self.height < 2 {
+        if self.tiles.len() < MIN_GROUP_TILES {
             return Err(GroupError::TooSmall);
         }
         if self.covers(AIR_TILE) {
             return Err(GroupError::CoversAirTile);
         }
-        if self.column() + self.width > TILESET_SIDE || self.row() + self.height > TILESET_SIDE {
-            return Err(GroupError::OutOfBounds {
-                top_left: self.top_left,
-                width: self.width,
-                height: self.height,
-            });
+        if let Some(&tile) = self.tiles.iter().find(|&&tile| tile >= TILE_COUNT) {
+            return Err(GroupError::OutOfBounds(tile));
         }
 
         Ok(())

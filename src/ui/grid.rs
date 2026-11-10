@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use egui::ecolor::Hsva;
 use egui::emath::GuiRounding as _;
 use egui::{
-    Color32, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, Vec2, pos2,
+    Color32, Modifiers, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, TextureHandle,
+    Vec2, pos2,
 };
 
 use crate::model::group::TileGroup;
@@ -37,6 +38,39 @@ const HUE_STEP: f32 = 137.5 / 360.0;
 const GROUP_FILL_ALPHA: f32 = 0.35;
 const DRAG_FILL_ALPHA: f32 = 0.25;
 
+const DIMMED_GROUP_FILL_ALPHA: f32 = 0.12;
+const DIMMED_GROUP_STROKE_ALPHA: f32 = 0.4;
+const SELECTED_GROUP_OUTLINE_WIDTH: f32 = 4.0;
+
+const NEW_GROUP_FILL: Color32 = Color32::from_rgba_premultiplied(30, 30, 30, 30);
+const NEW_GROUP_DASH_LENGTH: f32 = 6.0;
+const NEW_GROUP_GAP_LENGTH: f32 = 4.0;
+
+const ACTION_LABEL_OFFSET: Vec2 = Vec2::new(16.0, 16.0);
+const ACTION_LABEL_ID: &str = "group_action_label";
+
+struct GroupLook {
+    fill_alpha: f32,
+    stroke_alpha: f32,
+    width: f32,
+}
+
+const NORMAL_GROUP_LOOK: GroupLook = GroupLook {
+    fill_alpha: GROUP_FILL_ALPHA,
+    stroke_alpha: 1.0,
+    width: OUTLINE_WIDTH,
+};
+const DIMMED_GROUP_LOOK: GroupLook = GroupLook {
+    fill_alpha: DIMMED_GROUP_FILL_ALPHA,
+    stroke_alpha: DIMMED_GROUP_STROKE_ALPHA,
+    width: OUTLINE_WIDTH,
+};
+const SELECTED_GROUP_LOOK: GroupLook = GroupLook {
+    fill_alpha: GROUP_FILL_ALPHA,
+    stroke_alpha: 1.0,
+    width: SELECTED_GROUP_OUTLINE_WIDTH,
+};
+
 const GROUP_NAME_INSET: f32 = 0.1;
 const GROUP_NAME_FONT: f32 = 0.28;
 const BADGE_INSET: f32 = 0.12;
@@ -55,8 +89,31 @@ pub struct GridView<'a> {
     pub group_editing: bool,
     pub drag_anchor: Option<usize>,
     pub selected: Option<usize>,
+    pub selected_group: Option<usize>,
     pub pool_mates: &'a [usize],
     pub picked: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragEdit {
+    Create,
+    Shape(ShapeEdit),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShapeEdit {
+    Add,
+    Remove,
+}
+
+impl DragEdit {
+    pub fn of(modifiers: Modifiers) -> Self {
+        match (modifiers.ctrl, modifiers.shift) {
+            (true, _) => Self::Shape(ShapeEdit::Remove),
+            (false, true) => Self::Shape(ShapeEdit::Add),
+            (false, false) => Self::Create,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -90,17 +147,18 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         allocated.min.round_to_pixels(pixels_per_point),
         allocated.size(),
     );
+    let geometry = GridGeometry { rect, cell_size };
     let painter = ui.painter_at(rect);
 
     let hovered = response
         .hover_pos()
-        .and_then(|pos| tile_index_at(rect, cell_size, pos));
+        .and_then(|pos| geometry.tile_index_at(pos));
     let pointed = response
         .interact_pointer_pos()
-        .map(|pos| tile_index_clamped(rect, cell_size, pos));
+        .map(|pos| geometry.tile_index_clamped(pos));
 
     for (index, tile) in view.tileset.tiles.iter().enumerate() {
-        let cell = cell_rect(rect, cell_size, index);
+        let cell = geometry.cell_rect(index);
         let state = tile_state(view.tileset, view.project, index);
 
         paint_checkerboard(&painter, cell, index);
@@ -122,26 +180,20 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
     }
 
     for (index, group) in view.project.groups().iter().enumerate() {
-        paint_group(&painter, rect, cell_size, group, group_color(index));
+        let look = group_look(&view, index);
+        paint_group(&painter, geometry, group, group_color(index), look);
     }
 
-    if view.group_editing
-        && let (Some(anchor), Some(corner)) = (view.drag_anchor, pointed.or(hovered))
-    {
-        paint_selection(
-            &painter,
-            rect,
-            cell_size,
-            anchor,
-            corner,
-            ui.visuals().selection.stroke.color,
-        );
+    let edit = DragEdit::of(ui.input(|input| input.modifiers));
+    if view.group_editing {
+        let corner = pointed.or(hovered);
+        let visuals = ui.visuals();
+        paint_group_edit_preview(&painter, &view, edit, geometry, corner, hovered, visuals);
     }
 
     let outliner = BorderOutliner {
         painter: ui.painter_at(rect.expand(SELECTED_OUTLINE_WIDTH)),
-        grid: rect,
-        cell_size,
+        geometry,
         pixels_per_point,
     };
     for &index in view.pool_mates {
@@ -158,7 +210,14 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         outliner.paint_centred_on_border(index, OUTLINE_WIDTH, ui.visuals().selection.stroke.color);
     }
 
-    let response = attach_tooltip(response, &view, hovered);
+    let label_pos = response
+        .hover_pos()
+        .filter(|_| shows_action_label(&view, edit, hovered));
+    if let Some(pos) = label_pos {
+        show_action_label(ui.ctx(), pos, action_label(edit, &view));
+    }
+
+    let response = attach_tooltip(response, &view, hovered.filter(|_| label_pos.is_none()));
 
     if view.group_editing {
         return GridResponse {
@@ -175,6 +234,97 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         clicked: hovered.filter(|_| released_by(&response, PointerButton::Primary)),
         secondary_clicked: hovered.filter(|_| released_by(&response, PointerButton::Secondary)),
         ..GridResponse::default()
+    }
+}
+
+fn selected_group<'a>(view: &GridView<'a>) -> Option<(usize, &'a TileGroup)> {
+    let index = view.selected_group?;
+
+    Some((index, view.project.groups().get(index)?))
+}
+
+fn action_label(edit: DragEdit, view: &GridView<'_>) -> String {
+    match (edit, selected_group(view)) {
+        (DragEdit::Create, _) => "New group".to_owned(),
+        (DragEdit::Shape(_), None) => "Select a group first".to_owned(),
+        (DragEdit::Shape(ShapeEdit::Add), Some((_, group))) => format!("Add to {}", group.name),
+        (DragEdit::Shape(ShapeEdit::Remove), Some((_, group))) => {
+            format!("Remove from {}", group.name)
+        }
+    }
+}
+
+fn show_action_label(ctx: &egui::Context, pointer: Pos2, text: String) {
+    egui::Area::new(egui::Id::new(ACTION_LABEL_ID))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(pointer + ACTION_LABEL_OFFSET)
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.add(egui::Label::new(text).extend());
+            });
+        });
+}
+
+fn edit_color(edit: DragEdit, view: &GridView<'_>, visuals: &egui::Visuals) -> Option<Color32> {
+    let (selected, _) = selected_group(view)?;
+
+    match edit {
+        DragEdit::Create => None,
+        DragEdit::Shape(ShapeEdit::Add) => Some(group_color(selected)),
+        DragEdit::Shape(ShapeEdit::Remove) => Some(visuals.error_fg_color),
+    }
+}
+
+fn group_look(view: &GridView<'_>, index: usize) -> &'static GroupLook {
+    match selected_group(view) {
+        Some((selected, _)) if view.group_editing && selected == index => &SELECTED_GROUP_LOOK,
+        Some(_) if view.group_editing => &DIMMED_GROUP_LOOK,
+        _ => &NORMAL_GROUP_LOOK,
+    }
+}
+
+fn paint_group_edit_preview(
+    painter: &egui::Painter,
+    view: &GridView<'_>,
+    edit: DragEdit,
+    geometry: GridGeometry,
+    corner: Option<usize>,
+    hovered: Option<usize>,
+    visuals: &egui::Visuals,
+) {
+    if edit == DragEdit::Create
+        && let (Some(anchor), Some(corner)) = (view.drag_anchor, corner)
+    {
+        paint_new_group_preview(painter, geometry, anchor, corner);
+        return;
+    }
+
+    let Some(color) = edit_color(edit, view, visuals) else {
+        return;
+    };
+
+    match (view.drag_anchor, corner, hovered) {
+        (Some(anchor), Some(corner), _) => {
+            paint_selection(painter, geometry, anchor, corner, color)
+        }
+        (None, _, Some(tile)) => {
+            let tint = color.gamma_multiply(DRAG_FILL_ALPHA);
+            painter.rect_filled(geometry.cell_rect(tile), 0.0, tint);
+        }
+        _ => {}
+    }
+}
+
+fn shows_action_label(view: &GridView<'_>, edit: DragEdit, hovered: Option<usize>) -> bool {
+    if !view.group_editing || hovered.is_none() {
+        return false;
+    }
+
+    match (edit, view.drag_anchor) {
+        (DragEdit::Create, None) => false,
+        (DragEdit::Create, Some(anchor)) => view.project.group_at(anchor).is_none(),
+        (DragEdit::Shape(_), _) => true,
     }
 }
 
@@ -204,10 +354,9 @@ pub fn group_of(project: &Project, tile: usize) -> Option<&TileGroup> {
 
 pub fn describe_group(group: &TileGroup) -> String {
     let mut text = format!(
-        "{}: {}×{}, {}",
+        "{}: {}, {}",
         group.name,
-        group.width,
-        group.height,
+        group.size_label(),
         mode_label(group.mode)
     );
     if !group.chance.is_full() {
@@ -219,36 +368,41 @@ pub fn describe_group(group: &TileGroup) -> String {
 
 fn paint_group(
     painter: &egui::Painter,
-    grid: Rect,
-    cell_size: f32,
+    geometry: GridGeometry,
     group: &TileGroup,
     color: Color32,
+    look: &GroupLook,
 ) {
-    let area = tile_span(grid, cell_size, group.top_left, group.bottom_right());
-    painter.rect_filled(area, 0.0, color.gamma_multiply(GROUP_FILL_ALPHA));
-    painter.rect_stroke(
-        area,
-        0.0,
-        Stroke::new(OUTLINE_WIDTH, color),
-        StrokeKind::Inside,
-    );
+    let cell_size = geometry.cell_size;
+    let stroke = color.gamma_multiply(look.stroke_alpha);
+    for &tile in &group.tiles {
+        let cell = geometry.cell_rect(tile);
+        painter.rect_filled(cell, 0.0, color.gamma_multiply(look.fill_alpha));
+        for edge in outer_edges(group, tile, cell, look.width) {
+            painter.rect_filled(edge, 0.0, stroke);
+        }
+    }
 
-    let anchor = cell_rect(grid, cell_size, group.top_left);
-    painter.text(
-        anchor.left_top() + Vec2::splat(cell_size * GROUP_NAME_INSET),
-        egui::Align2::LEFT_TOP,
-        &group.name,
-        egui::FontId::proportional(cell_size * GROUP_NAME_FONT),
-        Color32::WHITE,
-    );
+    if let Some(anchor) = group.anchor() {
+        painter.text(
+            geometry.cell_rect(anchor).left_top() + Vec2::splat(cell_size * GROUP_NAME_INSET),
+            egui::Align2::LEFT_TOP,
+            &group.name,
+            egui::FontId::proportional(cell_size * GROUP_NAME_FONT),
+            Color32::WHITE,
+        );
+    }
 
     if group.chance.is_full() || cell_size < MIN_BADGE_CELL_SIZE {
         return;
     }
+    let Some(badge_tile) = group.bottom_left_tile() else {
+        return;
+    };
 
     let inset = Vec2::new(cell_size * BADGE_INSET, -cell_size * BADGE_INSET);
     painter.text(
-        area.left_bottom() + inset,
+        geometry.cell_rect(badge_tile).left_bottom() + inset,
         egui::Align2::LEFT_BOTTOM,
         format!("{}%", group.chance.percent()),
         egui::FontId::proportional(cell_size * CHANCE_FONT),
@@ -256,16 +410,56 @@ fn paint_group(
     );
 }
 
+fn offset_tile(tile: usize, dx: isize, dy: isize) -> Option<usize> {
+    let column = (tile % TILESET_SIDE)
+        .checked_add_signed(dx)
+        .filter(|column| *column < TILESET_SIDE)?;
+    let row = (tile / TILESET_SIDE).checked_add_signed(dy)?;
+
+    Some(row * TILESET_SIDE + column)
+}
+
+fn corner_square(cell: Rect, dx: isize, dy: isize, width: f32) -> Rect {
+    let x = match dx < 0 {
+        true => cell.min.x,
+        false => cell.max.x - width,
+    };
+    let y = match dy < 0 {
+        true => cell.min.y,
+        false => cell.max.y - width,
+    };
+
+    Rect::from_min_size(pos2(x, y), Vec2::splat(width))
+}
+
+fn outer_edges(group: &TileGroup, tile: usize, cell: Rect, width: f32) -> Vec<Rect> {
+    let covered = |dx, dy| offset_tile(tile, dx, dy).is_some_and(|other| group.covers(other));
+    let top = Rect::from_min_max(cell.min, pos2(cell.max.x, cell.min.y + width));
+    let bottom = Rect::from_min_max(pos2(cell.min.x, cell.max.y - width), cell.max);
+    let left = Rect::from_min_max(cell.min, pos2(cell.min.x + width, cell.max.y));
+    let right = Rect::from_min_max(pos2(cell.max.x - width, cell.min.y), cell.max);
+
+    let sides = [(0, -1, top), (0, 1, bottom), (-1, 0, left), (1, 0, right)]
+        .into_iter()
+        .filter(|&(dx, dy, _)| !covered(dx, dy))
+        .map(|(_, _, strip)| strip);
+    let inner_corners = [(-1, -1), (1, -1), (-1, 1), (1, 1)]
+        .into_iter()
+        .filter(|&(dx, dy)| covered(dx, 0) && covered(0, dy) && !covered(dx, dy))
+        .map(|(dx, dy)| corner_square(cell, dx, dy, width));
+
+    sides.chain(inner_corners).collect()
+}
+
 fn paint_selection(
     painter: &egui::Painter,
-    grid: Rect,
-    cell_size: f32,
+    geometry: GridGeometry,
     anchor: usize,
     corner: usize,
     color: Color32,
 ) {
     let (top_left, bottom_right) = corners(anchor, corner);
-    let area = tile_span(grid, cell_size, top_left, bottom_right);
+    let area = geometry.tile_span(top_left, bottom_right);
 
     painter.rect_filled(area, 0.0, color.gamma_multiply(DRAG_FILL_ALPHA));
     painter.rect_stroke(
@@ -274,6 +468,32 @@ fn paint_selection(
         Stroke::new(OUTLINE_WIDTH, color),
         StrokeKind::Inside,
     );
+}
+
+fn paint_new_group_preview(
+    painter: &egui::Painter,
+    geometry: GridGeometry,
+    anchor: usize,
+    corner: usize,
+) {
+    let (top_left, bottom_right) = corners(anchor, corner);
+    let area = geometry.tile_span(top_left, bottom_right);
+    let outline = area.shrink(OUTLINE_WIDTH / 2.0);
+    let path = [
+        outline.left_top(),
+        outline.right_top(),
+        outline.right_bottom(),
+        outline.left_bottom(),
+        outline.left_top(),
+    ];
+
+    painter.rect_filled(area, 0.0, NEW_GROUP_FILL);
+    painter.extend(Shape::dashed_line(
+        &path,
+        Stroke::new(OUTLINE_WIDTH, Color32::WHITE),
+        NEW_GROUP_DASH_LENGTH,
+        NEW_GROUP_GAP_LENGTH,
+    ));
 }
 
 /// The smallest rectangle holding both tiles, as top-left and bottom-right ids.
@@ -287,21 +507,16 @@ pub fn corners(first: usize, second: usize) -> (usize, usize) {
     (top_left, bottom_right)
 }
 
-fn tile_span(grid: Rect, cell_size: f32, top_left: usize, bottom_right: usize) -> Rect {
-    cell_rect(grid, cell_size, top_left).union(cell_rect(grid, cell_size, bottom_right))
-}
-
 struct BorderOutliner {
     painter: egui::Painter,
-    grid: Rect,
-    cell_size: f32,
+    geometry: GridGeometry,
     pixels_per_point: f32,
 }
 
 impl BorderOutliner {
     fn paint_centred_on_border(&self, index: usize, width: f32, color: Color32) {
         let half = (width / 2.0 * self.pixels_per_point).round().max(1.0) / self.pixels_per_point;
-        let cell = cell_rect(self.grid, self.cell_size, index);
+        let cell = self.geometry.cell_rect(index);
         let outer = cell.expand(half);
 
         for edge in [
@@ -364,34 +579,46 @@ fn paint_outline(
     }
 }
 
-fn cell_rect(grid: Rect, cell_size: f32, index: usize) -> Rect {
-    let column = (index % TILESET_SIDE) as f32;
-    let row = (index / TILESET_SIDE) as f32;
-    let min = grid.min + Vec2::new(column * cell_size, row * cell_size);
-
-    Rect::from_min_size(min, Vec2::splat(cell_size))
+#[derive(Clone, Copy)]
+struct GridGeometry {
+    rect: Rect,
+    cell_size: f32,
 }
 
-fn tile_index_at(grid: Rect, cell_size: f32, pos: Pos2) -> Option<usize> {
-    let local = pos - grid.min;
-    let column = (local.x / cell_size).floor() as i32;
-    let row = (local.y / cell_size).floor() as i32;
+impl GridGeometry {
+    fn cell_rect(&self, index: usize) -> Rect {
+        let column = (index % TILESET_SIDE) as f32;
+        let row = (index / TILESET_SIDE) as f32;
+        let min = self.rect.min + Vec2::new(column * self.cell_size, row * self.cell_size);
 
-    let side = TILESET_SIDE as i32;
-    if !(0..side).contains(&column) || !(0..side).contains(&row) {
-        return None;
+        Rect::from_min_size(min, Vec2::splat(self.cell_size))
     }
 
-    Some((row * side + column) as usize)
-}
+    fn tile_span(&self, top_left: usize, bottom_right: usize) -> Rect {
+        self.cell_rect(top_left).union(self.cell_rect(bottom_right))
+    }
 
-fn tile_index_clamped(grid: Rect, cell_size: f32, pos: Pos2) -> usize {
-    let local = pos - grid.min;
-    let last = TILESET_SIDE as f32 - 1.0;
-    let column = (local.x / cell_size).floor().clamp(0.0, last) as usize;
-    let row = (local.y / cell_size).floor().clamp(0.0, last) as usize;
+    fn tile_index_at(&self, pos: Pos2) -> Option<usize> {
+        let local = pos - self.rect.min;
+        let column = (local.x / self.cell_size).floor() as i32;
+        let row = (local.y / self.cell_size).floor() as i32;
 
-    row * TILESET_SIDE + column
+        let side = TILESET_SIDE as i32;
+        if !(0..side).contains(&column) || !(0..side).contains(&row) {
+            return None;
+        }
+
+        Some((row * side + column) as usize)
+    }
+
+    fn tile_index_clamped(&self, pos: Pos2) -> usize {
+        let local = pos - self.rect.min;
+        let last = TILESET_SIDE as f32 - 1.0;
+        let column = (local.x / self.cell_size).floor().clamp(0.0, last) as usize;
+        let row = (local.y / self.cell_size).floor().clamp(0.0, last) as usize;
+
+        row * TILESET_SIDE + column
+    }
 }
 
 fn whole_pixel_cell_size(available: Vec2, pixels_per_point: f32) -> f32 {
