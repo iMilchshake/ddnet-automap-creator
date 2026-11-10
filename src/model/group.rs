@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use thiserror::Error;
 
-use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TILESET_SIDE};
+use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TILESET_SIDE, TileMods};
+use crate::model::transform::{Orientations, Transform};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupMode {
@@ -16,6 +17,52 @@ pub struct TileGroup {
     pub tiles: BTreeSet<usize>,
     pub mode: GroupMode,
     pub chance: Chance,
+    pub mods: TileMods,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupCopy {
+    pub transform: Transform,
+    pub cells: Vec<(i32, i32)>,
+}
+
+fn reading_order(&(x, y): &(i32, i32)) -> (i32, i32) {
+    (y, x)
+}
+
+impl GroupCopy {
+    fn new(transform: Transform, tile_cells: &[(i32, i32)]) -> Self {
+        let mut moved: Vec<(i32, i32)> = tile_cells
+            .iter()
+            .map(|&(x, y)| transform.move_offset(x, y))
+            .collect();
+        moved.sort_by_key(reading_order);
+        let (anchor_x, anchor_y) = *moved.first().expect("a validated group has tiles");
+
+        Self {
+            transform,
+            cells: moved
+                .into_iter()
+                .map(|(x, y)| (x - anchor_x, y - anchor_y))
+                .collect(),
+        }
+    }
+
+    pub fn ring_offsets(&self) -> Vec<(i32, i32)> {
+        let mut ring: Vec<(i32, i32)> = self
+            .cells
+            .iter()
+            .flat_map(|&(x, y)| {
+                (-RING_REACH..=RING_REACH)
+                    .flat_map(move |dy| (-RING_REACH..=RING_REACH).map(move |dx| (x + dx, y + dy)))
+            })
+            .filter(|cell| !self.cells.contains(cell))
+            .collect();
+        ring.sort_by_key(reading_order);
+        ring.dedup();
+
+        ring
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -116,26 +163,17 @@ impl TileGroup {
         }
     }
 
-    pub fn ring_offsets(&self) -> Vec<(i32, i32)> {
-        let cells: BTreeSet<(i32, i32)> = self
+    pub fn copies(&self) -> Vec<GroupCopy> {
+        let cells: Vec<(i32, i32)> = self
             .tiles
             .iter()
-            .map(|&tile| (row_of(tile) as i32, column_of(tile) as i32))
+            .map(|&tile| (column_of(tile) as i32, row_of(tile) as i32))
             .collect();
-        let Some(&(anchor_y, anchor_x)) = cells.first() else {
-            return Vec::new();
-        };
 
-        cells
-            .iter()
-            .flat_map(|&(y, x)| {
-                (-RING_REACH..=RING_REACH)
-                    .flat_map(move |dy| (-RING_REACH..=RING_REACH).map(move |dx| (y + dy, x + dx)))
-            })
-            .filter(|cell| !cells.contains(cell))
-            .collect::<BTreeSet<_>>()
+        Orientations::generated(self.mods)
+            .transforms()
             .into_iter()
-            .map(|(y, x)| (x - anchor_x, y - anchor_y))
+            .map(|transform| GroupCopy::new(transform, &cells))
             .collect()
     }
 

@@ -46,6 +46,9 @@ pub enum BlueprintError {
     #[error("group `{0}` must list its tiles in ascending order, each once")]
     GroupTiles(String),
 
+    #[error("group `{0}` lists orientations that flipping and rotating cannot make")]
+    GroupOrientations(String),
+
     #[error("`{0}` is not a neighbor state, expected 0 (empty), 1 (full) or 2 (any)")]
     NeighborCode(u8),
 
@@ -141,6 +144,8 @@ pub struct BlueprintGroup {
     pub tiles: Vec<usize>,
     pub mode: BlueprintMode,
     pub chance: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientations: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -352,14 +357,17 @@ fn orientation_name(transform: Transform) -> String {
     }
 }
 
-fn load_orientation(tile: usize, name: &str) -> Result<Transform, BlueprintError> {
+fn parse_orientation(name: &str) -> Option<Transform> {
     Transform::ALL
         .into_iter()
         .find(|transform| orientation_name(*transform) == name)
-        .ok_or_else(|| BlueprintError::OrientationName {
-            tile,
-            name: name.to_owned(),
-        })
+}
+
+fn load_orientation(tile: usize, name: &str) -> Result<Transform, BlueprintError> {
+    parse_orientation(name).ok_or_else(|| BlueprintError::OrientationName {
+        tile,
+        name: name.to_owned(),
+    })
 }
 
 fn load_orientations(tile: usize, names: &[String]) -> Result<Orientations, BlueprintError> {
@@ -412,7 +420,31 @@ fn store_group(group: &TileGroup) -> BlueprintGroup {
             GroupMode::Decorate => BlueprintMode::Decorate,
         },
         chance: group.chance.percent(),
+        orientations: store_group_orientations(group.mods),
     }
+}
+
+fn store_group_orientations(mods: TileMods) -> Option<Vec<String>> {
+    (mods != TileMods::default()).then(|| {
+        Orientations::generated(mods)
+            .transforms()
+            .into_iter()
+            .map(orientation_name)
+            .collect()
+    })
+}
+
+fn load_group_mods(group: &BlueprintGroup) -> Result<TileMods, BlueprintError> {
+    let Some(names) = &group.orientations else {
+        return Ok(TileMods::default());
+    };
+
+    names
+        .iter()
+        .map(|name| parse_orientation(name))
+        .collect::<Option<Orientations>>()
+        .and_then(Orientations::preset)
+        .ok_or_else(|| BlueprintError::GroupOrientations(group.name.clone()))
 }
 
 fn load_group(group: &BlueprintGroup) -> Result<TileGroup, BlueprintError> {
@@ -428,6 +460,7 @@ fn load_group(group: &BlueprintGroup) -> Result<TileGroup, BlueprintError> {
             BlueprintMode::Decorate => GroupMode::Decorate,
         },
         chance: Chance::new(group.chance)?,
+        mods: load_group_mods(group)?,
     })
 }
 

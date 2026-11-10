@@ -28,7 +28,7 @@ const CROSS_COLOR: Color32 =
 
 const NO_MODS: TileMods = TileMods::new(false, false, false);
 const LAST_ORIENTATION: &str = "Keep at least one direction.";
-const ORIENTATIONS_LABEL: &str = "Rotated and flipped copies";
+pub(crate) const ORIENTATIONS_LABEL: &str = "Rotated and flipped copies";
 const ROTATE_FLAG_TOOLTIP: &str = "Also place it rotated by 90°, 180° and 270°";
 const X_FLIP_FLAG_TOOLTIP: &str = "Also place it mirrored left-right";
 const Y_FLIP_FLAG_TOOLTIP: &str = "Also place it mirrored top-bottom";
@@ -96,7 +96,8 @@ impl TilePanel {
         );
         let changed = ui
             .scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
-                show_preset_flags(ui, &mut shown, column.height(), width)
+                let size = stacked_flag_size(shown, column.height(), width);
+                show_preset_flags(ui, &mut shown, size)
             })
             .inner;
         if changed {
@@ -200,13 +201,16 @@ impl TilePanel {
     }
 }
 
-fn show_preset_flags(ui: &mut Ui, mods: &mut TileMods, height: f32, width: f32) -> bool {
+fn stacked_flag_size(mods: TileMods, height: f32, width: f32) -> Vec2 {
     let count = match mods.can_rotate {
         true => ROTATING_FLAG_COUNT,
         false => PLAIN_FLAG_COUNT,
     };
-    let button_height = (height - (count - 1.0) * FLAG_GAP) / count;
-    let size = Vec2::new(width, button_height);
+
+    Vec2::new(width, (height - (count - 1.0) * FLAG_GAP) / count)
+}
+
+pub(crate) fn show_preset_flags(ui: &mut Ui, mods: &mut TileMods, size: Vec2) -> bool {
     ui.spacing_mut().item_spacing.y = FLAG_GAP;
     ui.spacing_mut().icon_spacing = FLAG_ICON_GAP;
 
@@ -224,6 +228,7 @@ fn show_preset_flags(ui: &mut Ui, mods: &mut TileMods, height: f32, width: f32) 
         changed |= toggle_button(ui, size, &Y_FLIP_FLAG, &mut mods.can_y_flip);
     }
 
+    *mods = mods.canonical();
     changed
 }
 
@@ -252,7 +257,7 @@ fn toggle_button(ui: &mut Ui, size: Vec2, flag: &Flag, active: &mut bool) -> boo
     clicked
 }
 
-fn flag_width(ui: &Ui) -> f32 {
+pub(crate) fn flag_width(ui: &Ui) -> f32 {
     let widest_label = FLAGS
         .iter()
         .map(|flag| {

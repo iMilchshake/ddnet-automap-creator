@@ -76,7 +76,7 @@ impl Transform {
             .expect("the transforms are closed under composition")
     }
 
-    fn move_offset(self, dx: i32, dy: i32) -> (i32, i32) {
+    pub fn move_offset(self, dx: i32, dy: i32) -> (i32, i32) {
         let (mut dx, mut dy) = (dx, dy);
         if self.y_flip {
             dy = -dy;

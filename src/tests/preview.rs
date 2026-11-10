@@ -1,4 +1,5 @@
-use std::ops::Range;
+use std::collections::BTreeSet;
+use std::ops::{Range, RangeInclusive};
 use std::time::{Duration, Instant};
 
 use twmap::Tile;
@@ -39,6 +40,17 @@ const IMAGE_STEM: &str = "grass_main";
 const COMPILE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const COMPILE_TIMEOUT: Duration = Duration::from_secs(30);
 const AIR_DECORATION: usize = 9;
+const ELL_TILES: [usize; 4] = [65, 81, 97, 98];
+const COUNTED_TILE: usize = 65;
+const DOMINO_TILES: [usize; 2] = [COUNTED_TILE, COUNTED_TILE + 1];
+const DOMINO_SEEDS: RangeInclusive<u32> = 1..=32;
+const LOW_CHANCE_PERCENT: f32 = 5.0;
+const LOW_CHANCE_SIDE: usize = 256;
+const LOW_CHANCE_SEEDS: RangeInclusive<u32> = 1..=8;
+const MIN_TOTAL_SHARE: f32 = 0.7;
+const MAX_TOTAL_SHARE: f32 = 1.05;
+const READS_LATER_CELL: &str = "[Test]\nNoLayerCopy\nIndex 1\nIndex 2\nPos 1 0 INDEX 1\n";
+const SHARE_TOLERANCE: f32 = 0.12;
 
 fn placed(index: usize, centre: Centre) -> PreviewCell {
     PreviewCell::Placed(PlacedTile {
@@ -216,6 +228,27 @@ fn later_rules_win_where_their_conditions_hold() {
         assert_eq!(automapped.cell(edge_column, edge_row), plain(7));
         assert_eq!(automapped.cell(inner_column, inner_row), plain(2));
         assert_eq!(automapped.cell(air_column, air_row), PreviewCell::Air);
+    }
+}
+
+#[test]
+fn rules_run_cell_by_cell_the_way_ddnet_does() {
+    let mut shape = CustomShape::empty(3, 1);
+    for column in 0..3 {
+        shape.set(column, 0, true);
+    }
+
+    let automapped = automap(
+        READS_LATER_CELL,
+        Sample::Custom,
+        &shape,
+        SEED,
+        UNMATCHED_MARKER,
+    )
+    .unwrap();
+
+    for column in 0..3 {
+        assert_eq!(automapped.cell(column, 0), plain(1), "{column}");
     }
 }
 
@@ -580,6 +613,7 @@ fn the_unmatched_marker_skips_active_rules_and_group_footprints() {
         tiles: TileGroup::rect_tiles(2, 3),
         mode: GroupMode::Fill,
         chance: Chance::FULL,
+        mods: TileMods::default(),
     });
 
     assert_eq!(unmatched_marker(&project), 4);
@@ -624,6 +658,7 @@ fn a_group_of_any_shape_compiles() {
         tiles: [65, 81, 82].into_iter().collect(),
         mode: GroupMode::Decorate,
         chance: Chance::FULL,
+        mods: TileMods::default(),
     };
     let source = render(&[RuleSet {
         image_stem: IMAGE_STEM,
@@ -636,6 +671,185 @@ fn a_group_of_any_shape_compiles() {
     .unwrap();
 
     assert!(!compiled(source).is_empty());
+}
+
+fn ell(mods: TileMods, percent: f32) -> TileGroup {
+    TileGroup {
+        name: "ell".to_owned(),
+        tiles: ELL_TILES.into_iter().collect(),
+        mode: GroupMode::Fill,
+        chance: Chance::new(percent).unwrap(),
+        mods,
+    }
+}
+
+fn compiled_group(group: &TileGroup) -> String {
+    let source = render(&[RuleSet {
+        image_stem: IMAGE_STEM,
+        name: "Test",
+        tiles: &[],
+        deactivated: &[],
+        groups: std::slice::from_ref(group),
+        chance_mode: ChanceMode::Normalize,
+    }])
+    .unwrap();
+
+    compiled(source)
+}
+
+fn rule_blocks(rules: &str) -> Vec<Vec<&str>> {
+    let mut blocks: Vec<Vec<&str>> = Vec::new();
+    for line in rules.lines() {
+        if line.starts_with("Index ") {
+            blocks.push(Vec::new());
+        }
+        if let Some(block) = blocks.last_mut() {
+            block.push(line);
+        }
+    }
+
+    blocks
+}
+
+fn full_positions(block: &[&str]) -> BTreeSet<(i32, i32)> {
+    block
+        .iter()
+        .filter_map(|line| {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            match words.as_slice() {
+                ["Pos", x, y, "FULL"] => Some((x.parse().unwrap(), y.parse().unwrap())),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+fn flags_of(index_line: &str) -> Transform {
+    let words: Vec<&str> = index_line.split_whitespace().collect();
+
+    Transform {
+        x_flip: words.contains(&"XFLIP"),
+        y_flip: words.contains(&"YFLIP"),
+        rot: words.contains(&"ROTATE"),
+    }
+}
+
+#[test]
+fn rpp_turns_every_group_copy_the_way_the_model_does() {
+    let group = ell(TileMods::new(true, false, true), 100.0);
+    let rules = compiled_group(&group);
+    let blocks = rule_blocks(&rules);
+    let copies = group.copies();
+
+    assert_eq!(copies.len(), Transform::ALL.len());
+    assert!(blocks.len() >= copies.len(), "{rules}");
+    for (copy, block) in copies.iter().zip(&blocks) {
+        let expected: BTreeSet<(i32, i32)> = copy.cells.iter().copied().collect();
+
+        assert_eq!(full_positions(block), expected, "{:?}", copy.transform);
+        assert_eq!(flags_of(block[0]), copy.transform, "{}", block[0]);
+    }
+}
+
+fn solid_everywhere(side: usize) -> CustomShape {
+    let mut shape = CustomShape::empty(side, side);
+    for row in 0..side {
+        for column in 0..side {
+            shape.set(column, row, true);
+        }
+    }
+
+    shape
+}
+
+fn anchors(automapped: &Automapped) -> Vec<PlacedTile> {
+    (0..automapped.height)
+        .flat_map(|row| (0..automapped.width).map(move |column| (column, row)))
+        .filter_map(|(column, row)| match automapped.cell(column, row) {
+            PreviewCell::Placed(placed) if placed.index == COUNTED_TILE => Some(placed),
+            _ => None,
+        })
+        .collect()
+}
+
+fn copy_counts(mods: TileMods) -> Vec<usize> {
+    let group = ell(mods, LOW_CHANCE_PERCENT);
+    let rules = compiled_group(&group);
+    let shape = solid_everywhere(LOW_CHANCE_SIDE);
+
+    let copies = group.copies();
+    let mut counts = vec![0_usize; copies.len()];
+    for seed in LOW_CHANCE_SEEDS {
+        let automapped = automap(&rules, Sample::Custom, &shape, seed, UNMATCHED_MARKER).unwrap();
+        for placed in anchors(&automapped) {
+            let position = copies
+                .iter()
+                .position(|copy| copy.transform == placed.transform)
+                .unwrap();
+            counts[position] += 1;
+        }
+    }
+    eprintln!("{mods:?} copy counts {counts:?}");
+
+    counts
+}
+
+#[test]
+fn every_copy_of_a_low_chance_group_gets_an_equal_share_of_the_anchors() {
+    for mods in [
+        TileMods::new(true, false, false),
+        TileMods::new(false, false, true),
+    ] {
+        let counts = copy_counts(mods);
+        let mean = counts.iter().sum::<usize>() as f32 / counts.len() as f32;
+
+        for count in &counts {
+            assert!(
+                (*count as f32 - mean).abs() <= SHARE_TOLERANCE * mean,
+                "{mods:?} {counts:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_low_chance_group_places_about_its_chance_of_the_cells() {
+    let counts = copy_counts(TileMods::new(true, false, false));
+    let total = counts.iter().sum::<usize>() as f32;
+    let cells = (LOW_CHANCE_SIDE * LOW_CHANCE_SIDE * LOW_CHANCE_SEEDS.count()) as f32;
+    let expected = cells * LOW_CHANCE_PERCENT / Chance::FULL.percent();
+    eprintln!("total anchors {total} of expected {expected}");
+
+    assert!(
+        (MIN_TOTAL_SHARE * expected..=MAX_TOTAL_SHARE * expected).contains(&total),
+        "{counts:?} of expected {expected}"
+    );
+}
+
+#[test]
+fn only_one_copy_is_placed_where_two_copies_fit_the_same_cells() {
+    let domino = TileGroup {
+        tiles: DOMINO_TILES.into_iter().collect(),
+        ..ell(TileMods::new(true, false, false), Chance::FULL.percent())
+    };
+    let rules = compiled_group(&domino);
+    let mut shape = CustomShape::empty(DOMINO_TILES.len(), 1);
+    for column in 0..DOMINO_TILES.len() {
+        shape.set(column, 0, true);
+    }
+
+    let mut winners = Vec::new();
+    for seed in DOMINO_SEEDS {
+        let automapped = automap(&rules, Sample::Custom, &shape, seed, UNMATCHED_MARKER).unwrap();
+        let placed = anchors(&automapped);
+
+        assert_eq!(placed.len(), 1, "seed {seed}");
+        winners.push(placed[0].transform);
+    }
+
+    for copy in domino.copies() {
+        assert!(winners.contains(&copy.transform), "{:?}", copy.transform);
+    }
 }
 
 #[test]

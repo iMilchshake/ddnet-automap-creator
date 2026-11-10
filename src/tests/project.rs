@@ -3,7 +3,7 @@ use crate::model::group::{GroupMode, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode};
 use crate::model::project::Project;
-use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileMods, TileRule};
 
 fn some_rule() -> TileRule {
     TileRule::new(Neighborhood::uniform(NeighborState::Full))
@@ -48,6 +48,7 @@ fn the_mask_skips_tiles_inside_a_group() {
         tiles: TileGroup::rect_tiles(TILE_COUNT - 18, TILE_COUNT - 1),
         mode: GroupMode::Fill,
         chance: Chance::FULL,
+        mods: TileMods::default(),
     });
 
     assert_eq!(project.mask_tile(), Some(TILE_COUNT - 3));
@@ -194,6 +195,7 @@ fn a_tile_is_free_only_when_no_rule_and_no_group_claim_it() {
         tiles: TileGroup::rect_tiles(64, 81),
         mode: GroupMode::Fill,
         chance: Chance::FULL,
+        mods: TileMods::default(),
     });
 
     for tile in [64, 65, 80, 81] {

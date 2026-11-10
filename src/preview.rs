@@ -11,6 +11,8 @@ use crate::model::project::Project;
 use crate::model::tile::{AIR_TILE, Centre, TILE_COUNT, referenced_tiles};
 use crate::model::transform::Transform;
 
+mod execute;
+
 const DM1: &[u8] = include_bytes!("../assets/dm1.map");
 const GAME_LAYER_HOOKABLE: u8 = 1;
 const GAME_LAYER_UNHOOKABLE: u8 = 3;
@@ -315,7 +317,7 @@ pub fn automap(
 
     let mut tiles = sample.tiles(custom, unmatched_marker)?;
     let was_solid = tiles.map(|tile| tile.id != 0);
-    rule_set.run(seed, &mut tiles);
+    execute::run(rule_set, seed, &mut tiles);
 
     Ok(collect(&tiles, &was_solid, unmatched_marker))
 }

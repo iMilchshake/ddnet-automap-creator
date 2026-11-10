@@ -16,7 +16,7 @@ use crate::file_saver::FileSaver;
 use crate::model::group::{GroupError, GroupMode, TileGroup};
 use crate::model::pool::{self, Pool};
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{AIR_TILE, Chance, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, TileMods, TileRule};
 use crate::preview::{CustomShape, Sample, placing_rule};
 use crate::tileset::{self, Tileset};
 use crate::ui::code_frame::code_chip;
@@ -1605,6 +1605,7 @@ impl AutomapperApp {
             tiles,
             mode: GroupMode::Fill,
             chance: Chance::FULL,
+            mods: TileMods::default(),
         };
 
         if let Err(error) = group.validate() {

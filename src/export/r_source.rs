@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::model::group::{self, GroupError, GroupMode, TileGroup};
+use crate::model::group::{self, GroupCopy, GroupError, GroupMode, TileGroup};
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode, Pool, PoolRuns, Variant};
 use crate::model::project::{Project, is_free_tile};
@@ -332,15 +332,33 @@ fn insert_object_block(
 ) -> String {
     let names: Vec<String> = every_group
         .iter()
-        .map(|group| object_name(index, namespaced, group))
+        .flat_map(|other| copy_names(index, namespaced, other))
         .collect();
+    let object = object_name(index, namespaced, group);
+    let copies = group.copies();
 
+    copies
+        .iter()
+        .enumerate()
+        .map(|(position, copy)| {
+            format!(
+                "InsertObject({}){}.If(\n{}\n);",
+                with_suffix(object.clone(), copy.transform),
+                percent_call(copy_percent(group.chance, position, copies.len())),
+                copy_tests(group, copy, &names).join(",\n"),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn copy_tests(group: &TileGroup, copy: &GroupCopy, names: &[String]) -> Vec<String> {
     let mut tests = vec![
         "    Object().HasSpace()".to_owned(),
         format!("    Object().IsNotOverlapping({})", names.join(", ")),
     ];
     if group.mode == GroupMode::Decorate {
-        let offsets: Vec<String> = group
+        let offsets: Vec<String> = copy
             .ring_offsets()
             .iter()
             .map(|(x, y)| format!("[{x}, {y}]"))
@@ -348,12 +366,24 @@ fn insert_object_block(
         tests.push(format!("    IndexAt({}).IsFull()", offsets.join(", ")));
     }
 
-    format!(
-        "InsertObject({}){}.If(\n{}\n);",
-        object_name(index, namespaced, group),
-        chance_call(group.chance),
-        tests.join(",\n"),
-    )
+    tests
+}
+
+fn copy_names(index: usize, namespaced: bool, group: &TileGroup) -> Vec<String> {
+    let object = object_name(index, namespaced, group);
+
+    group
+        .copies()
+        .iter()
+        .map(|copy| with_suffix(object.clone(), copy.transform))
+        .collect()
+}
+
+fn copy_percent(chance: Chance, position: usize, count: usize) -> f32 {
+    let percent = chance.percent();
+    let taken_before = position as f32 * percent / Chance::FULL.percent();
+
+    percent / (count as f32 - taken_before)
 }
 
 fn chance_call(chance: Chance) -> String {
@@ -367,13 +397,17 @@ fn percent_call(percent: f32) -> String {
     }
 }
 
-fn index_name(tile: usize, transform: Transform) -> String {
+fn with_suffix(name: String, transform: Transform) -> String {
     let suffix = transform.suffix();
     if suffix.is_empty() {
-        return tile.to_string();
+        return name;
     }
 
-    format!("{tile}.{suffix}")
+    format!("{name}.{suffix}")
+}
+
+fn index_name(tile: usize, transform: Transform) -> String {
+    with_suffix(tile.to_string(), transform)
 }
 
 fn insert_lines(pool: &Pool, mode: ChanceMode) -> Vec<String> {

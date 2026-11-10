@@ -4,7 +4,7 @@ use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{AIR_TILE, Centre, Chance, TILE_COUNT, TileRule};
+use crate::model::tile::{AIR_TILE, Centre, Chance, TILE_COUNT, TileMods, TileRule};
 use crate::tests::support::{HALF_TURN, index_of, mods, outer_corner};
 
 fn rule(neighborhood: Neighborhood, percent: f32, can_rotate: bool) -> TileRule {
@@ -163,6 +163,7 @@ fn a_deactivated_rule_under_a_group_still_stops_the_export() {
         tiles: TileGroup::rect_tiles(64, 81),
         mode: GroupMode::Fill,
         chance: Chance::FULL,
+        mods: TileMods::default(),
     };
     let tiles = [(65, anywhere(100.0)), (1, anywhere(100.0))];
 
@@ -422,7 +423,46 @@ fn tile_group(name: &str, top_left: usize, mode: GroupMode, percent: f32) -> Til
         tiles: TileGroup::rect_tiles(top_left, top_left + 17),
         mode,
         chance: Chance::new(percent).unwrap(),
+        mods: TileMods::default(),
     }
+}
+
+#[test]
+fn every_copy_of_a_group_is_inserted_and_rolls_among_the_spots_left_over() {
+    let rotating = TileGroup {
+        mods: TileMods::new(false, false, true),
+        ..tile_group("bones", 64, GroupMode::Fill, 100.0)
+    };
+
+    let source = emit_with_groups(&[], &[rotating]).unwrap();
+
+    assert!(source.contains("InsertObject(o:bones).Chance(25).If("));
+    assert!(source.contains(&format!(
+        "InsertObject(o:bones.R).Chance({}).If(",
+        100.0_f32 / 3.0
+    )));
+    assert!(source.contains("InsertObject(o:bones.VH).Chance(50).If("));
+    assert!(source.contains("InsertObject(o:bones.VHR).If("));
+    assert!(source.contains("IsNotOverlapping(o:bones, o:bones.R, o:bones.VH, o:bones.VHR)"));
+}
+
+#[test]
+fn a_decorating_copy_tests_the_ring_of_its_own_shape() {
+    let rotating = TileGroup {
+        mods: TileMods::new(false, false, true),
+        mode: GroupMode::Decorate,
+        tiles: [65, 81, 82].into_iter().collect(),
+        ..tile_group("bones", 64, GroupMode::Fill, 100.0)
+    };
+
+    let source = emit_with_groups(&[], &[rotating]).unwrap();
+    let rings: Vec<&str> = source
+        .lines()
+        .filter(|line| line.contains("IndexAt("))
+        .collect();
+
+    assert_eq!(rings.len(), 4);
+    assert_ne!(rings[0], rings[1]);
 }
 
 #[test]

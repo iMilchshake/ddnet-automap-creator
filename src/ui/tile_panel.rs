@@ -9,7 +9,7 @@ use crate::tileset::Tileset;
 mod header;
 mod icons;
 mod neighbors;
-mod orientations;
+pub(super) mod orientations;
 mod pools;
 
 const CELL_GAP: f32 = 3.0;

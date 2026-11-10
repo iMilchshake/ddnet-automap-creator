@@ -150,6 +150,26 @@ fn every_preset_round_trips_through_its_generated_set() {
 }
 
 #[test]
+fn every_flag_combination_canonicalizes_to_the_preset_a_save_loads_back() {
+    for x_flip in [false, true] {
+        for y_flip in [false, true] {
+            for rotate in [false, true] {
+                let flags = mods(x_flip, y_flip, rotate);
+                let canonical = flags.canonical();
+
+                assert_eq!(
+                    Orientations::generated(canonical),
+                    Orientations::generated(flags)
+                );
+                assert_eq!(Orientations::generated(canonical).preset(), Some(canonical));
+            }
+        }
+    }
+
+    assert_eq!(mods(true, true, true).canonical(), mods(true, false, true));
+}
+
+#[test]
 fn a_set_no_preset_generates_has_no_preset() {
     let turn_only: Orientations = [Transform::IDENTITY, transform(false, false, true)]
         .into_iter()

@@ -70,6 +70,10 @@ impl TileMods {
             can_rotate,
         }
     }
+
+    pub fn canonical(self) -> Self {
+        Orientations::generated(self).preset().unwrap_or(self)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

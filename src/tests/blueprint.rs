@@ -16,6 +16,7 @@ fn group(name: &str, top_left: usize, mode: GroupMode, percent: f32) -> TileGrou
         tiles: TileGroup::rect_tiles(top_left, top_left + 17),
         mode,
         chance: Chance::new(percent).unwrap(),
+        mods: TileMods::default(),
     }
 }
 
@@ -333,6 +334,52 @@ fn a_group_of_any_shape_survives_a_round_trip() {
     project.append_group(l_shape.clone());
 
     assert_eq!(round_trip(&project).groups(), [l_shape]);
+}
+
+#[test]
+fn the_copies_of_a_group_survive_a_round_trip() {
+    let mut project = Project::default();
+    project.append_group(TileGroup {
+        mods: mods(false, false, true),
+        ..group("bones", 64, GroupMode::Fill, 100.0)
+    });
+
+    assert_eq!(round_trip(&project), project);
+    assert!(written(project).contains(r#""orientations": [ "N", "R", "VH", "VHR" ]"#));
+}
+
+#[test]
+fn a_group_without_orientations_loads_as_the_identity_only() {
+    let json = document(
+        "",
+        "",
+        r#"{"name": "bones", "tiles": [64, 65, 80, 81],
+            "mode": "fill", "chance": 100.0}"#,
+    );
+
+    assert_eq!(load(&json).unwrap().groups()[0].mods, TileMods::default());
+}
+
+#[test]
+fn group_orientations_no_flags_can_make_are_refused() {
+    for list in [r#"["N", "R"]"#, "[]"] {
+        let json = document(
+            "",
+            "",
+            &format!(
+                r#"{{"name": "bones", "tiles": [64, 65, 80, 81],
+                    "mode": "fill", "chance": 100.0, "orientations": {list}}}"#
+            ),
+        );
+
+        assert!(
+            matches!(
+                load(&json).unwrap_err(),
+                BlueprintError::GroupOrientations(_)
+            ),
+            "{list}"
+        );
+    }
 }
 
 #[test]

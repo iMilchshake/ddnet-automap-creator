@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 
-use egui::Ui;
+use egui::{Ui, Vec2};
 
 use crate::model::group::{GroupMode, TileGroup};
-use crate::model::tile::Chance;
+use crate::model::tile::{Chance, TileMods};
+use crate::ui::tile_panel::orientations::{ORIENTATIONS_LABEL, flag_width, show_preset_flags};
 
 const MIN_CHANCE_PERCENT: f32 = 0.1;
 const MAX_CHANCE_PERCENT: f32 = 100.0;
@@ -11,7 +12,8 @@ const CHANCE_DRAG_SPEED: f64 = 0.5;
 
 const FILL_HINT: &str = "Placed wherever its own tiles are solid.";
 const DECORATE_HINT: &str = "Also needs a solid ring of tiles around it.";
-const SHAPE_HINT: &str = "Shift+drag adds tiles, Ctrl+drag removes tiles.";
+const ORIENTATIONS_HINT: &str = "Also places the group turned or mirrored where it fits.";
+const CHANCE_HINT: &str = "Shared across the group and its rotated and flipped copies.";
 
 pub fn mode_label(mode: GroupMode) -> &'static str {
     match mode {
@@ -26,6 +28,7 @@ pub struct GroupPanel {
     mode: GroupMode,
     /// A plain percentage while editing; only a valid one becomes a `Chance`.
     chance_percent: f32,
+    mods: TileMods,
     tiles: BTreeSet<usize>,
     subtitle: String,
     error: Option<String>,
@@ -43,6 +46,7 @@ impl GroupPanel {
             name: group.name.clone(),
             mode: group.mode,
             chance_percent: group.chance.percent(),
+            mods: group.mods,
             tiles: group.tiles.clone(),
             subtitle,
             error: None,
@@ -56,7 +60,6 @@ impl GroupPanel {
     pub fn show(&mut self, ui: &mut Ui, groups: &[TileGroup]) -> Option<TileGroup> {
         ui.heading("Group");
         ui.weak(&self.subtitle);
-        ui.weak(SHAPE_HINT);
         ui.add_space(4.0);
 
         let edit = match self.show_options(ui) {
@@ -94,6 +97,14 @@ impl GroupPanel {
         });
 
         ui.add_space(4.0);
+        ui.label(ORIENTATIONS_LABEL)
+            .on_hover_text(ORIENTATIONS_HINT);
+        ui.horizontal(|ui| {
+            let size = Vec2::new(flag_width(ui), ui.spacing().interact_size.y);
+            changed |= show_preset_flags(ui, &mut self.mods, size);
+        });
+
+        ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label("Chance");
             changed |= ui
@@ -103,6 +114,7 @@ impl GroupPanel {
                         .speed(CHANCE_DRAG_SPEED)
                         .suffix(" %"),
                 )
+                .on_hover_text(CHANCE_HINT)
                 .changed();
         });
 
@@ -123,6 +135,7 @@ impl GroupPanel {
             tiles: self.tiles.clone(),
             mode: self.mode,
             chance,
+            mods: self.mods,
         };
 
         if let Err(error) = group.validate() {

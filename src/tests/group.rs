@@ -1,5 +1,7 @@
 use crate::model::group::{GroupError, GroupMode, TileGroup, validate_all};
-use crate::model::tile::{Chance, TILE_COUNT, TILESET_SIDE};
+use crate::model::tile::{Chance, TILE_COUNT, TILESET_SIDE, TileMods};
+use crate::model::transform::Transform;
+use crate::tests::support::{QUARTER_TURN, mods};
 
 fn group(name: &str, top_left: usize, width: usize, height: usize) -> TileGroup {
     let bottom_right = top_left + (height - 1) * TILESET_SIDE + width - 1;
@@ -13,11 +15,50 @@ fn shaped(name: &str, tiles: impl IntoIterator<Item = usize>) -> TileGroup {
         tiles: tiles.into_iter().collect(),
         mode: GroupMode::Fill,
         chance: Chance::FULL,
+        mods: TileMods::default(),
     }
 }
 
 fn l_shape() -> TileGroup {
     shaped("a", [65, 81, 82])
+}
+
+fn ring_of(group: &TileGroup) -> Vec<(i32, i32)> {
+    group.copies()[0].ring_offsets()
+}
+
+#[test]
+fn a_group_without_flags_has_only_its_own_copy() {
+    let copies = l_shape().copies();
+
+    assert_eq!(copies.len(), 1);
+    assert_eq!(copies[0].transform, Transform::IDENTITY);
+    assert_eq!(copies[0].cells, [(0, 0), (0, 1), (1, 1)]);
+}
+
+#[test]
+fn a_rotated_copy_is_anchored_on_its_own_topmost_leftmost_tile() {
+    let rotating = TileGroup {
+        mods: mods(false, false, true),
+        ..l_shape()
+    };
+    let copies = rotating.copies();
+
+    assert_eq!(copies.len(), 4);
+    assert_eq!(copies[1].transform, QUARTER_TURN);
+    assert_eq!(copies[1].cells, [(0, 0), (1, 0), (0, 1)]);
+}
+
+#[test]
+fn the_ring_of_a_copy_follows_its_turned_shape() {
+    let rotating = TileGroup {
+        mods: mods(false, false, true),
+        ..l_shape()
+    };
+    let rotated = &rotating.copies()[1];
+
+    assert!(rotated.ring_offsets().contains(&(1, 1)));
+    assert!(!rotated.ring_offsets().contains(&(0, 1)));
 }
 
 #[test]
@@ -76,7 +117,7 @@ fn the_size_label_names_rectangles_by_size_and_others_by_count() {
 
 #[test]
 fn the_decorate_ring_surrounds_the_footprint() {
-    let single = group("a", 64, 1, 1).ring_offsets();
+    let single = ring_of(&group("a", 64, 1, 1));
     assert_eq!(
         single,
         [
@@ -91,7 +132,7 @@ fn the_decorate_ring_surrounds_the_footprint() {
         ]
     );
 
-    let two_by_two = group("a", 64, 2, 2).ring_offsets();
+    let two_by_two = ring_of(&group("a", 64, 2, 2));
     assert_eq!(two_by_two.len(), 12);
     assert!(!two_by_two.contains(&(0, 0)));
     assert!(!two_by_two.contains(&(1, 1)));
@@ -102,7 +143,7 @@ fn the_decorate_ring_surrounds_the_footprint() {
 #[test]
 fn the_ring_of_an_l_shape_hugs_the_notch_and_stays_relative_to_the_anchor() {
     assert_eq!(
-        l_shape().ring_offsets(),
+        ring_of(&l_shape()),
         [
             (-1, -1),
             (0, -1),
