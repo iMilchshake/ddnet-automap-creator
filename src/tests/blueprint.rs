@@ -1,5 +1,5 @@
 use crate::blueprint::{self, BlueprintError};
-use crate::model::group::{GroupMode, TileGroup};
+use crate::model::group::{CellState, GroupError, GroupPreset, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
@@ -10,13 +10,16 @@ use crate::tests::support::{half_turn, index_of, mods, outer_corner};
 
 const IMAGE: &str = "grass_main";
 
-fn group(name: &str, top_left: usize, mode: GroupMode, percent: f32) -> TileGroup {
+fn group(name: &str, top_left: usize, preset: GroupPreset, percent: f32) -> TileGroup {
+    let mut group = TileGroup::new(
+        name.to_owned(),
+        TileGroup::rect_tiles(top_left, top_left + 17),
+    );
+    group.apply_preset(preset);
+
     TileGroup {
-        name: name.to_owned(),
-        tiles: TileGroup::rect_tiles(top_left, top_left + 17),
-        mode,
         chance: Chance::new(percent).unwrap(),
-        mods: TileMods::default(),
+        ..group
     }
 }
 
@@ -47,9 +50,9 @@ fn furnished() -> Project {
     project.deactivate(9);
     project.deactivate(32);
 
-    project.append_group(group("bones", 64, GroupMode::Decorate, 1.0));
-    project.append_group(group("pipes", 100, GroupMode::Fill, 100.0));
-    project.append_group(group("vines", 150, GroupMode::Fill, 33.5));
+    project.append_group(group("bones", 64, GroupPreset::Decorate, 1.0));
+    project.append_group(group("pipes", 100, GroupPreset::Fill, 100.0));
+    project.append_group(group("vines", 150, GroupPreset::OnFloor, 33.5));
 
     project
 }
@@ -326,10 +329,8 @@ fn group_priority_order_survives_a_round_trip() {
 
 #[test]
 fn a_group_of_any_shape_survives_a_round_trip() {
-    let l_shape = TileGroup {
-        tiles: [65, 81, 82].into_iter().collect(),
-        ..group("bones", 64, GroupMode::Fill, 100.0)
-    };
+    let mut l_shape = group("bones", 64, GroupPreset::Fill, 100.0);
+    l_shape.set_tiles([65, 81, 82].into_iter().collect());
     let mut project = Project::default();
     project.append_group(l_shape.clone());
 
@@ -341,11 +342,94 @@ fn the_copies_of_a_group_survive_a_round_trip() {
     let mut project = Project::default();
     project.append_group(TileGroup {
         mods: mods(false, false, true),
-        ..group("bones", 64, GroupMode::Fill, 100.0)
+        ..group("bones", 64, GroupPreset::Fill, 100.0)
     });
 
     assert_eq!(round_trip(&project), project);
     assert!(written(project).contains(r#""orientations": [ "N", "R", "VH", "VHR" ]"#));
+}
+
+#[test]
+fn a_custom_neighborhood_survives_a_round_trip() {
+    let mut custom = group("bones", 64, GroupPreset::Fill, 100.0);
+    custom.neighbors.insert((0, 4), CellState::Empty);
+    custom.neighbors.insert((-1, 3), CellState::Full);
+    let mut project = Project::default();
+    project.append_group(custom);
+
+    assert_eq!(round_trip(&project), project);
+    assert!(written(project).contains(r#""neighbors""#));
+}
+
+#[test]
+fn a_neighbor_offset_outside_the_group_and_its_ring_is_refused() {
+    for offsets in ["[[5, 0]]", "[[-2, 0]]", "[[0, 4]]"] {
+        let json = document(
+            "",
+            "",
+            &format!(
+                r#"{{"name": "bones", "tiles": [64, 65, 80, 81],
+                    "neighbors": {{"full": {offsets}, "empty": []}}, "chance": 100.0}}"#
+            ),
+        );
+
+        assert!(
+            matches!(load(&json).unwrap_err(), BlueprintError::GroupNeighbor(_)),
+            "{offsets}"
+        );
+    }
+}
+
+#[test]
+fn an_offset_listed_twice_is_refused() {
+    for neighbors in [
+        r#"{"full": [[0, 0]], "empty": [[0, 0]]}"#,
+        r#"{"full": [[0, 0], [0, 0]], "empty": []}"#,
+    ] {
+        let json = document(
+            "",
+            "",
+            &format!(
+                r#"{{"name": "bones", "tiles": [64, 65, 80, 81],
+                    "neighbors": {neighbors}, "chance": 100.0}}"#
+            ),
+        );
+
+        assert!(
+            matches!(
+                load(&json).unwrap_err(),
+                BlueprintError::GroupNeighborRepeated(_)
+            ),
+            "{neighbors}"
+        );
+    }
+}
+
+#[test]
+fn a_group_without_tiles_reports_that_it_is_too_small() {
+    let json = document(
+        "",
+        "",
+        r#"{"name": "bones", "tiles": [],
+            "neighbors": {"full": [], "empty": []}, "chance": 100.0}"#,
+    );
+
+    assert!(matches!(
+        load(&json).unwrap_err(),
+        BlueprintError::Group(GroupError::TooSmall)
+    ));
+}
+
+#[test]
+fn a_group_with_the_old_mode_field_is_refused() {
+    let json = document(
+        "",
+        "",
+        r#"{"name": "bones", "tiles": [64, 65, 80, 81],
+            "mode": "fill", "chance": 100.0}"#,
+    );
+
+    assert!(matches!(load(&json).unwrap_err(), BlueprintError::Json(_)));
 }
 
 #[test]
@@ -354,7 +438,7 @@ fn a_group_without_orientations_loads_as_the_identity_only() {
         "",
         "",
         r#"{"name": "bones", "tiles": [64, 65, 80, 81],
-            "mode": "fill", "chance": 100.0}"#,
+            "neighbors": {"full": [], "empty": []}, "chance": 100.0}"#,
     );
 
     assert_eq!(load(&json).unwrap().groups()[0].mods, TileMods::default());
@@ -368,7 +452,8 @@ fn group_orientations_no_flags_can_make_are_refused() {
             "",
             &format!(
                 r#"{{"name": "bones", "tiles": [64, 65, 80, 81],
-                    "mode": "fill", "chance": 100.0, "orientations": {list}}}"#
+                    "neighbors": {{"full": [], "empty": []}}, "chance": 100.0,
+                    "orientations": {list}}}"#
             ),
         );
 
@@ -541,7 +626,7 @@ fn an_invalid_group_is_refused() {
         "",
         "",
         r#"{"name": "bones", "tiles": [64],
-            "mode": "fill", "chance": 100.0}"#,
+            "neighbors": {"full": [], "empty": []}, "chance": 100.0}"#,
     );
     assert!(matches!(load(&json).unwrap_err(), BlueprintError::Group(_)));
 }
@@ -552,7 +637,10 @@ fn group_tiles_must_ascend_without_repeats() {
         let json = document(
             "",
             "",
-            &format!(r#"{{"name": "bones", "tiles": [{tiles}], "mode": "fill", "chance": 100.0}}"#),
+            &format!(
+                r#"{{"name": "bones", "tiles": [{tiles}],
+                    "neighbors": {{"full": [], "empty": []}}, "chance": 100.0}}"#
+            ),
         );
         assert!(matches!(
             load(&json).unwrap_err(),
@@ -567,9 +655,9 @@ fn two_groups_sharing_a_name_are_refused() {
         "",
         "",
         r#"{"name": "bones", "tiles": [64, 65, 80, 81],
-            "mode": "fill", "chance": 100.0},
+            "neighbors": {"full": [], "empty": []}, "chance": 100.0},
            {"name": "bones", "tiles": [100, 101, 116, 117],
-            "mode": "fill", "chance": 100.0}"#,
+            "neighbors": {"full": [], "empty": []}, "chance": 100.0}"#,
     );
     assert!(matches!(load(&json).unwrap_err(), BlueprintError::Group(_)));
 }
@@ -580,7 +668,7 @@ fn a_group_over_a_configured_tile_is_refused() {
         &plain_tile(65),
         "",
         r#"{"name": "bones", "tiles": [64, 65, 80, 81],
-            "mode": "fill", "chance": 100.0}"#,
+            "neighbors": {"full": [], "empty": []}, "chance": 100.0}"#,
     );
     assert!(matches!(
         load(&json).unwrap_err(),

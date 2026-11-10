@@ -2,7 +2,7 @@ use json_pretty_compact::PrettyCompactFormatter;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::model::group::{self, GroupError, GroupMode, TileGroup};
+use crate::model::group::{self, CellState, GroupError, TileGroup};
 use crate::model::neighbor::{NEIGHBOR_COUNT, NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
@@ -48,6 +48,12 @@ pub enum BlueprintError {
 
     #[error("group `{0}` lists orientations that flipping and rotating cannot make")]
     GroupOrientations(String),
+
+    #[error("group `{0}` lists a surrounding tile that is not on or next to the group")]
+    GroupNeighbor(String),
+
+    #[error("group `{0}` lists the same surrounding tile more than once")]
+    GroupNeighborRepeated(String),
 
     #[error("`{0}` is not a neighbor state, expected 0 (empty), 1 (full) or 2 (any)")]
     NeighborCode(u8),
@@ -142,17 +148,16 @@ pub enum BlueprintState {
 pub struct BlueprintGroup {
     pub name: String,
     pub tiles: Vec<usize>,
-    pub mode: BlueprintMode,
+    pub neighbors: BlueprintNeighbors,
     pub chance: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orientations: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum BlueprintMode {
-    Fill,
-    Decorate,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BlueprintNeighbors {
+    pub full: Vec<[i32; 2]>,
+    pub empty: Vec<[i32; 2]>,
 }
 
 pub struct Loaded {
@@ -415,13 +420,58 @@ fn store_group(group: &TileGroup) -> BlueprintGroup {
     BlueprintGroup {
         name: group.name.clone(),
         tiles: group.footprint(),
-        mode: match group.mode {
-            GroupMode::Fill => BlueprintMode::Fill,
-            GroupMode::Decorate => BlueprintMode::Decorate,
+        neighbors: BlueprintNeighbors {
+            full: stored_offsets(group, CellState::Full),
+            empty: stored_offsets(group, CellState::Empty),
         },
         chance: group.chance.percent(),
         orientations: store_group_orientations(group.mods),
     }
+}
+
+fn stored_offsets(group: &TileGroup, wanted: CellState) -> Vec<[i32; 2]> {
+    let Some((left, top)) = group.origin() else {
+        return Vec::new();
+    };
+    let mut offsets: Vec<[i32; 2]> = group
+        .neighbors
+        .iter()
+        .filter(|(_, state)| **state == wanted)
+        .map(|(&(x, y), _)| [x - left, y - top])
+        .collect();
+    offsets.sort_by_key(|&[x, y]| (y, x));
+
+    offsets
+}
+
+fn load_neighbors(
+    group: &mut TileGroup,
+    stored: &BlueprintNeighbors,
+) -> Result<(), BlueprintError> {
+    let Some((left, top)) = group.origin() else {
+        return Ok(());
+    };
+    group
+        .neighbors
+        .values_mut()
+        .for_each(|state| *state = CellState::Any);
+    for (offsets, state) in [
+        (&stored.full, CellState::Full),
+        (&stored.empty, CellState::Empty),
+    ] {
+        for &[dx, dy] in offsets {
+            let slot = group
+                .neighbors
+                .get_mut(&(left + dx, top + dy))
+                .ok_or_else(|| BlueprintError::GroupNeighbor(group.name.clone()))?;
+            if *slot != CellState::Any {
+                return Err(BlueprintError::GroupNeighborRepeated(group.name.clone()));
+            }
+            *slot = state;
+        }
+    }
+
+    Ok(())
 }
 
 fn store_group_orientations(mods: TileMods) -> Option<Vec<String>> {
@@ -452,16 +502,14 @@ fn load_group(group: &BlueprintGroup) -> Result<TileGroup, BlueprintError> {
         return Err(BlueprintError::GroupTiles(group.name.clone()));
     }
 
-    Ok(TileGroup {
-        name: group.name.clone(),
-        tiles: group.tiles.iter().copied().collect(),
-        mode: match group.mode {
-            BlueprintMode::Fill => GroupMode::Fill,
-            BlueprintMode::Decorate => GroupMode::Decorate,
-        },
+    let mut loaded = TileGroup {
         chance: Chance::new(group.chance)?,
         mods: load_group_mods(group)?,
-    })
+        ..TileGroup::new(group.name.clone(), group.tiles.iter().copied().collect())
+    };
+    load_neighbors(&mut loaded, &group.neighbors)?;
+
+    Ok(loaded)
 }
 
 fn store_state(state: NeighborState) -> BlueprintState {

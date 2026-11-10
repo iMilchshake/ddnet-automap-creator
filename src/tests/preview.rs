@@ -8,7 +8,7 @@ use twmap::ndarray::Array2;
 use crate::blueprint;
 use crate::export::compiler::RulesCompiler;
 use crate::export::r_source::{RuleSet, output_file, render};
-use crate::model::group::{GroupMode, TileGroup};
+use crate::model::group::{GroupPreset, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
@@ -44,6 +44,8 @@ const ELL_TILES: [usize; 4] = [65, 81, 97, 98];
 const COUNTED_TILE: usize = 65;
 const DOMINO_TILES: [usize; 2] = [COUNTED_TILE, COUNTED_TILE + 1];
 const DOMINO_SEEDS: RangeInclusive<u32> = 1..=32;
+const WALLED_FLOOR_WIDTH: usize = 16;
+const WALLED_FLOOR_HEIGHT: usize = 6;
 const LOW_CHANCE_PERCENT: f32 = 5.0;
 const LOW_CHANCE_SIDE: usize = 256;
 const LOW_CHANCE_SEEDS: RangeInclusive<u32> = 1..=8;
@@ -608,13 +610,10 @@ fn the_unmatched_marker_is_the_first_tile_nothing_claims() {
 fn the_unmatched_marker_skips_active_rules_and_group_footprints() {
     let mut project = Project::default();
     project.add_rule(1, some_rule());
-    project.add_group(TileGroup {
-        name: "bones".to_owned(),
-        tiles: TileGroup::rect_tiles(2, 3),
-        mode: GroupMode::Fill,
-        chance: Chance::FULL,
-        mods: TileMods::default(),
-    });
+    project.add_group(TileGroup::new(
+        "bones".to_owned(),
+        TileGroup::rect_tiles(2, 3),
+    ));
 
     assert_eq!(unmatched_marker(&project), 4);
 }
@@ -653,13 +652,8 @@ fn the_unmatched_marker_falls_back_when_only_the_mask_is_free() {
 
 #[test]
 fn a_group_of_any_shape_compiles() {
-    let group = TileGroup {
-        name: "bones".to_owned(),
-        tiles: [65, 81, 82].into_iter().collect(),
-        mode: GroupMode::Decorate,
-        chance: Chance::FULL,
-        mods: TileMods::default(),
-    };
+    let mut group = TileGroup::new("bones".to_owned(), [65, 81, 82].into_iter().collect());
+    group.apply_preset(GroupPreset::Decorate);
     let source = render(&[RuleSet {
         image_stem: IMAGE_STEM,
         name: "Test",
@@ -674,12 +668,14 @@ fn a_group_of_any_shape_compiles() {
 }
 
 fn ell(mods: TileMods, percent: f32) -> TileGroup {
+    shaped(&ELL_TILES, mods, percent)
+}
+
+fn shaped(tiles: &[usize], mods: TileMods, percent: f32) -> TileGroup {
     TileGroup {
-        name: "ell".to_owned(),
-        tiles: ELL_TILES.into_iter().collect(),
-        mode: GroupMode::Fill,
         chance: Chance::new(percent).unwrap(),
         mods,
+        ..TileGroup::new("ell".to_owned(), tiles.iter().copied().collect())
     }
 }
 
@@ -828,10 +824,11 @@ fn a_low_chance_group_places_about_its_chance_of_the_cells() {
 
 #[test]
 fn only_one_copy_is_placed_where_two_copies_fit_the_same_cells() {
-    let domino = TileGroup {
-        tiles: DOMINO_TILES.into_iter().collect(),
-        ..ell(TileMods::new(true, false, false), Chance::FULL.percent())
-    };
+    let domino = shaped(
+        &DOMINO_TILES,
+        TileMods::new(true, false, false),
+        Chance::FULL.percent(),
+    );
     let rules = compiled_group(&domino);
     let mut shape = CustomShape::empty(DOMINO_TILES.len(), 1);
     for column in 0..DOMINO_TILES.len() {
@@ -850,6 +847,135 @@ fn only_one_copy_is_placed_where_two_copies_fit_the_same_cells() {
     for copy in domino.copies() {
         assert!(winners.contains(&copy.transform), "{:?}", copy.transform);
     }
+}
+
+#[test]
+fn an_on_floor_group_lands_on_air_above_solid_ground_and_never_inside_it() {
+    let mut floor = shaped(&DOMINO_TILES, TileMods::default(), Chance::FULL.percent());
+    floor.apply_preset(GroupPreset::OnFloor);
+    let rules = compiled_group(&floor);
+
+    let automapped = automap(
+        &rules,
+        Sample::Custom,
+        &ground_shape(),
+        SEED,
+        UNMATCHED_MARKER,
+    )
+    .unwrap();
+    let covered = group_cells(&automapped);
+
+    assert!(!covered.is_empty());
+    for (_, row, placed) in covered {
+        assert_eq!(row, GROUND_ROWS.start - 1);
+        assert_eq!(placed.centre, Centre::Empty);
+    }
+}
+
+fn placed_cells(automapped: &Automapped) -> Vec<(usize, usize, PlacedTile)> {
+    (0..automapped.height)
+        .flat_map(|row| (0..automapped.width).map(move |column| (column, row)))
+        .filter_map(|(column, row)| match automapped.cell(column, row) {
+            PreviewCell::Placed(placed) => Some((column, row, placed)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn group_cells(automapped: &Automapped) -> Vec<(usize, usize, PlacedTile)> {
+    placed_cells(automapped)
+        .into_iter()
+        .filter(|(_, _, placed)| DOMINO_TILES.contains(&placed.index))
+        .collect()
+}
+
+fn shape_of(
+    width: usize,
+    height: usize,
+    solid: impl IntoIterator<Item = (usize, usize)>,
+) -> CustomShape {
+    let mut shape = CustomShape::empty(width, height);
+    for (column, row) in solid {
+        shape.set(column, row, true);
+    }
+
+    shape
+}
+
+fn on_floor_domino(mods: TileMods, percent: f32) -> TileGroup {
+    let mut floor = shaped(&DOMINO_TILES, mods, percent);
+    floor.apply_preset(GroupPreset::OnFloor);
+
+    floor
+}
+
+#[test]
+fn an_empty_centre_tile_never_lands_right_of_a_group_tile_on_air() {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
+    neighborhood.set_state(index_of("left"), NeighborState::Full);
+    let tiles = [(
+        AIR_DECORATION,
+        TileRule {
+            centre: Centre::Empty,
+            ..TileRule::new(neighborhood)
+        },
+    )];
+    let floor = on_floor_domino(TileMods::default(), Chance::FULL.percent());
+    let source = render(&[RuleSet {
+        image_stem: IMAGE_STEM,
+        name: "Test",
+        tiles: &tiles,
+        deactivated: &[],
+        groups: std::slice::from_ref(&floor),
+        chance_mode: ChanceMode::Normalize,
+    }])
+    .unwrap();
+
+    let wall = (0..GROUND_ROWS.start).map(|row| (0, row));
+    let floor_cells = GROUND_ROWS.flat_map(|row| (0..SHAPE_SIZE).map(move |column| (column, row)));
+    let shape = shape_of(SHAPE_SIZE, SHAPE_SIZE, wall.chain(floor_cells));
+
+    let automapped = automap(
+        &compiled(source),
+        Sample::Custom,
+        &shape,
+        SEED,
+        UNMATCHED_MARKER,
+    )
+    .unwrap();
+
+    assert_eq!(automapped.cell(1, 1), placed(AIR_DECORATION, Centre::Empty));
+    let covered: Vec<(usize, usize)> = group_cells(&automapped)
+        .into_iter()
+        .map(|(column, row, _)| (column, row))
+        .collect();
+    assert_eq!(covered, [(2, 1), (3, 1)]);
+}
+
+#[test]
+fn a_rotating_on_floor_group_at_half_chance_only_covers_air() {
+    let floor = on_floor_domino(TileMods::new(false, false, true), 50.0);
+    let rules = compiled_group(&floor);
+
+    let walls = (0..WALLED_FLOOR_HEIGHT).flat_map(|row| [(0, row), (WALLED_FLOOR_WIDTH - 1, row)]);
+    let floor_cells = (WALLED_FLOOR_HEIGHT - GROUND_ROWS.len()..WALLED_FLOOR_HEIGHT)
+        .flat_map(|row| (0..WALLED_FLOOR_WIDTH).map(move |column| (column, row)));
+    let shape = shape_of(
+        WALLED_FLOOR_WIDTH,
+        WALLED_FLOOR_HEIGHT,
+        walls.chain(floor_cells),
+    );
+
+    let group_tiles: Vec<PlacedTile> = DOMINO_SEEDS
+        .flat_map(|seed| {
+            let automapped = automap(&rules, Sample::Custom, &shape, seed, UNMATCHED_MARKER);
+            group_cells(&automapped.unwrap())
+        })
+        .map(|(_, _, placed)| placed)
+        .collect();
+
+    assert!(!group_tiles.is_empty());
+    assert!(group_tiles.iter().all(|p| p.centre == Centre::Empty));
 }
 
 #[test]

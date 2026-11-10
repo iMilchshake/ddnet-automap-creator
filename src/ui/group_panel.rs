@@ -1,54 +1,45 @@
-use std::collections::BTreeSet;
+use egui::{TextureHandle, Ui, Vec2};
 
-use egui::{Ui, Vec2};
-
-use crate::model::group::{GroupMode, TileGroup};
+use crate::model::group::{GroupPreset, TileGroup};
 use crate::model::tile::{Chance, TileMods};
+use crate::tileset::Tileset;
+use crate::ui::group_neighbors;
 use crate::ui::tile_panel::orientations::{ORIENTATIONS_LABEL, flag_width, show_preset_flags};
 
 const MIN_CHANCE_PERCENT: f32 = 0.1;
 const MAX_CHANCE_PERCENT: f32 = 100.0;
 const CHANCE_DRAG_SPEED: f64 = 0.5;
 
-const FILL_HINT: &str = "Placed wherever its own tiles are solid.";
-const DECORATE_HINT: &str = "Also needs a solid ring of tiles around it.";
+const SURROUNDINGS_LABEL: &str = "Surroundings";
 const ORIENTATIONS_HINT: &str = "Also places the group turned or mirrored where it fits.";
 const CHANCE_HINT: &str = "Shared across the group and its rotated and flipped copies.";
 
-pub fn mode_label(mode: GroupMode) -> &'static str {
-    match mode {
-        GroupMode::Fill => "Fill",
-        GroupMode::Decorate => "Decorate",
+fn preset_hint(preset: GroupPreset) -> &'static str {
+    match preset {
+        GroupPreset::Fill => "Placed wherever its own tiles are solid.",
+        GroupPreset::Decorate => "Also needs a solid ring of tiles around it.",
+        GroupPreset::OnFloor => "Placed on air, standing on solid ground.",
     }
 }
 
 pub struct GroupPanel {
     index: usize,
     name: String,
-    mode: GroupMode,
     /// A plain percentage while editing; only a valid one becomes a `Chance`.
     chance_percent: f32,
     mods: TileMods,
-    tiles: BTreeSet<usize>,
-    subtitle: String,
+    surroundings: TileGroup,
     error: Option<String>,
 }
 
 impl GroupPanel {
     pub fn new(index: usize, group: &TileGroup) -> Self {
-        let subtitle = match group.as_rect() {
-            Some((top_left, _)) => format!("Tile {top_left}, {}", group.size_label()),
-            None => group.size_label(),
-        };
-
         Self {
             index,
             name: group.name.clone(),
-            mode: group.mode,
             chance_percent: group.chance.percent(),
             mods: group.mods,
-            tiles: group.tiles.clone(),
-            subtitle,
+            surroundings: group.clone(),
             error: None,
         }
     }
@@ -57,12 +48,17 @@ impl GroupPanel {
         self.index
     }
 
-    pub fn show(&mut self, ui: &mut Ui, groups: &[TileGroup]) -> Option<TileGroup> {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        tileset: &Tileset,
+        texture: &TextureHandle,
+        groups: &[TileGroup],
+    ) -> Option<TileGroup> {
         ui.heading("Group");
-        ui.weak(&self.subtitle);
         ui.add_space(4.0);
 
-        let edit = match self.show_options(ui) {
+        let edit = match self.show_options(ui, tileset, texture) {
             true => self.validated(groups),
             false => None,
         };
@@ -74,7 +70,7 @@ impl GroupPanel {
         edit
     }
 
-    fn show_options(&mut self, ui: &mut Ui) -> bool {
+    fn show_options(&mut self, ui: &mut Ui, tileset: &Tileset, texture: &TextureHandle) -> bool {
         let mut changed = false;
 
         ui.horizontal(|ui| {
@@ -84,17 +80,21 @@ impl GroupPanel {
                 .changed();
         });
 
+        ui.add_space(4.0);
+        ui.label(SURROUNDINGS_LABEL);
         ui.horizontal(|ui| {
-            ui.label("Mode");
-            changed |= ui
-                .selectable_value(&mut self.mode, GroupMode::Fill, "Fill")
-                .on_hover_text(FILL_HINT)
-                .changed();
-            changed |= ui
-                .selectable_value(&mut self.mode, GroupMode::Decorate, "Decorate")
-                .on_hover_text(DECORATE_HINT)
-                .changed();
+            for preset in GroupPreset::ALL {
+                let active = self.surroundings.preset() == Some(preset);
+                let button = ui
+                    .selectable_label(active, preset.label())
+                    .on_hover_text(preset_hint(preset));
+                if button.clicked() {
+                    self.surroundings.apply_preset(preset);
+                    changed = true;
+                }
+            }
         });
+        changed |= group_neighbors::show(ui, tileset, texture, &mut self.surroundings);
 
         ui.add_space(4.0);
         ui.label(ORIENTATIONS_LABEL)
@@ -132,10 +132,9 @@ impl GroupPanel {
 
         let group = TileGroup {
             name: self.name.trim().to_owned(),
-            tiles: self.tiles.clone(),
-            mode: self.mode,
             chance,
             mods: self.mods,
+            ..self.surroundings.clone()
         };
 
         if let Err(error) = group.validate() {

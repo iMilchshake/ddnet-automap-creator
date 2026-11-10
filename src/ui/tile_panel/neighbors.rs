@@ -13,6 +13,7 @@ use crate::model::tile::{Centre, TileRule};
 use crate::model::transform::Transform;
 use crate::tileset::Tileset;
 use crate::ui::grid;
+use crate::ui::neighbor_input::{pressed_state, released_on};
 use crate::ui::neighbor_paint::{CORNER_RADIUS, paint_centre, paint_neighbor};
 
 const MIN_CELL_SIZE: f32 = 32.0;
@@ -245,17 +246,6 @@ fn paint_flash(ui: &Ui, rect: Rect, flash: Option<GridFlash>) {
     ui.painter().rect_filled(rect, CORNER_RADIUS, color);
 }
 
-fn released_on(ui: &Ui, response: &Response, rect: Rect, button: PointerButton) -> bool {
-    let released_inside = response.drag_stopped_by(button)
-        && ui.input(|input| {
-            input
-                .pointer
-                .latest_pos()
-                .is_some_and(|pos| rect.contains(pos))
-        });
-    response.clicked_by(button) || released_inside
-}
-
 fn clicked_centre(response: &Response) -> Option<Centre> {
     if response.clicked_by(PointerButton::Primary) {
         return Some(Centre::Full);
@@ -264,20 +254,6 @@ fn clicked_centre(response: &Response) -> Option<Centre> {
     response
         .clicked_by(PointerButton::Secondary)
         .then_some(Centre::Empty)
-}
-
-fn pressed_state(ui: &Ui) -> Option<NeighborState> {
-    ui.input(|input| {
-        if input.key_pressed(egui::Key::Num1) {
-            Some(NeighborState::Empty)
-        } else if input.key_pressed(egui::Key::Num2) {
-            Some(NeighborState::Full)
-        } else if input.key_pressed(egui::Key::Num3) {
-            Some(NeighborState::Any)
-        } else {
-            None
-        }
-    })
 }
 
 fn cell_tooltip(state: NeighborState) -> String {

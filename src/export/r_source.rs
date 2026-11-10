@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::model::group::{self, GroupCopy, GroupError, GroupMode, TileGroup};
+use crate::model::group::{self, Cell, GroupCopy, GroupError, TileGroup};
 use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode, Pool, PoolRuns, Variant};
 use crate::model::project::{Project, is_free_tile};
@@ -22,6 +22,8 @@ const ON_MASK: &str = ".If(IndexAt([0, 0]).Is(g:mask))";
 const CENTRE_TEST: &str = "IndexAt([0, 0])";
 const NO_DEFAULT_POS_RULE: &str = ".NoDefaultPosRule()";
 const FILL_OBJECTS: &str = "Run().FillObjects();";
+const HAS_SPACE: &str = "Object().HasSpace()";
+const ANCHOR: Cell = (0, 0);
 
 #[derive(Debug, Error)]
 pub enum ExportError {
@@ -211,6 +213,12 @@ fn render_rule_set(
             .flat_map(|pool| copy_run_lines(pool, rule_set.chance_mode));
         runs.push(new_run(false, rules));
     }
+    if !empty_centred.is_empty() {
+        let rules = empty_centred
+            .iter()
+            .flat_map(|pool| copy_run_lines(pool, rule_set.chance_mode));
+        runs.push(new_run(false, rules));
+    }
     if !rule_set.groups.is_empty() {
         let objects = rule_set
             .groups
@@ -218,12 +226,6 @@ fn render_rule_set(
             .map(|group| insert_object_block(index, namespaced, group, rule_set.groups))
             .chain([FILL_OBJECTS.to_owned()]);
         runs.push(new_run(true, objects));
-    }
-    if !empty_centred.is_empty() {
-        let rules = empty_centred
-            .iter()
-            .flat_map(|pool| copy_run_lines(pool, rule_set.chance_mode));
-        runs.push(new_run(false, rules));
     }
 
     lines.extend(runs.join(&String::new()));
@@ -342,31 +344,54 @@ fn insert_object_block(
         .enumerate()
         .map(|(position, copy)| {
             format!(
-                "InsertObject({}){}.If(\n{}\n);",
+                "InsertObject({}){}.If(\n{}\n){};",
                 with_suffix(object.clone(), copy.transform),
                 percent_call(copy_percent(group.chance, position, copies.len())),
-                copy_tests(group, copy, &names).join(",\n"),
+                copy_tests(copy, &names).join(",\n"),
+                anchor_call(copy),
             )
         })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn copy_tests(group: &TileGroup, copy: &GroupCopy, names: &[String]) -> Vec<String> {
-    let mut tests = vec![
-        "    Object().HasSpace()".to_owned(),
-        format!("    Object().IsNotOverlapping({})", names.join(", ")),
-    ];
-    if group.mode == GroupMode::Decorate {
-        let offsets: Vec<String> = copy
-            .ring_offsets()
-            .iter()
-            .map(|(x, y)| format!("[{x}, {y}]"))
-            .collect();
-        tests.push(format!("    IndexAt({}).IsFull()", offsets.join(", ")));
+fn anchor_call(copy: &GroupCopy) -> &'static str {
+    match copy.full.contains(&ANCHOR) {
+        true => "",
+        false => NO_DEFAULT_POS_RULE,
     }
+}
 
-    tests
+fn copy_tests(copy: &GroupCopy, names: &[String]) -> Vec<String> {
+    let all_own_full = copy.cells.iter().all(|cell| copy.full.contains(cell));
+    let (space_test, full): (Option<String>, Vec<Cell>) = match all_own_full {
+        true => (
+            Some(HAS_SPACE.to_owned()),
+            copy.full
+                .iter()
+                .filter(|cell| !copy.cells.contains(cell))
+                .copied()
+                .collect(),
+        ),
+        false => (None, copy.full.clone()),
+    };
+
+    [
+        Some(format!("Object().IsNotOverlapping({})", names.join(", "))),
+        space_test,
+        index_test(&full, "IsFull"),
+        index_test(&copy.empty, "IsEmpty"),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|test| format!("    {test}"))
+    .collect()
+}
+
+fn index_test(offsets: &[Cell], check: &str) -> Option<String> {
+    let positions: Vec<String> = offsets.iter().map(|(x, y)| format!("[{x}, {y}]")).collect();
+
+    (!positions.is_empty()).then(|| format!("IndexAt({}).{check}()", positions.join(", ")))
 }
 
 fn copy_names(index: usize, namespaced: bool, group: &TileGroup) -> Vec<String> {

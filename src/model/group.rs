@@ -1,21 +1,99 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
+use crate::model::neighbor::NeighborState;
 use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TILESET_SIDE, TileMods};
 use crate::model::transform::{Orientations, Transform};
 
+pub type Cell = (i32, i32);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GroupMode {
+pub enum CellState {
+    Any,
+    Full,
+    Empty,
+}
+
+impl CellState {
+    pub fn toggled_solid(self) -> Self {
+        match self {
+            Self::Any | Self::Empty => Self::Full,
+            Self::Full => Self::Any,
+        }
+    }
+
+    pub fn from_neighbor(state: NeighborState) -> Option<Self> {
+        match state {
+            NeighborState::Any => Some(Self::Any),
+            NeighborState::Full => Some(Self::Full),
+            NeighborState::Empty => Some(Self::Empty),
+            NeighborState::Is(_) => None,
+        }
+    }
+}
+
+impl From<CellState> for NeighborState {
+    fn from(state: CellState) -> Self {
+        match state {
+            CellState::Any => Self::Any,
+            CellState::Full => Self::Full,
+            CellState::Empty => Self::Empty,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupPreset {
     Fill,
     Decorate,
+    OnFloor,
+}
+
+impl GroupPreset {
+    pub const ALL: [Self; 3] = [Self::Fill, Self::Decorate, Self::OnFloor];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fill => "Fill",
+            Self::Decorate => "Decorate",
+            Self::OnFloor => "On floor",
+        }
+    }
+
+    fn own_state(self) -> CellState {
+        match self {
+            Self::Fill | Self::Decorate => CellState::Full,
+            Self::OnFloor => CellState::Empty,
+        }
+    }
+
+    fn ring_state(self, own: &BTreeSet<Cell>, (x, y): Cell) -> CellState {
+        match self {
+            Self::Fill => CellState::Any,
+            Self::Decorate => CellState::Full,
+            Self::OnFloor if own.contains(&(x, y - 1)) => CellState::Full,
+            Self::OnFloor => CellState::Any,
+        }
+    }
+
+    fn states(self, own: &BTreeSet<Cell>) -> BTreeMap<Cell, CellState> {
+        own.iter()
+            .map(|&cell| (cell, self.own_state()))
+            .chain(
+                ring_around(own)
+                    .into_iter()
+                    .map(|cell| (cell, self.ring_state(own, cell))),
+            )
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TileGroup {
     pub name: String,
     pub tiles: BTreeSet<usize>,
-    pub mode: GroupMode,
+    pub neighbors: BTreeMap<Cell, CellState>,
     pub chance: Chance,
     pub mods: TileMods,
 }
@@ -23,45 +101,57 @@ pub struct TileGroup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupCopy {
     pub transform: Transform,
-    pub cells: Vec<(i32, i32)>,
+    pub cells: Vec<Cell>,
+    pub full: Vec<Cell>,
+    pub empty: Vec<Cell>,
 }
 
-fn reading_order(&(x, y): &(i32, i32)) -> (i32, i32) {
+fn reading_order(&(x, y): &Cell) -> (i32, i32) {
     (y, x)
 }
 
+fn cell_of(tile: usize) -> Cell {
+    (column_of(tile) as i32, row_of(tile) as i32)
+}
+
+fn own_cells(tiles: &BTreeSet<usize>) -> BTreeSet<Cell> {
+    tiles.iter().map(|&tile| cell_of(tile)).collect()
+}
+
+fn ring_around(own: &BTreeSet<Cell>) -> BTreeSet<Cell> {
+    own.iter()
+        .flat_map(|&(x, y)| {
+            (-RING_REACH..=RING_REACH)
+                .flat_map(move |dy| (-RING_REACH..=RING_REACH).map(move |dx| (x + dx, y + dy)))
+        })
+        .filter(|cell| !own.contains(cell))
+        .collect()
+}
+
 impl GroupCopy {
-    fn new(transform: Transform, tile_cells: &[(i32, i32)]) -> Self {
-        let mut moved: Vec<(i32, i32)> = tile_cells
-            .iter()
-            .map(|&(x, y)| transform.move_offset(x, y))
-            .collect();
-        moved.sort_by_key(reading_order);
-        let (anchor_x, anchor_y) = *moved.first().expect("a validated group has tiles");
+    fn new(transform: Transform, group: &TileGroup) -> Self {
+        let moved = |&(x, y): &Cell| transform.move_offset(x, y);
+        let mut cells: Vec<Cell> = own_cells(&group.tiles).iter().map(moved).collect();
+        cells.sort_by_key(reading_order);
+        let (anchor_x, anchor_y) = *cells.first().expect("a validated group has tiles");
+        let relative = |(x, y): Cell| (x - anchor_x, y - anchor_y);
+        let offsets_where = |wanted: CellState| {
+            let mut offsets: Vec<Cell> = group
+                .neighbors
+                .iter()
+                .filter(|(_, state)| **state == wanted)
+                .map(|(cell, _)| relative(moved(cell)))
+                .collect();
+            offsets.sort_by_key(reading_order);
+            offsets
+        };
 
         Self {
             transform,
-            cells: moved
-                .into_iter()
-                .map(|(x, y)| (x - anchor_x, y - anchor_y))
-                .collect(),
+            cells: cells.into_iter().map(relative).collect(),
+            full: offsets_where(CellState::Full),
+            empty: offsets_where(CellState::Empty),
         }
-    }
-
-    pub fn ring_offsets(&self) -> Vec<(i32, i32)> {
-        let mut ring: Vec<(i32, i32)> = self
-            .cells
-            .iter()
-            .flat_map(|&(x, y)| {
-                (-RING_REACH..=RING_REACH)
-                    .flat_map(move |dy| (-RING_REACH..=RING_REACH).map(move |dx| (x + dx, y + dy)))
-            })
-            .filter(|cell| !self.cells.contains(cell))
-            .collect();
-        ring.sort_by_key(reading_order);
-        ring.dedup();
-
-        ring
     }
 }
 
@@ -106,6 +196,70 @@ fn rect_size(top_left: usize, bottom_right: usize) -> (usize, usize) {
 }
 
 impl TileGroup {
+    pub fn new(name: String, tiles: BTreeSet<usize>) -> Self {
+        let mut group = Self {
+            name,
+            tiles,
+            neighbors: BTreeMap::new(),
+            chance: Chance::FULL,
+            mods: TileMods::default(),
+        };
+        group.apply_preset(GroupPreset::Fill);
+
+        group
+    }
+
+    pub fn apply_preset(&mut self, preset: GroupPreset) {
+        self.neighbors = preset.states(&own_cells(&self.tiles));
+    }
+
+    pub fn preset(&self) -> Option<GroupPreset> {
+        let own = own_cells(&self.tiles);
+
+        GroupPreset::ALL
+            .into_iter()
+            .find(|preset| preset.states(&own) == self.neighbors)
+    }
+
+    pub fn set_tiles(&mut self, tiles: BTreeSet<usize>) {
+        let own = own_cells(&tiles);
+        let ring = ring_around(&own);
+        let was_own = own_cells(&self.tiles);
+        let was_ring = ring_around(&was_own);
+        let kept = |cell: Cell, same_role: bool, fallback: CellState| {
+            self.neighbors
+                .get(&cell)
+                .copied()
+                .filter(|_| same_role)
+                .unwrap_or(fallback)
+        };
+
+        self.neighbors = own
+            .iter()
+            .map(|&cell| (cell, kept(cell, was_own.contains(&cell), CellState::Full)))
+            .chain(
+                ring.iter()
+                    .map(|&cell| (cell, kept(cell, was_ring.contains(&cell), CellState::Any))),
+            )
+            .collect();
+        self.tiles = tiles;
+    }
+
+    pub fn own_tile_at(&self, cell: Cell) -> Option<usize> {
+        self.tiles
+            .iter()
+            .copied()
+            .find(|&tile| cell_of(tile) == cell)
+    }
+
+    pub fn origin(&self) -> Option<Cell> {
+        let cells = own_cells(&self.tiles);
+        let left = cells.iter().map(|&(x, _)| x).min()?;
+        let top = cells.iter().map(|&(_, y)| y).min()?;
+
+        Some((left, top))
+    }
+
     pub fn rect_tiles(top_left: usize, bottom_right: usize) -> BTreeSet<usize> {
         (row_of(top_left)..=row_of(bottom_right))
             .flat_map(|row| {
@@ -164,16 +318,10 @@ impl TileGroup {
     }
 
     pub fn copies(&self) -> Vec<GroupCopy> {
-        let cells: Vec<(i32, i32)> = self
-            .tiles
-            .iter()
-            .map(|&tile| (column_of(tile) as i32, row_of(tile) as i32))
-            .collect();
-
         Orientations::generated(self.mods)
             .transforms()
             .into_iter()
-            .map(|transform| GroupCopy::new(transform, &cells))
+            .map(|transform| GroupCopy::new(transform, self))
             .collect()
     }
 

@@ -1,5 +1,5 @@
 use crate::export::r_source::{ExportError, RuleSet, last_wins_odds, render, render_rule_sets};
-use crate::model::group::{GroupMode, TileGroup};
+use crate::model::group::{CellState, GroupPreset, TileGroup};
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
@@ -158,13 +158,7 @@ fn a_rule_set_with_only_deactivated_rules_is_empty() {
 
 #[test]
 fn a_deactivated_rule_under_a_group_still_stops_the_export() {
-    let group = TileGroup {
-        name: "bones".to_owned(),
-        tiles: TileGroup::rect_tiles(64, 81),
-        mode: GroupMode::Fill,
-        chance: Chance::FULL,
-        mods: TileMods::default(),
-    };
+    let group = tile_group("bones", 64, GroupPreset::Fill, 100.0);
     let tiles = [(65, anywhere(100.0)), (1, anywhere(100.0))];
 
     assert!(matches!(
@@ -293,7 +287,7 @@ fn the_mask_moves_below_a_rule_on_tile_255() {
 #[test]
 fn the_mask_moves_below_a_group_on_tile_255() {
     let tiles = [(5, anywhere(30.0)), (6, anywhere(30.0))];
-    let groups = [tile_group("bones", 238, GroupMode::Fill, 100.0)];
+    let groups = [tile_group("bones", 238, GroupPreset::Fill, 100.0)];
 
     let source = emit_with_groups(&tiles, &groups).unwrap();
 
@@ -417,21 +411,31 @@ fn an_empty_rule_set_is_refused() {
     assert!(matches!(error, ExportError::EmptyRuleSet(name) if name == "Grass_Main"));
 }
 
-fn tile_group(name: &str, top_left: usize, mode: GroupMode, percent: f32) -> TileGroup {
+fn tile_group(name: &str, top_left: usize, preset: GroupPreset, percent: f32) -> TileGroup {
+    let mut group = TileGroup::new(
+        name.to_owned(),
+        TileGroup::rect_tiles(top_left, top_left + 17),
+    );
+    group.apply_preset(preset);
+
     TileGroup {
-        name: name.to_owned(),
-        tiles: TileGroup::rect_tiles(top_left, top_left + 17),
-        mode,
         chance: Chance::new(percent).unwrap(),
-        mods: TileMods::default(),
+        ..group
     }
+}
+
+fn reshaped(mut group: TileGroup, tiles: &[usize], preset: GroupPreset) -> TileGroup {
+    group.set_tiles(tiles.iter().copied().collect());
+    group.apply_preset(preset);
+
+    group
 }
 
 #[test]
 fn every_copy_of_a_group_is_inserted_and_rolls_among_the_spots_left_over() {
     let rotating = TileGroup {
         mods: TileMods::new(false, false, true),
-        ..tile_group("bones", 64, GroupMode::Fill, 100.0)
+        ..tile_group("bones", 64, GroupPreset::Fill, 100.0)
     };
 
     let source = emit_with_groups(&[], &[rotating]).unwrap();
@@ -450,9 +454,11 @@ fn every_copy_of_a_group_is_inserted_and_rolls_among_the_spots_left_over() {
 fn a_decorating_copy_tests_the_ring_of_its_own_shape() {
     let rotating = TileGroup {
         mods: TileMods::new(false, false, true),
-        mode: GroupMode::Decorate,
-        tiles: [65, 81, 82].into_iter().collect(),
-        ..tile_group("bones", 64, GroupMode::Fill, 100.0)
+        ..reshaped(
+            tile_group("bones", 64, GroupPreset::Fill, 100.0),
+            &[65, 81, 82],
+            GroupPreset::Decorate,
+        )
     };
 
     let source = emit_with_groups(&[], &[rotating]).unwrap();
@@ -469,8 +475,8 @@ fn a_decorating_copy_tests_the_ring_of_its_own_shape() {
 fn groups_become_objects_declared_before_the_automapper() {
     let tiles = [(1, rule(Neighborhood::default(), 100.0, false))];
     let groups = [
-        tile_group("bones", 64, GroupMode::Fill, 100.0),
-        tile_group("pipes", 100, GroupMode::Fill, 100.0),
+        tile_group("bones", 64, GroupPreset::Fill, 100.0),
+        tile_group("pipes", 100, GroupPreset::Fill, 100.0),
     ];
 
     let source = emit_with_groups(&tiles, &groups).unwrap();
@@ -492,10 +498,11 @@ fn groups_become_objects_declared_before_the_automapper() {
 
 #[test]
 fn a_group_that_is_not_a_rectangle_is_declared_through_indices() {
-    let group = TileGroup {
-        tiles: [65, 66, 81, 97, 98, 99].into_iter().collect(),
-        ..tile_group("bones", 64, GroupMode::Fill, 100.0)
-    };
+    let group = reshaped(
+        tile_group("bones", 64, GroupPreset::Fill, 100.0),
+        &[65, 66, 81, 97, 98, 99],
+        GroupPreset::Fill,
+    );
     let source = emit_with_groups(&[], &[group]).unwrap();
 
     assert!(
@@ -506,10 +513,11 @@ fn a_group_that_is_not_a_rectangle_is_declared_through_indices() {
 
 #[test]
 fn a_run_of_indices_does_not_wrap_across_tileset_rows() {
-    let group = TileGroup {
-        tiles: [15, 16, 40].into_iter().collect(),
-        ..tile_group("bones", 64, GroupMode::Fill, 100.0)
-    };
+    let group = reshaped(
+        tile_group("bones", 64, GroupPreset::Fill, 100.0),
+        &[15, 16, 40],
+        GroupPreset::Fill,
+    );
     let source = emit_with_groups(&[], &[group]).unwrap();
 
     assert!(
@@ -520,16 +528,18 @@ fn a_run_of_indices_does_not_wrap_across_tileset_rows() {
 
 #[test]
 fn a_decorate_group_also_tests_the_ring_around_its_footprint() {
-    let groups = [tile_group("bones", 64, GroupMode::Decorate, 1.0)];
+    let groups = [tile_group("bones", 64, GroupPreset::Decorate, 1.0)];
     let source = emit_with_groups(&[], &groups).unwrap();
 
     assert!(
         source.contains(
             "InsertObject(o:bones).Chance(1).If(\n\
-         \x20   Object().HasSpace(),\n\
          \x20   Object().IsNotOverlapping(o:bones),\n\
-         \x20   IndexAt([-1, -1], [0, -1], [1, -1], [2, -1], [-1, 0], [2, 0], \
-         [-1, 1], [2, 1], [-1, 2], [0, 2], [1, 2], [2, 2]).IsFull()\n\
+         \x20   Object().HasSpace(),\n\
+         \x20   IndexAt([-1, -1], [0, -1], [1, -1], [2, -1], \
+         [-1, 0], [2, 0], \
+         [-1, 1], [2, 1], \
+         [-1, 2], [0, 2], [1, 2], [2, 2]).IsFull()\n\
          );"
         ),
         "{source}"
@@ -537,27 +547,63 @@ fn a_decorate_group_also_tests_the_ring_around_its_footprint() {
 }
 
 #[test]
-fn a_fill_group_at_full_chance_tests_nothing_but_space_and_overlap() {
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+fn a_fill_group_tests_its_own_tiles_for_solid_and_overlap() {
+    let groups = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
     let source = emit_with_groups(&[], &groups).unwrap();
 
     assert!(
         source.contains(
             "InsertObject(o:bones).If(\n\
-         \x20   Object().HasSpace(),\n\
-         \x20   Object().IsNotOverlapping(o:bones)\n\
+         \x20   Object().IsNotOverlapping(o:bones),\n\
+         \x20   Object().HasSpace()\n\
          );"
         ),
         "{source}"
     );
-    assert!(!source.contains("IsFull()"));
+    assert!(!source.contains("IsFull"));
+    assert!(!source.contains("IsEmpty"));
+}
+
+#[test]
+fn a_group_with_a_mixed_footprint_lists_its_own_cells_explicitly() {
+    let mut group = tile_group("bones", 64, GroupPreset::Fill, 100.0);
+    group.neighbors.insert((1, 5), CellState::Any);
+    let source = emit_with_groups(&[], &[group]).unwrap();
+
+    assert!(
+        source.contains(
+            "InsertObject(o:bones).If(\n\
+         \x20   Object().IsNotOverlapping(o:bones),\n\
+         \x20   IndexAt([0, 0], [1, 0], [0, 1]).IsFull()\n\
+         );"
+        ),
+        "{source}"
+    );
+    assert!(!source.contains("HasSpace"));
+}
+
+#[test]
+fn an_on_floor_group_tests_air_inside_ground_below_and_skips_the_default_rule() {
+    let groups = [tile_group("bones", 64, GroupPreset::OnFloor, 100.0)];
+    let source = emit_with_groups(&[], &groups).unwrap();
+
+    assert!(
+        source.contains(
+            "InsertObject(o:bones).If(\n\
+         \x20   Object().IsNotOverlapping(o:bones),\n\
+         \x20   IndexAt([0, 2], [1, 2]).IsFull(),\n\
+         \x20   IndexAt([0, 0], [1, 0], [0, 1], [1, 1]).IsEmpty()\n\
+         ).NoDefaultPosRule();"
+        ),
+        "{source}"
+    );
 }
 
 #[test]
 fn every_group_is_told_not_to_overlap_any_group_including_itself() {
     let groups = [
-        tile_group("bones", 64, GroupMode::Fill, 100.0),
-        tile_group("pipes", 100, GroupMode::Fill, 100.0),
+        tile_group("bones", 64, GroupPreset::Fill, 100.0),
+        tile_group("pipes", 100, GroupPreset::Fill, 100.0),
     ];
     let source = emit_with_groups(&[], &groups).unwrap();
 
@@ -569,7 +615,7 @@ fn every_group_is_told_not_to_overlap_any_group_including_itself() {
 
 #[test]
 fn groups_alone_start_their_run_right_after_the_automapper_line() {
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let groups = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
     let source = emit_with_groups(&[], &groups).unwrap();
 
     assert!(
@@ -579,7 +625,7 @@ fn groups_alone_start_their_run_right_after_the_automapper_line() {
 
 #[test]
 fn runs_are_separated_by_one_blank_line() {
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let groups = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
     let tiles = [
         (1, anywhere(100.0)),
         (2, rule(tile_specific(), 100.0, false)),
@@ -602,7 +648,7 @@ fn a_rule_set_without_groups_never_mentions_objects() {
 
 #[test]
 fn a_tile_cannot_be_configured_and_grouped_at_once() {
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let groups = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
 
     for tile in [64, 65, 80, 81] {
         let tiles = [(tile, rule(Neighborhood::default(), 100.0, false))];
@@ -616,7 +662,7 @@ fn a_tile_cannot_be_configured_and_grouped_at_once() {
 
 #[test]
 fn an_invalid_group_stops_the_export() {
-    let groups = [tile_group("big_bones", 64, GroupMode::Fill, 100.0)];
+    let groups = [tile_group("big_bones", 64, GroupPreset::Fill, 100.0)];
 
     let error = emit_with_groups(&[], &groups).unwrap_err();
     assert!(matches!(error, ExportError::Group(_)));
@@ -624,7 +670,7 @@ fn an_invalid_group_stops_the_export() {
 
 #[test]
 fn groups_alone_are_enough_to_export() {
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let groups = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
     assert!(emit_with_groups(&[], &groups).is_ok());
 }
 
@@ -663,8 +709,8 @@ fn several_rule_sets_share_one_output_and_header() {
 #[test]
 fn several_rule_sets_namespace_same_named_groups() {
     let tiles = [(1, rule(Neighborhood::default(), 100.0, false))];
-    let groups_a = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
-    let groups_b = [tile_group("bones", 100, GroupMode::Fill, 100.0)];
+    let groups_a = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
+    let groups_b = [tile_group("bones", 100, GroupPreset::Fill, 100.0)];
 
     let source = render(&[
         rule_set("SetA", &tiles, &groups_a),
@@ -680,7 +726,7 @@ fn several_rule_sets_namespace_same_named_groups() {
 #[test]
 fn a_single_rule_set_keeps_unnamespaced_object_names() {
     let tiles = [(1, rule(Neighborhood::default(), 100.0, false))];
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let groups = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
 
     let source = render(&[rule_set("SetA", &tiles, &groups)]).unwrap();
 
@@ -789,7 +835,7 @@ fn rule_sets_without_tile_specific_neighbors_get_no_extra_run() {
 
 #[test]
 fn the_copy_run_sits_before_the_group_runs() {
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let groups = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
     let tiles = [(2, rule(tile_specific(), 100.0, false))];
 
     let source = emit_with_groups(&tiles, &groups).unwrap();
@@ -800,7 +846,7 @@ fn the_copy_run_sits_before_the_group_runs() {
 
 #[test]
 fn fill_objects_directly_follows_the_last_insert_object_block() {
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+    let groups = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
     let tiles = [(1, anywhere(100.0))];
 
     let source = emit_with_groups(&tiles, &groups).unwrap();
@@ -827,21 +873,24 @@ fn empty_centred(neighborhood: Neighborhood, percent: f32) -> TileRule {
 }
 
 #[test]
-fn empty_centre_rules_get_a_last_copy_run_after_the_group_runs() {
-    let groups = [tile_group("bones", 64, GroupMode::Fill, 100.0)];
+fn empty_centre_rules_get_a_copy_run_before_the_group_runs() {
+    let groups = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
     let tiles = [(2, empty_centred(full_at_right(), 100.0))];
 
     let source = emit_with_groups(&tiles, &groups).unwrap();
 
     assert!(
-        source.ends_with(
-            "Run().FillObjects();\n\
+        source.contains(
+            "NewRun();\n\
+             Insert(2).NoDefaultPosRule().If(IndexAt([0, 0]).IsEmpty().IsFullAt(right), IndexAt([1, 0]).IsNotOut());\n\
              \n\
              NewRun();\n\
-             Insert(2).NoDefaultPosRule().If(IndexAt([0, 0]).IsEmpty().IsFullAt(right), IndexAt([1, 0]).IsNotOut());\n"
+             OverrideLayer();\n\
+             InsertObject("
         ),
         "{source}"
     );
+    assert!(source.ends_with("Run().FillObjects();\n"), "{source}");
     assert!(!source.contains("util:NewRule"));
 }
 

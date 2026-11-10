@@ -17,6 +17,7 @@ const MIN_MARK_WIDTH: f32 = 1.0;
 
 const MARK_COLOR: Color32 = Color32::from_gray(150);
 const FULL_FILL: Color32 = Color32::from_gray(185);
+const FULL_OVERLAY: Color32 = Color32::from_rgba_premultiplied(100, 100, 100, 110);
 const ANY_LIGHT: Color32 = Color32::from_gray(96);
 const ANY_DARK: Color32 = Color32::from_gray(64);
 const PREVIEW_LIGHT: Color32 = Color32::from_gray(64);
@@ -44,9 +45,7 @@ pub fn paint_state(ui: &Ui, rect: Rect, state: NeighborState) {
     );
     let border = match state {
         NeighborState::Empty => {
-            let cross = rect.shrink(rect.width() * EMPTY_CROSS_INSET_FRACTION);
-            painter.line_segment([cross.left_top(), cross.right_bottom()], mark);
-            painter.line_segment([cross.right_top(), cross.left_bottom()], mark);
+            paint_cross(painter, rect, mark);
             mark
         }
         NeighborState::Full => {
@@ -64,6 +63,36 @@ pub fn paint_state(ui: &Ui, rect: Rect, state: NeighborState) {
     };
 
     painter.rect_stroke(rect, CORNER_RADIUS, border, StrokeKind::Inside);
+}
+
+fn paint_cross(painter: &Painter, rect: Rect, mark: Stroke) {
+    let cross = rect.shrink(rect.width() * EMPTY_CROSS_INSET_FRACTION);
+    painter.line_segment([cross.left_top(), cross.right_bottom()], mark);
+    painter.line_segment([cross.right_top(), cross.left_bottom()], mark);
+}
+
+pub fn paint_marked_tile(
+    ui: &Ui,
+    rect: Rect,
+    texture: &TextureHandle,
+    slice: &TileSlice,
+    state: NeighborState,
+) {
+    let painter = ui.painter();
+    paint_turned_tile(painter, rect, texture, slice, Transform::IDENTITY);
+
+    let mark = Stroke::new(
+        (rect.width() * MARK_WIDTH_FRACTION).max(MIN_MARK_WIDTH),
+        MARK_COLOR,
+    );
+    match state {
+        NeighborState::Full => {
+            painter.rect_filled(rect, CORNER_RADIUS, FULL_OVERLAY);
+        }
+        NeighborState::Empty => paint_cross(painter, rect, mark),
+        NeighborState::Any | NeighborState::Is(_) => {}
+    }
+    painter.rect_stroke(rect, CORNER_RADIUS, mark, StrokeKind::Inside);
 }
 
 pub fn paint_neighbor(

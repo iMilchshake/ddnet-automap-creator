@@ -1,5 +1,7 @@
-use crate::model::group::{GroupError, GroupMode, TileGroup, validate_all};
-use crate::model::tile::{Chance, TILE_COUNT, TILESET_SIDE, TileMods};
+use std::collections::BTreeMap;
+
+use crate::model::group::{CellState, GroupError, GroupPreset, TileGroup, validate_all};
+use crate::model::tile::{TILE_COUNT, TILESET_SIDE};
 use crate::model::transform::Transform;
 use crate::tests::support::{QUARTER_TURN, mods};
 
@@ -10,21 +12,40 @@ fn group(name: &str, top_left: usize, width: usize, height: usize) -> TileGroup 
 }
 
 fn shaped(name: &str, tiles: impl IntoIterator<Item = usize>) -> TileGroup {
-    TileGroup {
-        name: name.to_owned(),
-        tiles: tiles.into_iter().collect(),
-        mode: GroupMode::Fill,
-        chance: Chance::FULL,
-        mods: TileMods::default(),
-    }
+    TileGroup::new(name.to_owned(), tiles.into_iter().collect())
 }
 
 fn l_shape() -> TileGroup {
     shaped("a", [65, 81, 82])
 }
 
+fn decorated(group: &TileGroup) -> TileGroup {
+    let mut decorated = group.clone();
+    decorated.apply_preset(GroupPreset::Decorate);
+
+    decorated
+}
+
 fn ring_of(group: &TileGroup) -> Vec<(i32, i32)> {
-    group.copies()[0].ring_offsets()
+    ring_of_copy(group, 0)
+}
+
+fn ring_of_copy(group: &TileGroup, copy: usize) -> Vec<(i32, i32)> {
+    let copy = decorated(group).copies().remove(copy);
+
+    copy.full
+        .into_iter()
+        .filter(|cell| !copy.cells.contains(cell))
+        .collect()
+}
+
+fn states_of(group: &TileGroup, wanted: CellState) -> Vec<(i32, i32)> {
+    group
+        .neighbors
+        .iter()
+        .filter(|(_, state)| **state == wanted)
+        .map(|(&cell, _)| cell)
+        .collect()
 }
 
 #[test]
@@ -55,10 +76,10 @@ fn the_ring_of_a_copy_follows_its_turned_shape() {
         mods: mods(false, false, true),
         ..l_shape()
     };
-    let rotated = &rotating.copies()[1];
+    let ring = ring_of_copy(&rotating, 1);
 
-    assert!(rotated.ring_offsets().contains(&(1, 1)));
-    assert!(!rotated.ring_offsets().contains(&(0, 1)));
+    assert!(ring.contains(&(1, 1)));
+    assert!(!ring.contains(&(0, 1)));
 }
 
 #[test]
@@ -159,6 +180,84 @@ fn the_ring_of_an_l_shape_hugs_the_notch_and_stays_relative_to_the_anchor() {
             (2, 2),
         ]
     );
+}
+
+#[test]
+fn a_new_group_is_a_fill_group() {
+    let fresh = l_shape();
+
+    assert_eq!(fresh.preset(), Some(GroupPreset::Fill));
+    assert_eq!(states_of(&fresh, CellState::Full).len(), 3);
+    assert_eq!(states_of(&fresh, CellState::Any).len(), 12);
+}
+
+#[test]
+fn every_preset_is_recognised_after_it_is_applied() {
+    for preset in GroupPreset::ALL {
+        let mut group = l_shape();
+        group.apply_preset(preset);
+
+        assert_eq!(group.preset(), Some(preset));
+    }
+}
+
+#[test]
+fn a_hand_edited_map_matches_no_preset() {
+    let mut group = l_shape();
+    group.neighbors.insert((1, 4), CellState::Empty);
+
+    assert_eq!(group.preset(), None);
+}
+
+#[test]
+fn the_decorate_preset_makes_the_whole_ring_solid() {
+    let mut group = l_shape();
+    group.apply_preset(GroupPreset::Decorate);
+
+    assert_eq!(states_of(&group, CellState::Full).len(), 15);
+    assert!(states_of(&group, CellState::Any).is_empty());
+}
+
+#[test]
+fn the_on_floor_preset_needs_air_inside_and_ground_below() {
+    let mut group = l_shape();
+    group.apply_preset(GroupPreset::OnFloor);
+    let copy = &group.copies()[0];
+
+    assert_eq!(copy.empty, [(0, 0), (0, 1), (1, 1)]);
+    assert_eq!(copy.full, [(0, 2), (1, 2)]);
+}
+
+#[test]
+fn reshaping_keeps_states_of_cells_that_keep_their_role() {
+    let mut group = group("a", 64, 2, 1);
+    group.neighbors.insert((0, 4), CellState::Any);
+    group.neighbors.insert((2, 3), CellState::Full);
+    group.neighbors.insert((-1, 4), CellState::Empty);
+
+    group.set_tiles(TileGroup::rect_tiles(64, 66));
+
+    let expected = BTreeMap::from([
+        ((2, 4), CellState::Full),
+        ((0, 4), CellState::Any),
+        ((2, 3), CellState::Full),
+        ((-1, 4), CellState::Empty),
+        ((3, 4), CellState::Any),
+    ]);
+    for (cell, state) in expected {
+        assert_eq!(group.neighbors[&cell], state, "{cell:?}");
+    }
+    assert_eq!(group.neighbors[&(1, 4)], CellState::Full);
+}
+
+#[test]
+fn reshaping_drops_cells_that_are_no_longer_part_of_the_group() {
+    let mut group = group("a", 64, 3, 1);
+
+    group.set_tiles(TileGroup::rect_tiles(64, 65));
+
+    assert!(!group.neighbors.contains_key(&(3, 4)));
+    assert_eq!(group.neighbors[&(2, 4)], CellState::Any);
 }
 
 #[test]

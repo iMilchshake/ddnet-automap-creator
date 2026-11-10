@@ -13,10 +13,10 @@ use crate::export::r_source::{self, ExportError, RuleSet};
 use crate::file_filter::{AUTOMAPPER, BLUEPRINT, RPP_SOURCE, RULES, TILESET_IMAGE};
 use crate::file_picker::{FilePicker, PickedFile};
 use crate::file_saver::FileSaver;
-use crate::model::group::{GroupError, GroupMode, TileGroup};
+use crate::model::group::{GroupError, TileGroup};
 use crate::model::pool::{self, Pool};
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{AIR_TILE, Chance, TileMods, TileRule};
+use crate::model::tile::{AIR_TILE, TileRule};
 use crate::preview::{CustomShape, Sample, placing_rule};
 use crate::tileset::{self, Tileset};
 use crate::ui::code_frame::code_chip;
@@ -1112,7 +1112,12 @@ impl AutomapperApp {
                         }
                         Inspector::Group(panel) => {
                             group_edit = panel
-                                .show(ui, self.rule_sets.active().groups())
+                                .show(
+                                    ui,
+                                    &loaded.tileset,
+                                    &loaded.texture,
+                                    self.rule_sets.active().groups(),
+                                )
                                 .map(|group| (panel.index(), group));
                         }
                         Inspector::Empty => {
@@ -1565,8 +1570,8 @@ impl AutomapperApp {
         };
         let mut group = original.clone();
 
-        match shape {
-            ShapeEdit::Remove => group.tiles.retain(|tile| !tiles.contains(tile)),
+        let reshaped = match shape {
+            ShapeEdit::Remove => group.tiles.difference(tiles).copied().collect(),
             ShapeEdit::Add => {
                 let project = self.rule_sets.active();
                 if !tiles
@@ -1577,13 +1582,14 @@ impl AutomapperApp {
                         .warning(ctx, "Those tiles are air, in another group or have a rule");
                     return;
                 }
-                group.tiles.extend(tiles);
+                group.tiles.union(tiles).copied().collect()
             }
-        }
+        };
 
-        if group.tiles == original.tiles {
+        if reshaped == original.tiles {
             return;
         }
+        group.set_tiles(reshaped);
         if let Err(error) = group.validate() {
             let message = match error {
                 GroupError::TooSmall => {
@@ -1600,13 +1606,7 @@ impl AutomapperApp {
     }
 
     fn create_group(&mut self, ctx: &Context, tiles: BTreeSet<usize>) {
-        let group = TileGroup {
-            name: self.rule_sets.active().unused_group_name(),
-            tiles,
-            mode: GroupMode::Fill,
-            chance: Chance::FULL,
-            mods: TileMods::default(),
-        };
+        let group = TileGroup::new(self.rule_sets.active().unused_group_name(), tiles);
 
         if let Err(error) = group.validate() {
             self.status.warning(ctx, error.to_string());

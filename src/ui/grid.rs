@@ -7,16 +7,16 @@ use egui::{
     Vec2, pos2,
 };
 
-use crate::model::group::TileGroup;
+use crate::model::group::{GroupPreset, TileGroup};
 use crate::model::project::Project;
 use crate::model::tile::{Chance, TILESET_SIDE};
 use crate::tileset::{TileSlice, Tileset};
 use crate::ui::allocate_centered;
-use crate::ui::group_panel::mode_label;
 use crate::ui::hover_card;
 use crate::ui::tile_state::{TileState, tile_state};
 
 const MIN_CELL_SIZE: f32 = 8.0;
+const CUSTOM_LABEL: &str = "Custom";
 
 const MIN_BADGE_CELL_SIZE: f32 = 16.0;
 
@@ -357,7 +357,7 @@ pub fn describe_group(group: &TileGroup) -> String {
         "{}: {}, {}",
         group.name,
         group.size_label(),
-        mode_label(group.mode)
+        group.preset().map_or(CUSTOM_LABEL, GroupPreset::label)
     );
     if !group.chance.is_full() {
         text.push_str(&format!(", {}%", group.chance.percent()));

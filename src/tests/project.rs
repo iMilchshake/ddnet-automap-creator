@@ -1,9 +1,9 @@
 use crate::export::r_source::{RuleSet, render};
-use crate::model::group::{GroupMode, TileGroup};
+use crate::model::group::TileGroup;
 use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode};
 use crate::model::project::Project;
-use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileMods, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileRule};
 
 fn some_rule() -> TileRule {
     TileRule::new(Neighborhood::uniform(NeighborState::Full))
@@ -43,13 +43,10 @@ fn the_mask_skips_tiles_with_a_rule_even_when_deactivated() {
 #[test]
 fn the_mask_skips_tiles_inside_a_group() {
     let mut project = Project::default();
-    project.add_group(TileGroup {
-        name: "bones".to_owned(),
-        tiles: TileGroup::rect_tiles(TILE_COUNT - 18, TILE_COUNT - 1),
-        mode: GroupMode::Fill,
-        chance: Chance::FULL,
-        mods: TileMods::default(),
-    });
+    project.add_group(TileGroup::new(
+        "bones".to_owned(),
+        TileGroup::rect_tiles(TILE_COUNT - 18, TILE_COUNT - 1),
+    ));
 
     assert_eq!(project.mask_tile(), Some(TILE_COUNT - 3));
 }
@@ -190,13 +187,10 @@ fn a_tile_is_free_only_when_no_rule_and_no_group_claim_it() {
     assert!(!project.is_free(64));
 
     let mut grouped = Project::default();
-    grouped.add_group(TileGroup {
-        name: "bones".to_owned(),
-        tiles: TileGroup::rect_tiles(64, 81),
-        mode: GroupMode::Fill,
-        chance: Chance::FULL,
-        mods: TileMods::default(),
-    });
+    grouped.add_group(TileGroup::new(
+        "bones".to_owned(),
+        TileGroup::rect_tiles(64, 81),
+    ));
 
     for tile in [64, 65, 80, 81] {
         assert!(!grouped.is_free(tile), "{tile}");
