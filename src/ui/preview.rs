@@ -5,7 +5,6 @@ use egui::{
     StrokeKind, TextureHandle, Vec2, pos2,
 };
 
-use crate::model::neighbor::Neighborhood;
 use crate::model::transform::Transform;
 use crate::preview::{Automapped, CustomShape, PlacedTile, PreviewCell};
 use crate::tileset::{TileSlice, Tileset};
@@ -22,7 +21,8 @@ const PATH_SAMPLES_PER_CELL: f32 = 2.0;
 
 pub struct ClickedTile {
     pub placed: PlacedTile,
-    pub around: Neighborhood,
+    pub column: usize,
+    pub row: usize,
 }
 
 #[derive(Default)]
@@ -112,9 +112,10 @@ fn clicked_cell(
 
     response
         .clicked_by(PointerButton::Primary)
-        .then(|| ClickedTile {
+        .then_some(ClickedTile {
             placed,
-            around: automapped.neighbors_at(column, row),
+            column,
+            row,
         })
 }
 

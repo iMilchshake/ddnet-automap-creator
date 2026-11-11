@@ -167,16 +167,16 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
             paint_tile(&painter, cell, view.texture, tile);
         }
 
-        if let Some(darkening) = tile_darkening(state) {
+        if let Some(darkening) = tile_darkening(&state) {
             painter.rect_filled(cell, 0.0, darkening);
         }
 
-        if let Some(color) = outline_color(state) {
+        if let Some(color) = outline_color(&state) {
             paint_outline(&painter, &view, cell, index, color, pixels_per_point);
         }
 
         let share = view.shares.get(&index).copied();
-        paint_badge(&painter, cell, cell_size, state, share, ui.visuals());
+        paint_badge(&painter, cell, cell_size, &state, share, ui.visuals());
     }
 
     for (index, group) in view.project.groups().iter().enumerate() {
@@ -530,7 +530,7 @@ impl BorderOutliner {
     }
 }
 
-fn outline_color(state: TileState) -> Option<Color32> {
+fn outline_color(state: &TileState) -> Option<Color32> {
     match state {
         TileState::Configured(_) => Some(CONFIGURED_OUTLINE),
         TileState::Deactivated(Some(_)) => Some(DEACTIVATED_OUTLINE),
@@ -539,7 +539,7 @@ fn outline_color(state: TileState) -> Option<Color32> {
 }
 
 fn has_same_outline(view: &GridView<'_>, index: usize, color: Color32) -> bool {
-    outline_color(tile_state(view.tileset, view.project, index)) == Some(color)
+    outline_color(&tile_state(view.tileset, view.project, index)) == Some(color)
 }
 
 fn paint_outline(
@@ -647,7 +647,7 @@ fn paint_checkerboard(painter: &egui::Painter, cell: Rect, index: usize) {
     painter.rect_filled(cell, 0.0, color);
 }
 
-fn tile_darkening(state: TileState) -> Option<Color32> {
+fn tile_darkening(state: &TileState) -> Option<Color32> {
     match state {
         TileState::Deactivated(_) => Some(Color32::from_black_alpha(DEACTIVATED_DARKEN_ALPHA)),
         TileState::Configured(_)
@@ -662,7 +662,7 @@ fn paint_badge(
     painter: &egui::Painter,
     cell: Rect,
     cell_size: f32,
-    state: TileState,
+    state: &TileState,
     share: Option<f32>,
     visuals: &egui::Visuals,
 ) {

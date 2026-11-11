@@ -70,14 +70,14 @@ const GETTING_STARTED: [(&str, &str); 5] = [
 
 const RULE_CONCEPT: (&str, &str) = (
     "Rule",
-    "A rule is defined by the neighborhood around a tile. Each of the 8 surrounding cells must either be solid or empty, or can be set to any. A cell can also require a specific tile. When DDNet runs the automapper, it sweeps over every position of the map and places the tile wherever the neighborhood of one of its rules matches. If several rules match the same spot, the more specific one wins.",
+    "A rule is defined by the neighborhood around a tile. By default this is the 8 surrounding cells. Unlock the neighborhood size to add rows and columns on any side, where new cells start as any. Each cell must either be solid or empty, or can be set to any. A cell can also require a specific tile. When DDNet runs the automapper, it sweeps over every position of the map and places the tile wherever the neighborhood of one of its rules matches. If several rules match the same spot, the more specific one wins.",
 );
 const NEIGHBOR_STATES_HEADING: &str = "Neighbor states";
 const NEIGHBOR_STATES_INTRO: &str = "The 3 basic states of a neighboring cell look like this:";
 const OTHER_CONCEPTS: [(&str, &str); 8] = [
     (
         "Rotated and flipped copies",
-        "For each rotated/flipped variant, another rule is added that applies the same transformation to the tile that should be placed and its neighborhood. This allows one rule to be reused for different orientations.",
+        "For each rotated/flipped variant, another rule is added that applies the same transformation to the tile that should be placed and its neighborhood. This allows one rule to be reused for different orientations. If the neighbors look the same after turning, the turned tiles are mixed in randomly.",
     ),
     (
         "Multiple rules per tile",

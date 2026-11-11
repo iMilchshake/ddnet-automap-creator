@@ -1,8 +1,8 @@
-use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::neighbor::{NeighborState, Neighborhood, Side};
 use crate::model::pool::{ChanceMode, Pool, Variant, base_shares, pools, pools_of};
 use crate::model::tile::{Centre, Chance, TileRule};
 use crate::model::transform::{Orientations, Transform};
-use crate::tests::support::{HALF_TURN, QUARTER_TURN, half_turn, index_of, mods};
+use crate::tests::support::{HALF_TURN, QUARTER_TURN, half_turn, mods, offset_of};
 
 const TOLERANCE: f32 = 0.001;
 
@@ -22,7 +22,7 @@ fn half_turn_only() -> TileRule {
 
 fn only(name: &str) -> Neighborhood {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(index_of(name), NeighborState::Full);
+    neighborhood.set_state(offset_of(name), NeighborState::Full);
 
     neighborhood
 }
@@ -52,12 +52,31 @@ fn assert_close(actual: &[f32], expected: &[f32]) {
 #[test]
 fn a_tile_requirement_counts_towards_specificity() {
     let mut requiring = Neighborhood::uniform(NeighborState::Any);
-    requiring.set_state(index_of("top"), NeighborState::Is(17));
+    requiring.set_state(offset_of("top"), NeighborState::Is(17));
 
     let pools = pools(&[(1, TileRule::new(requiring)), (3, anywhere(100.0))]);
 
     let order: Vec<usize> = pools.iter().map(|pool| pool.members[0].tile).collect();
     assert_eq!(order, [3, 1]);
+}
+
+#[test]
+fn neighborhoods_differing_only_by_an_any_row_share_one_pool() {
+    let pools = pools(&[
+        (1, TileRule::new(only("left"))),
+        (2, TileRule::new(only("left").grown(Side::Up))),
+    ]);
+
+    assert_eq!(pools.len(), 1);
+    assert_eq!(pools[0].members.len(), 2);
+}
+
+#[test]
+fn specificity_ignores_any_cells() {
+    let mut neighborhood = only("left").grown(Side::Down).grown(Side::Right);
+    neighborhood.set_state((2, 1), NeighborState::Any);
+
+    assert_eq!(neighborhood.specificity(), 1);
 }
 
 #[test]
@@ -283,16 +302,98 @@ fn rules_of_one_tile_need_not_be_adjacent() {
 }
 
 #[test]
-fn a_later_rule_reaching_a_known_neighborhood_by_another_transform_is_dropped() {
+fn a_later_rule_reaching_a_known_neighborhood_by_another_transform_is_kept() {
     let turned = TileRule {
         custom: Some(half_turn()),
         ..TileRule::new(only("right"))
     };
 
-    let variants = variants(&[(3, TileRule::new(only("left"))), (3, turned)]);
+    let pools = pools(&[(3, TileRule::new(only("left"))), (3, turned)]);
 
-    assert_eq!(variants.len(), 1);
-    assert_eq!(variants[0].rule, 0);
+    assert_eq!(pools.len(), 1);
+    let members: Vec<(usize, Transform)> = pools[0]
+        .members
+        .iter()
+        .map(|member| (member.rule, member.transform))
+        .collect();
+    assert_eq!(members, [(0, Transform::IDENTITY), (1, HALF_TURN)]);
+}
+
+#[test]
+fn a_later_rule_with_the_same_neighborhood_and_transform_is_kept_with_its_own_chance() {
+    let mut later = TileRule::new(only("left"));
+    later.chance = Chance::new(10.0).unwrap();
+
+    let variants = variants(&[(3, TileRule::new(only("left"))), (3, later)]);
+
+    let members: Vec<(usize, Chance)> = variants
+        .iter()
+        .map(|variant| (variant.rule, variant.chance))
+        .collect();
+    assert_eq!(
+        members,
+        [(0, Chance::FULL), (1, Chance::new(10.0).unwrap())]
+    );
+}
+
+#[test]
+fn a_mirror_symmetric_rule_shares_its_chance_between_both_orientations() {
+    let rule = TileRule {
+        mods: mods(true, false, false),
+        chance: Chance::new(34.0).unwrap(),
+        ..TileRule::new(only("top"))
+    };
+
+    let pools = pools(&[(3, rule)]);
+
+    assert_eq!(pools.len(), 1);
+    let members: Vec<(Transform, Chance)> = pools[0]
+        .members
+        .iter()
+        .map(|member| (member.transform, member.chance))
+        .collect();
+    let half = Chance::new(17.0).unwrap();
+    assert_eq!(
+        members,
+        [
+            (Transform::IDENTITY, half),
+            (Transform::FLIP_HORIZONTALLY, half)
+        ]
+    );
+}
+
+#[test]
+fn an_asymmetric_rule_keeps_its_full_chance_per_orientation() {
+    let rule = TileRule {
+        mods: mods(true, false, false),
+        chance: Chance::new(34.0).unwrap(),
+        ..TileRule::new(only("left"))
+    };
+
+    let pools = pools(&[(3, rule)]);
+
+    assert_eq!(pools.len(), 2);
+    for pool in &pools {
+        assert_eq!(pool.members.len(), 1);
+        assert_eq!(pool.members[0].chance, Chance::new(34.0).unwrap());
+    }
+}
+
+#[test]
+fn a_fully_symmetric_rule_splits_its_chance_over_all_eight_orientations() {
+    let rule = TileRule {
+        mods: mods(true, false, true),
+        chance: Chance::new(80.0).unwrap(),
+        ..TileRule::new(Neighborhood::uniform(NeighborState::Full))
+    };
+
+    let pools = pools(&[(3, rule)]);
+
+    assert_eq!(pools.len(), 1);
+    assert_eq!(pools[0].members.len(), Transform::ALL.len());
+    for member in &pools[0].members {
+        assert_eq!(member.chance, Chance::new(10.0).unwrap());
+    }
 }
 
 fn empty_centred(neighborhood: Neighborhood) -> TileRule {
@@ -342,12 +443,15 @@ fn a_tile_keeps_its_full_and_its_empty_centre_rule_on_one_neighborhood() {
 fn turning_a_rule_leaves_its_centre_alone() {
     let rule = empty_centred(only("left"));
 
-    assert_eq!(rule.turned_neighbors(HALF_TURN).centre, Centre::Empty);
+    assert_eq!(
+        rule.clone().turned_neighbors(HALF_TURN).centre,
+        Centre::Empty
+    );
     assert_eq!(rule.turned_tile(HALF_TURN).centre, Centre::Empty);
 }
 
 #[test]
-fn a_placement_repeated_by_a_later_rule_of_the_tile_is_dropped() {
+fn a_placement_repeated_by_a_later_rule_of_the_tile_stays_a_member() {
     let pools = pools(&[
         (3, TileRule::new(only("left"))),
         (3, anywhere(50.0)),
@@ -365,6 +469,6 @@ fn a_placement_repeated_by_a_later_rule_of_the_tile_is_dropped() {
         .map(|member| (member.tile, member.rule))
         .collect();
 
-    assert_eq!(members, [(3, 0), (4, 0)]);
-    assert_eq!(pools.iter().flat_map(|pool| &pool.members).count(), 3);
+    assert_eq!(members, [(3, 0), (3, 2), (4, 0)]);
+    assert_eq!(pools.iter().flat_map(|pool| &pool.members).count(), 4);
 }

@@ -9,7 +9,7 @@ use crate::blueprint;
 use crate::export::compiler::RulesCompiler;
 use crate::export::r_source::{RuleSet, output_file, render};
 use crate::model::group::{GroupPreset, TileGroup};
-use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood, Offset, Reach, Side};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
@@ -19,7 +19,7 @@ use crate::preview::{
     Automapped, CustomShape, FALLBACK_UNMATCHED_MARKER, PlacedTile, PreviewCell, PreviewError,
     Sample, automap, placing_rule, unmatched_marker,
 };
-use crate::tests::support::index_of;
+use crate::tests::support::offset_of;
 
 const SEED: u32 = 42;
 const SOLID_ID: u8 = 200;
@@ -83,7 +83,7 @@ fn compiled(source: String) -> String {
 
 fn empty_above_ground() -> String {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(index_of("bottom"), NeighborState::Full);
+    neighborhood.set_state(offset_of("bottom"), NeighborState::Full);
     let tiles = [(
         AIR_DECORATION,
         TileRule {
@@ -348,6 +348,37 @@ fn an_unmapped_sample_marks_every_solid_cell_unmatched() {
 }
 
 #[test]
+fn an_exported_rule_with_outer_cells_compiles_to_positioned_tests() {
+    let reach = Reach {
+        left: 2,
+        right: 2,
+        up: 2,
+        down: 1,
+    };
+    let mut neighborhood = Neighborhood::with_reach(reach, NeighborState::Any);
+    neighborhood.set_state((2, 0), NeighborState::Full);
+    neighborhood.set_state((0, -2), NeighborState::Empty);
+    neighborhood.set_state((-2, 0), NeighborState::Is(17));
+    let tiles = [(AIR_DECORATION, TileRule::new(neighborhood))];
+
+    let rules = compiled(
+        render(&[RuleSet {
+            image_stem: IMAGE_STEM,
+            name: "Test",
+            tiles: &tiles,
+            deactivated: &[],
+            groups: &[],
+            chance_mode: ChanceMode::Normalize,
+        }])
+        .unwrap(),
+    );
+
+    assert!(rules.contains("Pos 2 0 FULL"), "{rules}");
+    assert!(rules.contains("Pos 0 -2 EMPTY"), "{rules}");
+    assert!(rules.contains("Pos -2 0 INDEX 17"), "{rules}");
+}
+
+#[test]
 fn an_exported_empty_centre_rule_places_into_the_air_above_ground() {
     let rules = compiled(empty_above_ground());
     assert!(rules.contains("NoDefaultRule"), "{rules}");
@@ -385,6 +416,50 @@ fn an_exported_empty_centre_rule_places_into_the_air_above_ground() {
         automapped.cell(0, GROUND_ROWS.start),
         PreviewCell::Unmatched
     );
+}
+
+fn mirror_symmetric_flippable() -> TileRule {
+    TileRule {
+        mods: TileMods::new(true, false, false),
+        chance: Chance::new(50.0).unwrap(),
+        ..rule_with(&[("top", NeighborState::Full)])
+    }
+}
+
+#[test]
+fn an_exported_symmetric_rule_places_both_the_plain_and_the_flipped_tile() {
+    let tiles = [(AIR_DECORATION, mirror_symmetric_flippable())];
+
+    let rules = compiled(
+        render(&[RuleSet {
+            image_stem: IMAGE_STEM,
+            name: "Test",
+            tiles: &tiles,
+            deactivated: &[],
+            groups: &[],
+            chance_mode: ChanceMode::Normalize,
+        }])
+        .unwrap(),
+    );
+
+    let index = format!("Index {AIR_DECORATION}");
+    assert!(rules.lines().any(|line| line == index), "{rules}");
+    assert!(
+        rules.lines().any(|line| line == format!("{index} XFLIP")),
+        "{rules}"
+    );
+}
+
+#[test]
+fn a_flipped_placement_of_a_symmetric_rule_resolves_to_that_rule() {
+    let project = project_with(&[mirror_symmetric_flippable()]);
+    let solid_above = solid_at(&["top"]);
+
+    for transform in [Transform::IDENTITY, Transform::FLIP_HORIZONTALLY] {
+        let placed = placed_tile(transform, Centre::Full);
+
+        assert_eq!(placing_rule(&project, placed, &solid_above), Some(0));
+    }
 }
 
 #[test]
@@ -465,19 +540,16 @@ fn shrinking_a_custom_map_keeps_the_overlap() {
 fn rule_with(states: &[(&str, NeighborState)]) -> TileRule {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
     for (name, state) in states {
-        neighborhood.set_state(index_of(name), *state);
+        neighborhood.set_state(offset_of(name), *state);
     }
 
     TileRule::new(neighborhood)
 }
 
-fn solid_at(names: &[&str]) -> Neighborhood {
-    let mut around = Neighborhood::uniform(NeighborState::Empty);
-    for name in names {
-        around.set_state(index_of(name), NeighborState::Full);
-    }
+fn solid_at(names: &[&str]) -> impl Fn(Offset) -> bool {
+    let solid: Vec<Offset> = names.iter().map(|name| offset_of(name)).collect();
 
-    around
+    move |offset| solid.contains(&offset)
 }
 
 fn placed_tile(transform: Transform, centre: Centre) -> PlacedTile {
@@ -489,28 +561,41 @@ fn placed_tile(transform: Transform, centre: Centre) -> PlacedTile {
 }
 
 #[test]
-fn neighbors_at_reads_the_sample_and_counts_outside_cells_as_full() {
+fn is_solid_near_reads_the_sample_and_counts_outside_cells_as_solid() {
     let automapped = Automapped::unmapped(Sample::Custom, &ground_shape()).unwrap();
     let row = GROUND_ROWS.start;
+    let expected = solid_at(&["left", "right", "bottom", "bottomLeft", "bottomRight"]);
 
-    assert_eq!(
-        automapped.neighbors_at(1, row),
-        solid_at(&["left", "right", "bottom", "bottomLeft", "bottomRight"])
-    );
-    assert_eq!(
-        automapped.neighbors_at(0, 0).state(index_of("left")),
-        NeighborState::Full
-    );
-    assert_eq!(
-        automapped.neighbors_at(0, 0).state(index_of("bottom")),
-        NeighborState::Empty
-    );
+    for neighbor in NEIGHBORS {
+        let offset = (neighbor.dx, neighbor.dy);
+        assert_eq!(
+            automapped.is_solid_near(1, row, offset),
+            expected(offset),
+            "{}",
+            neighbor.rpp_name
+        );
+    }
+    assert!(automapped.is_solid_near(0, 0, offset_of("left")));
+    assert!(!automapped.is_solid_near(0, 0, offset_of("bottom")));
+}
+
+#[test]
+fn a_rule_requiring_a_solid_cell_two_away_matches_only_where_the_map_has_it() {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any).grown(Side::Right);
+    neighborhood.set_state((2, 0), NeighborState::Full);
+    let project = project_with(&[TileRule::new(neighborhood)]);
+    let placed = placed_tile(Transform::IDENTITY, Centre::Full);
+
+    let solid_two_away = |offset: Offset| offset == (2, 0);
+
+    assert_eq!(placing_rule(&project, placed, solid_two_away), Some(0));
+    assert_eq!(placing_rule(&project, placed, solid_at(&["right"])), None);
 }
 
 fn project_with(rules: &[TileRule]) -> Project {
     let mut project = Project::default();
     for rule in rules {
-        project.add_rule(1, *rule);
+        project.add_rule(1, rule.clone());
     }
 
     project
@@ -621,7 +706,7 @@ fn the_unmatched_marker_skips_active_rules_and_group_footprints() {
 #[test]
 fn the_unmatched_marker_skips_tiles_a_neighbor_refers_to() {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(0, NeighborState::Is(1));
+    neighborhood.set_state(offset_of("topLeft"), NeighborState::Is(1));
     let mut project = Project::default();
     project.add_rule(5, TileRule::new(neighborhood));
 
@@ -912,7 +997,7 @@ fn on_floor_domino(mods: TileMods, percent: f32) -> TileGroup {
 #[test]
 fn an_empty_centre_tile_never_lands_right_of_a_group_tile_on_air() {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(index_of("left"), NeighborState::Full);
+    neighborhood.set_state(offset_of("left"), NeighborState::Full);
     let tiles = [(
         AIR_DECORATION,
         TileRule {

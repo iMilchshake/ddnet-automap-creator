@@ -1,11 +1,11 @@
 use crate::export::r_source::{ExportError, RuleSet, last_wins_odds, render, render_rule_sets};
 use crate::model::group::{CellState, GroupPreset, TileGroup};
-use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::neighbor::{NeighborState, Neighborhood, Reach};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{AIR_TILE, Centre, Chance, TILE_COUNT, TileMods, TileRule};
-use crate::tests::support::{HALF_TURN, index_of, mods, outer_corner};
+use crate::tests::support::{HALF_TURN, mods, offset_of, outer_corner};
 
 fn rule(neighborhood: Neighborhood, percent: f32, can_rotate: bool) -> TileRule {
     TileRule {
@@ -61,10 +61,10 @@ fn a_rotated_corner_and_a_weighted_pool_match_the_reference_output() {
     let surrounded = Neighborhood::uniform(NeighborState::Full);
     let tiles = [
         (32, rule(outer_corner(), 100.0, true)),
-        (1, rule(surrounded, 100.0, false)),
-        (2, rule(surrounded, 5.0, false)),
-        (3, rule(surrounded, 1.0, false)),
-        (66, rule(surrounded, 1.0, false)),
+        (1, rule(surrounded.clone(), 100.0, false)),
+        (2, rule(surrounded.clone(), 5.0, false)),
+        (3, rule(surrounded.clone(), 1.0, false)),
+        (66, rule(surrounded.clone(), 1.0, false)),
         (67, rule(surrounded, 1.0, false)),
     ];
 
@@ -198,7 +198,7 @@ fn an_all_any_neighborhood_drops_the_test() {
 fn a_pool_at_full_chance_rolls_instead_of_listing_chances() {
     let surrounded = Neighborhood::uniform(NeighborState::Full);
     let tiles = [
-        (1, rule(surrounded, 100.0, false)),
+        (1, rule(surrounded.clone(), 100.0, false)),
         (2, rule(surrounded, 100.0, false)),
     ];
     let source = emit(&tiles);
@@ -213,7 +213,7 @@ fn a_pool_at_full_chance_rolls_instead_of_listing_chances() {
 fn fractional_chances_keep_their_shortest_form() {
     let surrounded = Neighborhood::uniform(NeighborState::Full);
     let tiles = [
-        (1, rule(surrounded, 2.5, false)),
+        (1, rule(surrounded.clone(), 2.5, false)),
         (2, rule(surrounded, 100.0, false)),
     ];
     let source = emit(&tiles);
@@ -332,7 +332,7 @@ fn a_rule_on_the_air_tile_is_refused() {
 #[test]
 fn less_specific_rules_come_first() {
     let mut loose = Neighborhood::uniform(NeighborState::Any);
-    loose.set_state(index_of("top"), NeighborState::Full);
+    loose.set_state(offset_of("top"), NeighborState::Full);
 
     let tiles = [
         (
@@ -351,7 +351,7 @@ fn less_specific_rules_come_first() {
 fn empty_at(names: &[&str]) -> Neighborhood {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
     for name in names {
-        neighborhood.set_state(index_of(name), NeighborState::Empty);
+        neighborhood.set_state(offset_of(name), NeighborState::Empty);
     }
 
     neighborhood
@@ -374,15 +374,18 @@ fn several_rules_of_one_tile_are_emitted_by_specificity() {
 }
 
 #[test]
-fn a_symmetric_neighborhood_keeps_only_the_first_of_its_duplicates() {
+fn a_symmetric_neighborhood_rolls_all_its_orientations() {
     let tiles = [(
         7,
         rule(Neighborhood::uniform(NeighborState::Full), 100.0, true),
     )];
     let source = emit(&tiles);
+    let lines = body(&source);
 
-    assert_eq!(body(&source).len(), 1);
-    assert!(body(&source)[0].starts_with("Insert(7)."));
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].starts_with("Insert(g:mask)"));
+    assert!(lines[1].starts_with("Insert(7, 7.R"));
+    assert!(lines[1].contains(".Roll()"));
 }
 
 #[test]
@@ -738,9 +741,9 @@ const SPECIFIC_TESTS: &str =
 
 fn tile_specific() -> Neighborhood {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(index_of("top"), NeighborState::Is(17));
-    neighborhood.set_state(index_of("right"), NeighborState::Is(18));
-    neighborhood.set_state(index_of("bottom"), NeighborState::Empty);
+    neighborhood.set_state(offset_of("top"), NeighborState::Is(17));
+    neighborhood.set_state(offset_of("right"), NeighborState::Is(18));
+    neighborhood.set_state(offset_of("bottom"), NeighborState::Empty);
 
     neighborhood
 }
@@ -787,8 +790,8 @@ fn tile_specific_pools_get_their_own_copy_run_after_the_plain_inserts() {
 #[test]
 fn the_same_picked_tile_at_two_positions_shares_one_test() {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(index_of("topRight"), NeighborState::Is(16));
-    neighborhood.set_state(index_of("right"), NeighborState::Is(16));
+    neighborhood.set_state(offset_of("topRight"), NeighborState::Is(16));
+    neighborhood.set_state(offset_of("right"), NeighborState::Is(16));
 
     let source = emit(&[(40, rule(neighborhood, 100.0, false))]);
 
@@ -857,7 +860,7 @@ fn fill_objects_directly_follows_the_last_insert_object_block() {
 
 fn full_at_right() -> Neighborhood {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(index_of("right"), NeighborState::Full);
+    neighborhood.set_state(offset_of("right"), NeighborState::Full);
 
     neighborhood
 }
@@ -1021,8 +1024,8 @@ fn an_exact_pool_summing_to_100_with_float_noise_still_covers_every_cell() {
 #[test]
 fn the_mask_skips_tiles_a_neighbor_refers_to() {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(index_of("top"), NeighborState::Is(255));
-    neighborhood.set_state(index_of("bottom"), NeighborState::Is(254));
+    neighborhood.set_state(offset_of("top"), NeighborState::Is(255));
+    neighborhood.set_state(offset_of("bottom"), NeighborState::Is(254));
     let tiles = [
         (5, anywhere(30.0)),
         (6, anywhere(30.0)),
@@ -1030,6 +1033,65 @@ fn the_mask_skips_tiles_a_neighbor_refers_to() {
     ];
 
     assert!(emit(&tiles).contains("g:mask = 253;"));
+}
+
+fn reaching_two_cells() -> Neighborhood {
+    let reach = Reach {
+        left: 2,
+        right: 2,
+        up: 2,
+        down: 1,
+    };
+
+    Neighborhood::with_reach(reach, NeighborState::Any)
+}
+
+#[test]
+fn outer_cells_are_tested_by_position_next_to_the_named_ones() {
+    let mut neighborhood = reaching_two_cells();
+    neighborhood.set_state(offset_of("top"), NeighborState::Full);
+    neighborhood.set_state((2, 0), NeighborState::Full);
+    neighborhood.set_state((0, -2), NeighborState::Empty);
+
+    let source = emit(&[(5, rule(neighborhood, 100.0, false))]);
+
+    assert_eq!(
+        body(&source),
+        [
+            "Insert(5).If(IndexAt([0, 0]).IsFullAt(top), IndexAt([2, 0]).IsFull(), IndexAt([0, -2]).IsEmpty());"
+        ]
+    );
+}
+
+#[test]
+fn outer_cells_are_tested_in_the_tile_specific_copy_run() {
+    let mut neighborhood = reaching_two_cells();
+    neighborhood.set_state(offset_of("top"), NeighborState::Empty);
+    neighborhood.set_state((2, 0), NeighborState::Full);
+    neighborhood.set_state((0, -2), NeighborState::Empty);
+    neighborhood.set_state((-2, 0), NeighborState::Is(17));
+
+    let source = emit(&[(7, rule(neighborhood, 100.0, false))]);
+
+    assert_eq!(
+        body(&source),
+        [
+            "Insert(7).If(IndexAt([0, 0]).IsEmptyAt(top), IndexAt([2, 0]).IsFull(), IndexAt([0, -2]).IsEmpty(), IndexAt([-2, 0]).Is(17));"
+        ]
+    );
+}
+
+#[test]
+fn outer_cells_that_are_any_do_not_change_the_output() {
+    let mut small = Neighborhood::uniform(NeighborState::Any);
+    small.set_state(offset_of("top"), NeighborState::Full);
+    let mut large = reaching_two_cells();
+    large.set_state(offset_of("top"), NeighborState::Full);
+
+    assert_eq!(
+        emit(&[(5, rule(small, 100.0, false))]),
+        emit(&[(5, rule(large, 100.0, false))])
+    );
 }
 
 #[test]

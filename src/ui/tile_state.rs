@@ -3,7 +3,7 @@ use crate::model::project::Project;
 use crate::model::tile::{AIR_TILE, TileRule};
 use crate::tileset::{TileKind, Tileset};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TileState {
     Locked,
     Grouped,
@@ -13,7 +13,7 @@ pub enum TileState {
 }
 
 impl TileState {
-    pub fn is_editable(self) -> bool {
+    pub fn is_editable(&self) -> bool {
         !matches!(self, Self::Locked | Self::Grouped)
     }
 }
@@ -25,7 +25,7 @@ pub fn tile_state(tileset: &Tileset, project: &Project, tile: usize) -> TileStat
     if project.group_at(tile).is_some() {
         return TileState::Grouped;
     }
-    let rule = project.rules_of(tile).first().copied();
+    let rule = project.rules_of(tile).first().cloned();
     if rule.is_none() && tileset.tiles[tile].kind == TileKind::Locked {
         return TileState::Locked;
     }

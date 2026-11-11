@@ -5,7 +5,7 @@ use twmap::automapper::Automapper;
 use twmap::ndarray::{Array2, s};
 use twmap::{GameLayer, Tile, TileFlags, TwMap};
 
-use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
+use crate::model::neighbor::{NeighborState, Neighborhood, Offset};
 use crate::model::pool::{self, PoolRuns};
 use crate::model::project::Project;
 use crate::model::tile::{AIR_TILE, Centre, TILE_COUNT, referenced_tiles};
@@ -246,20 +246,9 @@ impl Automapped {
         self.cells[row * self.width + column]
     }
 
-    pub fn neighbors_at(&self, column: usize, row: usize) -> Neighborhood {
-        let mut around = Neighborhood::default();
-        for (index, neighbor) in NEIGHBORS.iter().enumerate() {
-            let state = match self.is_solid(column as i32 + neighbor.dx, row as i32 + neighbor.dy) {
-                true => NeighborState::Full,
-                false => NeighborState::Empty,
-            };
-            around.set_state(index, state);
-        }
-
-        around
-    }
-
-    fn is_solid(&self, column: i32, row: i32) -> bool {
+    pub fn is_solid_near(&self, column: usize, row: usize, (dx, dy): Offset) -> bool {
+        let column = column as i32 + dx;
+        let row = row as i32 + dy;
         let inside =
             (0..self.width as i32).contains(&column) && (0..self.height as i32).contains(&row);
 
@@ -267,12 +256,16 @@ impl Automapped {
     }
 }
 
-pub fn placing_rule(project: &Project, placed: PlacedTile, around: Neighborhood) -> Option<usize> {
+pub fn placing_rule(
+    project: &Project,
+    placed: PlacedTile,
+    is_solid: impl Fn(Offset) -> bool,
+) -> Option<usize> {
     let pools = pool::pools(&project.rules());
 
     PoolRuns::split(&pools)
         .lowest_priority_first()
-        .filter(|pool| fits(&pool.neighborhood, &around))
+        .filter(|pool| fits(&pool.neighborhood, &is_solid))
         .filter_map(|pool| {
             pool.members.iter().find(|member| {
                 member.tile == placed.index
@@ -284,16 +277,12 @@ pub fn placing_rule(project: &Project, placed: PlacedTile, around: Neighborhood)
         .map(|member| member.rule)
 }
 
-fn fits(wanted: &Neighborhood, around: &Neighborhood) -> bool {
-    wanted
-        .states()
-        .iter()
-        .zip(around.states())
-        .all(|(wanted, actual)| match wanted {
-            NeighborState::Any => true,
-            NeighborState::Empty => *actual == NeighborState::Empty,
-            NeighborState::Full | NeighborState::Is(_) => *actual == NeighborState::Full,
-        })
+fn fits(wanted: &Neighborhood, is_solid: &impl Fn(Offset) -> bool) -> bool {
+    wanted.cells().all(|(offset, state)| match state {
+        NeighborState::Any => true,
+        NeighborState::Empty => !is_solid(offset),
+        NeighborState::Full | NeighborState::Is(_) => is_solid(offset),
+    })
 }
 
 pub fn automap(

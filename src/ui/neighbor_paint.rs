@@ -1,6 +1,6 @@
 use egui::{Color32, Painter, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui, Vec2};
 
-use crate::model::neighbor::{NeighborState, neighbor_index_at};
+use crate::model::neighbor::{CENTRE, NeighborState, Offset, Reach};
 use crate::model::tile::Centre;
 use crate::model::transform::Transform;
 use crate::tileset::{TileSlice, Tileset};
@@ -136,15 +136,20 @@ pub fn paint_centre(
     }
 }
 
-pub fn show_pattern(ui: &mut Ui, cell_size: f32, paint_cell: impl Fn(&Ui, Rect, Option<usize>)) {
+pub fn show_pattern(
+    ui: &mut Ui,
+    reach: Reach,
+    cell_size: f32,
+    paint_cell: impl Fn(&Ui, Rect, Option<Offset>),
+) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = Vec2::splat(PATTERN_CELL_GAP);
-        for dy in -1..=1 {
+        for dy in -reach.up..=reach.down {
             ui.horizontal(|ui| {
-                for dx in -1..=1 {
+                for dx in -reach.left..=reach.right {
                     let (rect, _response) =
                         ui.allocate_exact_size(Vec2::splat(cell_size), Sense::hover());
-                    paint_cell(ui, rect, neighbor_index_at(dx, dy));
+                    paint_cell(ui, rect, ((dx, dy) != CENTRE).then_some((dx, dy)));
                 }
             });
         }

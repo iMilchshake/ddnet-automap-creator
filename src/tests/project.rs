@@ -4,6 +4,7 @@ use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::{self, ChanceMode};
 use crate::model::project::Project;
 use crate::model::tile::{AIR_TILE, Chance, TILE_COUNT, TileRule};
+use crate::tests::support::offset_of;
 
 fn some_rule() -> TileRule {
     TileRule::new(Neighborhood::uniform(NeighborState::Full))
@@ -54,8 +55,8 @@ fn the_mask_skips_tiles_inside_a_group() {
 #[test]
 fn the_mask_skips_tiles_a_neighbor_refers_to() {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(0, NeighborState::Is(TILE_COUNT - 1));
-    neighborhood.set_state(1, NeighborState::Is(TILE_COUNT - 2));
+    neighborhood.set_state(offset_of("topLeft"), NeighborState::Is(TILE_COUNT - 1));
+    neighborhood.set_state(offset_of("top"), NeighborState::Is(TILE_COUNT - 2));
     let mut project = Project::default();
     project.add_rule(7, TileRule::new(neighborhood));
 

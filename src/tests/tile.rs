@@ -2,7 +2,7 @@ use crate::model::neighbor::{NeighborState, Neighborhood};
 use crate::model::pool::pools;
 use crate::model::tile::{Chance, TileRule};
 use crate::model::transform::{Orientations, Transform};
-use crate::tests::support::{all_distinct, half_turn, index_of, mods, named};
+use crate::tests::support::{all_distinct, half_turn, mods, named, offset_of};
 
 #[test]
 fn a_rule_places_its_preset_unless_custom_is_set() {
@@ -12,7 +12,7 @@ fn a_rule_places_its_preset_unless_custom_is_set() {
     };
     let custom = TileRule {
         custom: Some(half_turn()),
-        ..rule
+        ..rule.clone()
     };
 
     assert_eq!(rule.orientations(), Orientations::generated(rule.mods));
@@ -21,7 +21,7 @@ fn a_rule_places_its_preset_unless_custom_is_set() {
 
 fn top_empty_rule() -> TileRule {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(index_of("top"), NeighborState::Empty);
+    neighborhood.set_state(offset_of("top"), NeighborState::Empty);
 
     TileRule::new(neighborhood)
 }
@@ -39,7 +39,7 @@ fn placements(rule: TileRule) -> Vec<(Transform, Neighborhood)> {
         .flat_map(|pool| {
             pool.members
                 .into_iter()
-                .map(move |member| (member.transform, pool.neighborhood))
+                .map(move |member| (member.transform, pool.neighborhood.clone()))
         })
         .collect()
 }
@@ -47,7 +47,7 @@ fn placements(rule: TileRule) -> Vec<(Transform, Neighborhood)> {
 #[test]
 fn turning_the_neighbors_clockwise_moves_only_the_neighborhood() {
     let rule = top_empty_rule();
-    let turned = rule.turned_neighbors(Transform::ROTATE_CLOCKWISE);
+    let turned = rule.clone().turned_neighbors(Transform::ROTATE_CLOCKWISE);
 
     assert_eq!(named(&turned.neighborhood, NeighborState::Empty), ["right"]);
     assert_eq!(turned.drawn, rule.drawn);
@@ -56,7 +56,7 @@ fn turning_the_neighbors_clockwise_moves_only_the_neighborhood() {
 #[test]
 fn turning_the_tile_clockwise_records_only_the_drawing() {
     let rule = top_empty_rule();
-    let turned = rule.turned_tile(Transform::ROTATE_CLOCKWISE);
+    let turned = rule.clone().turned_tile(Transform::ROTATE_CLOCKWISE);
 
     assert_eq!(turned.drawn, Transform::ROTATE_CLOCKWISE);
     assert_eq!(turned.neighborhood, rule.neighborhood);
@@ -65,7 +65,7 @@ fn turning_the_tile_clockwise_records_only_the_drawing() {
 #[test]
 fn turning_the_tile_clockwise_four_times_restores_the_rule() {
     let rule = distinct_rule();
-    let turned = (0..4).fold(rule, |turned, _| {
+    let turned = (0..4).fold(rule.clone(), |turned, _| {
         turned.turned_tile(Transform::ROTATE_CLOCKWISE)
     });
 
@@ -75,7 +75,7 @@ fn turning_the_tile_clockwise_four_times_restores_the_rule() {
 #[test]
 fn turning_a_rotating_rule_keeps_its_placements() {
     let rule = distinct_rule();
-    let before = placements(rule);
+    let before = placements(rule.clone());
     let turned = rule
         .turned_neighbors(Transform::ROTATE_CLOCKWISE)
         .turned_tile(Transform::ROTATE_CLOCKWISE);

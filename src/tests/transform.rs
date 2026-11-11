@@ -1,7 +1,7 @@
-use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::neighbor::{NeighborState, Neighborhood, Reach, Side};
 use crate::model::tile::TileMods;
 use crate::model::transform::{Orientations, Transform};
-use crate::tests::support::{all_distinct, half_turn, index_of, mods, named, outer_corner};
+use crate::tests::support::{all_distinct, half_turn, mods, named, offset_of, outer_corner};
 
 fn transform(x_flip: bool, y_flip: bool, rot: bool) -> Transform {
     Transform {
@@ -71,10 +71,70 @@ fn rotating_a_neighborhood_four_times_returns_it() {
     let rotate = transform(false, false, true);
     let base = outer_corner();
 
-    let mut turned = base;
+    let mut turned = base.clone();
     for _ in 0..4 {
         turned = rotate.apply(&turned);
     }
+
+    assert_eq!(turned, base);
+}
+
+fn wide_neighborhood() -> Neighborhood {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any)
+        .grown(Side::Right)
+        .grown(Side::Right)
+        .grown(Side::Up);
+    neighborhood.set_state((2, 0), NeighborState::Full);
+    neighborhood.set_state((-1, -2), NeighborState::Empty);
+
+    neighborhood
+}
+
+#[test]
+fn rotating_a_wide_neighborhood_turns_its_cells_and_reach() {
+    let turned = Transform::ROTATE_CLOCKWISE.apply(&wide_neighborhood());
+
+    assert_eq!(
+        turned.reach(),
+        Reach {
+            left: 1,
+            right: 2,
+            up: 1,
+            down: 3,
+        }
+    );
+    assert_eq!(turned.state((0, 2)), NeighborState::Full);
+    assert_eq!(turned.state((2, -1)), NeighborState::Empty);
+    assert_eq!(turned.specificity(), 2);
+}
+
+#[test]
+fn flipping_a_wide_neighborhood_swaps_the_reach_of_one_axis() {
+    let flipped = Transform::FLIP_HORIZONTALLY.apply(&wide_neighborhood());
+
+    assert_eq!(
+        flipped.reach(),
+        Reach {
+            left: 3,
+            right: 1,
+            up: 2,
+            down: 1,
+        }
+    );
+    assert_eq!(flipped.state((-2, 0)), NeighborState::Full);
+    assert_eq!(flipped.state((1, -2)), NeighborState::Empty);
+
+    let vertical = Transform::FLIP_VERTICALLY.apply(&wide_neighborhood());
+    assert_eq!(vertical.reach().up, 1);
+    assert_eq!(vertical.reach().down, 2);
+}
+
+#[test]
+fn rotating_a_wide_neighborhood_four_times_returns_it() {
+    let base = wide_neighborhood();
+    let turned = (0..4).fold(base.clone(), |turned, _| {
+        Transform::ROTATE_CLOCKWISE.apply(&turned)
+    });
 
     assert_eq!(turned, base);
 }
@@ -253,7 +313,7 @@ fn after_stays_within_the_eight_transforms() {
 
 fn only_empty(name: &str) -> Neighborhood {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
-    neighborhood.set_state(index_of(name), NeighborState::Empty);
+    neighborhood.set_state(offset_of(name), NeighborState::Empty);
 
     neighborhood
 }

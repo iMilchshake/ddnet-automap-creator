@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::group::{self, CellState, GroupError, TileGroup};
-use crate::model::neighbor::{NEIGHBOR_COUNT, NeighborState, Neighborhood};
+use crate::model::neighbor::{NeighborState, Neighborhood, Reach};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
@@ -57,6 +57,9 @@ pub enum BlueprintError {
 
     #[error("`{0}` is not a neighbor state, expected 0 (empty), 1 (full) or 2 (any)")]
     NeighborCode(u8),
+
+    #[error("tile {0} has a neighborhood whose size does not match its cells")]
+    NeighborhoodShape(usize),
 
     #[error("tile {AIR_TILE} is reserved for air and cannot be listed as a neighbor tile")]
     AirNeighborTile,
@@ -114,13 +117,57 @@ pub struct BlueprintTile {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlueprintRule {
-    pub con: [BlueprintState; NEIGHBOR_COUNT],
+    pub con: Vec<BlueprintState>,
+    #[serde(default, skip_serializing_if = "BlueprintReach::is_default")]
+    pub reach: BlueprintReach,
     pub chance: f32,
     pub orientations: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawn: Option<String>,
     #[serde(default, skip_serializing_if = "BlueprintCentre::is_full")]
     pub centre: BlueprintCentre,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlueprintReach {
+    pub left: i32,
+    pub right: i32,
+    pub up: i32,
+    pub down: i32,
+}
+
+impl BlueprintReach {
+    fn is_default(&self) -> bool {
+        Reach::from(*self) == Reach::DEFAULT
+    }
+}
+
+impl Default for BlueprintReach {
+    fn default() -> Self {
+        Reach::DEFAULT.into()
+    }
+}
+
+impl From<Reach> for BlueprintReach {
+    fn from(reach: Reach) -> Self {
+        Self {
+            left: reach.left,
+            right: reach.right,
+            up: reach.up,
+            down: reach.down,
+        }
+    }
+}
+
+impl From<BlueprintReach> for Reach {
+    fn from(reach: BlueprintReach) -> Self {
+        Self {
+            left: reach.left,
+            right: reach.right,
+            up: reach.up,
+            down: reach.down,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -334,7 +381,12 @@ fn store_rule(rule: &TileRule) -> BlueprintRule {
     let orientations = rule.orientations().transforms();
 
     BlueprintRule {
-        con: rule.neighborhood.states().map(store_state),
+        con: rule
+            .neighborhood
+            .cells()
+            .map(|(_, state)| store_state(state))
+            .collect(),
+        reach: rule.neighborhood.reach().into(),
         chance: rule.chance.percent(),
         orientations: orientations.into_iter().map(orientation_name).collect(),
         drawn: (rule.drawn != Transform::IDENTITY).then(|| orientation_name(rule.drawn)),
@@ -388,10 +440,9 @@ fn load_orientations(tile: usize, names: &[String]) -> Result<Orientations, Blue
 }
 
 fn load_rule(tile: usize, rule: &BlueprintRule) -> Result<TileRule, BlueprintError> {
-    let mut neighborhood = Neighborhood::default();
-    for (index, state) in rule.con.iter().enumerate() {
-        neighborhood.set_state(index, load_state(state)?);
-    }
+    let states = rule.con.iter().map(load_state).collect::<Result<_, _>>()?;
+    let neighborhood = Neighborhood::from_states(rule.reach.into(), states)
+        .ok_or(BlueprintError::NeighborhoodShape(tile))?;
 
     let orientations = load_orientations(tile, &rule.orientations)?;
     let drawn = match &rule.drawn {

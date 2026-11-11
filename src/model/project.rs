@@ -90,7 +90,7 @@ impl Project {
     pub fn all_rules(&self) -> Vec<(usize, TileRule)> {
         self.rules
             .iter()
-            .flat_map(|(&tile, rules)| rules.iter().map(move |&rule| (tile, rule)))
+            .flat_map(|(&tile, rules)| rules.iter().map(move |rule| (tile, rule.clone())))
             .collect()
     }
 

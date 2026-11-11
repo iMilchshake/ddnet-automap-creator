@@ -20,7 +20,7 @@ pub fn show(ui: &mut Ui, view: &GridView, tile: usize) {
         show_rule_pictures(ui, view, tile);
     }
 
-    ui.label(summary(view, tile, state));
+    ui.label(summary(view, tile, &state));
     if let Some(group) = group_of(view.project, tile) {
         ui.weak(describe_group(group));
     }
@@ -42,23 +42,29 @@ fn show_rule_pictures(ui: &mut Ui, view: &GridView, tile: usize) {
 }
 
 fn show_rule_picture(ui: &mut Ui, view: &GridView, tile: usize, rule: &TileRule) {
-    show_pattern(ui, CARD_CELL_SIZE, |ui, rect, neighbor| match neighbor {
-        Some(index) => paint_neighbor(
-            ui,
-            rect,
-            rule.neighborhood.state(index),
-            view.texture,
-            view.tileset,
-        ),
-        None => paint_centre(
-            ui,
-            rect,
-            view.texture,
-            &view.tileset.tiles[tile],
-            rule.centre,
-            rule.drawn,
-        ),
-    });
+    let reach = rule.neighborhood.reach();
+    show_pattern(
+        ui,
+        reach,
+        CARD_CELL_SIZE,
+        |ui, rect, neighbor| match neighbor {
+            Some(offset) => paint_neighbor(
+                ui,
+                rect,
+                rule.neighborhood.state(offset),
+                view.texture,
+                view.tileset,
+            ),
+            None => paint_centre(
+                ui,
+                rect,
+                view.texture,
+                &view.tileset.tiles[tile],
+                rule.centre,
+                rule.drawn,
+            ),
+        },
+    );
 }
 
 fn caption(number: usize, rule: &TileRule) -> String {
@@ -68,7 +74,7 @@ fn caption(number: usize, rule: &TileRule) -> String {
     }
 }
 
-fn summary(view: &GridView, tile: usize, state: TileState) -> String {
+fn summary(view: &GridView, tile: usize, state: &TileState) -> String {
     match state {
         TileState::Grouped => {
             let name = group_of(view.project, tile).map_or("", |group| group.name.as_str());

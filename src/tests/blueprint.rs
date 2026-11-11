@@ -1,12 +1,12 @@
 use crate::blueprint::{self, BlueprintError};
 use crate::model::group::{CellState, GroupError, GroupPreset, TileGroup};
-use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::neighbor::{NeighborState, Neighborhood, Side};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{AIR_TILE, Centre, Chance, TILE_COUNT, TileMods, TileRule};
 use crate::model::transform::{Orientations, Transform};
-use crate::tests::support::{half_turn, index_of, mods, outer_corner};
+use crate::tests::support::{half_turn, mods, offset_of, outer_corner};
 
 const IMAGE: &str = "grass_main";
 
@@ -94,7 +94,7 @@ fn tile_with(orientations: &str) -> String {
 
 fn loaded_rule(orientations: &str) -> TileRule {
     let project = load(&tile_with(orientations)).unwrap();
-    project.rules_of(5)[0]
+    project.rules_of(5)[0].clone()
 }
 
 fn drawn_rule(drawn: Transform) -> Project {
@@ -214,7 +214,7 @@ fn a_custom_set_equal_to_a_preset_comes_back_as_that_preset() {
     );
 
     let loaded = round_trip(&project);
-    let rule = loaded.rules_of(5)[0];
+    let rule = &loaded.rules_of(5)[0];
 
     assert_eq!(rule.mods, mods(true, false, false));
     assert_eq!(rule.custom, None);
@@ -716,7 +716,7 @@ fn with_con(con: &str) -> String {
 #[test]
 fn a_tile_requirement_survives_a_round_trip() {
     let mut neighborhood = outer_corner();
-    neighborhood.set_state(index_of("topLeft"), NeighborState::Is(17));
+    neighborhood.set_state(offset_of("topLeft"), NeighborState::Is(17));
     let mut project = Project::default();
     project.add_rule(5, TileRule::new(neighborhood));
 
@@ -729,10 +729,13 @@ fn a_tile_requirement_survives_a_round_trip() {
 #[test]
 fn a_tile_requirement_loads_from_its_object_form() {
     let project = load(&with_con(r#"[{"is": 17}, 0, 2, 0, 1, 2, 1, 1]"#)).unwrap();
-    let neighborhood = project.rules_of(5)[0].neighborhood;
+    let neighborhood = &project.rules_of(5)[0].neighborhood;
 
-    assert_eq!(neighborhood.state(0), NeighborState::Is(17));
-    assert_eq!(neighborhood.state(4), NeighborState::Full);
+    assert_eq!(
+        neighborhood.state(offset_of("topLeft")),
+        NeighborState::Is(17)
+    );
+    assert_eq!(neighborhood.state(offset_of("right")), NeighborState::Full);
 }
 
 #[test]
@@ -759,10 +762,77 @@ fn a_neighbor_tile_outside_the_tileset_is_refused() {
 fn a_con_of_the_wrong_length_is_refused() {
     for con in ["[2,0,2,0,1,2,1]", "[2,0,2,0,1,2,1,1,1]"] {
         assert!(
-            matches!(load(&with_con(con)).unwrap_err(), BlueprintError::Json(_)),
+            matches!(
+                load(&with_con(con)).unwrap_err(),
+                BlueprintError::NeighborhoodShape(5)
+            ),
             "{con}"
         );
     }
+}
+
+fn with_reach(con: &str, reach: &str) -> String {
+    one_tile(&tile_of(
+        5,
+        &format!(r#"{{"con": {con}, "reach": {reach}, "chance": 100.0, "orientations": ["N"]}}"#),
+    ))
+}
+
+#[test]
+fn a_non_square_neighborhood_survives_a_round_trip() {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Any)
+        .grown(Side::Left)
+        .grown(Side::Left)
+        .grown(Side::Down);
+    neighborhood.set_state((-2, 1), NeighborState::Full);
+    neighborhood.set_state((0, 2), NeighborState::Empty);
+    neighborhood.set_state((-3, 0), NeighborState::Is(17));
+    let mut project = Project::default();
+    project.add_rule(5, TileRule::new(neighborhood));
+
+    let text = written(project.clone());
+
+    assert!(text.contains(r#""reach""#), "{text}");
+    assert_eq!(round_trip(&project), project);
+}
+
+#[test]
+fn a_three_by_three_neighborhood_writes_no_reach() {
+    assert!(!written(furnished()).contains("reach"));
+}
+
+#[test]
+fn a_con_matching_the_reach_is_loaded() {
+    let json = with_reach(
+        "[2,2,2,2,2,2,2,2,2,2,2]",
+        r#"{"left":2,"right":1,"up":1,"down":1}"#,
+    );
+    let project = load(&json).unwrap();
+
+    assert_eq!(project.rules_of(5)[0].neighborhood.reach().left, 2);
+}
+
+#[test]
+fn a_con_not_matching_the_reach_is_refused() {
+    let json = with_reach(
+        "[2,2,2,2,2,2,2,2]",
+        r#"{"left":2,"right":1,"up":1,"down":1}"#,
+    );
+
+    assert!(matches!(
+        load(&json).unwrap_err(),
+        BlueprintError::NeighborhoodShape(5)
+    ));
+}
+
+#[test]
+fn a_reach_below_one_is_refused() {
+    let json = with_reach("[2,2,2,2,2]", r#"{"left":0,"right":1,"up":1,"down":1}"#);
+
+    assert!(matches!(
+        load(&json).unwrap_err(),
+        BlueprintError::NeighborhoodShape(5)
+    ));
 }
 
 const RULES_TEXT: &str = "# credit\n[Test]\nIndex 1\n";

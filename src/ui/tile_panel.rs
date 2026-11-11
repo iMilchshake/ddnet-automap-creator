@@ -1,6 +1,6 @@
 use egui::{TextureHandle, Ui};
 
-use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
+use crate::model::neighbor::{NeighborState, Neighborhood, Offset, offset_label};
 use crate::model::pool::{ChanceMode, Pool};
 use crate::model::tile::{Centre, Chance, TileMods, TileRule};
 use crate::model::transform::{Orientations, Transform};
@@ -72,7 +72,8 @@ pub struct TilePanel {
     chance_percent: f32,
     has_rule: bool,
     error: Option<String>,
-    picking: Option<usize>,
+    picking: Option<Offset>,
+    resizing: bool,
 }
 
 impl TilePanel {
@@ -89,6 +90,13 @@ impl TilePanel {
             has_rule,
             error: None,
             picking: None,
+            resizing: false,
+        }
+    }
+
+    pub fn keep_resizing_of(&mut self, previous: &Self) {
+        if (self.tile, self.index) == (previous.tile, previous.index) {
+            self.resizing = previous.resizing;
         }
     }
 
@@ -104,8 +112,8 @@ impl TilePanel {
         self.picking.is_some()
     }
 
-    pub fn picking_label(&self) -> Option<&'static str> {
-        self.picking.map(|index| NEIGHBORS[index].label)
+    pub fn picking_label(&self) -> Option<String> {
+        self.picking.map(offset_label)
     }
 
     pub fn picked(&self) -> Option<usize> {
@@ -117,8 +125,8 @@ impl TilePanel {
     }
 
     pub fn pick(&mut self, tile: usize) -> Option<TileEdit> {
-        let index = self.picking.take()?;
-        self.neighborhood.set_state(index, NeighborState::Is(tile));
+        let offset = self.picking.take()?;
+        self.neighborhood.set_state(offset, NeighborState::Is(tile));
         self.has_rule = true;
 
         self.apply()
@@ -184,7 +192,7 @@ impl TilePanel {
 
     fn rule(&self, chance: Chance) -> TileRule {
         TileRule {
-            neighborhood: self.neighborhood,
+            neighborhood: self.neighborhood.clone(),
             centre: self.centre,
             mods: self.mods,
             custom: self.custom,

@@ -1,6 +1,8 @@
 use crate::model::neighbor::{
-    NEIGHBOR_COUNT, NEIGHBORS, NeighborState, Neighborhood, neighbor_index_at,
+    CENTRE, NEIGHBORS, NeighborState, Neighborhood, Reach, Side, neighbor_at, offset_label,
 };
+
+const DIRECT_NEIGHBORS: usize = 8;
 
 #[test]
 fn offsets_cover_the_ring_without_the_center() {
@@ -16,7 +18,7 @@ fn offsets_cover_the_ring_without_the_center() {
         .collect();
     expected.sort();
 
-    assert_eq!(offsets.len(), NEIGHBOR_COUNT);
+    assert_eq!(offsets.len(), DIRECT_NEIGHBORS);
     assert_eq!(offsets, expected);
 }
 
@@ -25,7 +27,7 @@ fn rpp_names_are_unique() {
     let mut names: Vec<&str> = NEIGHBORS.iter().map(|neighbor| neighbor.rpp_name).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), NEIGHBOR_COUNT);
+    assert_eq!(names.len(), DIRECT_NEIGHBORS);
 }
 
 #[test]
@@ -49,27 +51,76 @@ fn only_tile_requirements_expose_a_tile() {
 #[test]
 fn uniform_sets_every_state() {
     let neighborhood = Neighborhood::uniform(NeighborState::Any);
-    assert_eq!(neighborhood.states(), &[NeighborState::Any; NEIGHBOR_COUNT]);
+    let states: Vec<NeighborState> = neighborhood.cells().map(|(_, state)| state).collect();
+
+    assert_eq!(states, [NeighborState::Any; DIRECT_NEIGHBORS]);
 }
 
 #[test]
-fn walking_the_three_by_three_grid_skips_the_center_in_reading_order() {
-    let indices: Vec<Option<usize>> = (-1..=1)
-        .flat_map(|dy| (-1..=1).map(move |dx| neighbor_index_at(dx, dy)))
-        .collect();
+fn cells_walk_the_rectangle_in_reading_order_without_the_center() {
+    let reach = Reach {
+        left: 2,
+        right: 1,
+        up: 1,
+        down: 1,
+    };
+    let neighborhood = Neighborhood::with_reach(reach, NeighborState::Any);
+    let offsets: Vec<(i32, i32)> = neighborhood.cells().map(|(offset, _)| offset).collect();
 
+    assert_eq!(offsets.len(), reach.cell_count());
+    assert_eq!(offsets[0], (-2, -1));
+    assert_eq!(offsets[2], (0, -1));
+    assert!(!offsets.contains(&CENTRE));
+    assert_eq!(offsets.last(), Some(&(1, 1)));
+}
+
+#[test]
+fn growing_adds_any_cells_and_shrinking_drops_them() {
+    let mut neighborhood = Neighborhood::uniform(NeighborState::Full);
+    neighborhood.set_state((1, 0), NeighborState::Empty);
+
+    let grown = neighborhood.grown(Side::Right);
+
+    assert_eq!(grown.reach().right, 2);
+    assert_eq!(grown.state((2, 1)), NeighborState::Any);
+    assert_eq!(grown.state((1, 0)), NeighborState::Empty);
+    assert_eq!(grown.shrunk(Side::Right), Some(neighborhood));
+}
+
+#[test]
+fn the_three_by_three_core_cannot_be_shrunk() {
+    let neighborhood = Neighborhood::default();
+
+    for side in Side::ALL {
+        assert!(!neighborhood.can_shrink(side));
+        assert_eq!(neighborhood.shrunk(side), None);
+    }
+}
+
+#[test]
+fn constraints_ignore_any_cells_and_reach() {
+    let mut small = Neighborhood::uniform(NeighborState::Any);
+    small.set_state((1, 0), NeighborState::Full);
+    let grown = small.grown(Side::Up).grown(Side::Left);
+
+    assert_ne!(small, grown);
+    assert_eq!(small.constraints(), grown.constraints());
+    assert_eq!(grown.specificity(), 1);
+}
+
+#[test]
+fn direct_neighbors_are_named_and_outer_cells_are_not() {
     assert_eq!(
-        indices,
-        [
-            Some(0),
-            Some(1),
-            Some(2),
-            Some(3),
-            None,
-            Some(4),
-            Some(5),
-            Some(6),
-            Some(7),
-        ]
+        neighbor_at((0, -1)).map(|neighbor| neighbor.rpp_name),
+        Some("top")
     );
+    assert!(neighbor_at((2, 0)).is_none());
+    assert!(neighbor_at(CENTRE).is_none());
+}
+
+#[test]
+fn outer_cells_are_labelled_by_distance() {
+    assert_eq!(offset_label((-1, 0)), "left");
+    assert_eq!(offset_label((2, -1)), "2 right, 1 up");
+    assert_eq!(offset_label((0, 3)), "3 down");
 }

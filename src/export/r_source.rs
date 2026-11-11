@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::model::group::{self, Cell, GroupCopy, GroupError, TileGroup};
-use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood};
+use crate::model::neighbor::{NeighborState, Neighborhood, neighbor_at};
 use crate::model::pool::{self, ChanceMode, Pool, PoolRuns, Variant};
 use crate::model::project::{Project, is_free_tile};
 use crate::model::tile::{
@@ -63,7 +63,7 @@ impl RuleSet<'_> {
         self.tiles
             .iter()
             .filter(|(tile, _)| !self.deactivated.contains(tile))
-            .copied()
+            .cloned()
             .collect()
     }
 
@@ -389,9 +389,7 @@ fn copy_tests(copy: &GroupCopy, names: &[String]) -> Vec<String> {
 }
 
 fn index_test(offsets: &[Cell], check: &str) -> Option<String> {
-    let positions: Vec<String> = offsets.iter().map(|(x, y)| format!("[{x}, {y}]")).collect();
-
-    (!positions.is_empty()).then(|| format!("IndexAt({}).{check}()", positions.join(", ")))
+    (!offsets.is_empty()).then(|| format!("IndexAt({}).{check}()", positions(offsets).join(", ")))
 }
 
 fn copy_names(index: usize, namespaced: bool, group: &TileGroup) -> Vec<String> {
@@ -491,9 +489,7 @@ fn pool_chance(pool: &Pool) -> String {
 }
 
 fn test_clause(neighborhood: &Neighborhood) -> String {
-    centre_test(neighborhood, Centre::Full)
-        .map(|test| format!(".If({test})"))
-        .unwrap_or_default()
+    if_clause(&centre_tests(neighborhood, Centre::Full))
 }
 
 fn if_clause(tests: &[String]) -> String {
@@ -503,43 +499,59 @@ fn if_clause(tests: &[String]) -> String {
     }
 }
 
-fn centre_test(neighborhood: &Neighborhood, centre: Centre) -> Option<String> {
+fn centre_tests(neighborhood: &Neighborhood, centre: Centre) -> Vec<String> {
     let full = names_with(neighborhood, NeighborState::Full);
     let empty = names_with(neighborhood, NeighborState::Empty);
     let empty_centre = centre == Centre::Empty;
-    if !empty_centre && full.is_empty() && empty.is_empty() {
-        return None;
-    }
 
-    let mut test = CENTRE_TEST.to_owned();
-    if empty_centre {
-        test.push_str(".IsEmpty()");
-    }
-    if !full.is_empty() {
-        test.push_str(&format!(".IsFullAt({})", full.join(", ")));
-    }
-    if !empty.is_empty() {
-        test.push_str(&format!(".IsEmptyAt({})", empty.join(", ")));
-    }
+    let named = (empty_centre || !full.is_empty() || !empty.is_empty()).then(|| {
+        let mut test = CENTRE_TEST.to_owned();
+        if empty_centre {
+            test.push_str(".IsEmpty()");
+        }
+        if !full.is_empty() {
+            test.push_str(&format!(".IsFullAt({})", full.join(", ")));
+        }
+        if !empty.is_empty() {
+            test.push_str(&format!(".IsEmptyAt({})", empty.join(", ")));
+        }
+        test
+    });
+    let outer_full = outer_offsets_where(neighborhood, NeighborState::Full);
+    let outer_empty = outer_offsets_where(neighborhood, NeighborState::Empty);
 
-    Some(test)
+    named
+        .into_iter()
+        .chain(index_test(&outer_full, "IsFull"))
+        .chain(index_test(&outer_empty, "IsEmpty"))
+        .collect()
 }
 
-fn positions_where(
+fn offsets_where(
     neighborhood: &Neighborhood,
     matches: impl Fn(NeighborState) -> bool,
-) -> Vec<String> {
-    NEIGHBORS
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| matches(neighborhood.state(*index)))
-        .map(|(_, neighbor)| format!("[{}, {}]", neighbor.dx, neighbor.dy))
+) -> Vec<Cell> {
+    neighborhood
+        .cells()
+        .filter(|(_, state)| matches(*state))
+        .map(|(offset, _)| offset)
         .collect()
+}
+
+fn outer_offsets_where(neighborhood: &Neighborhood, wanted: NeighborState) -> Vec<Cell> {
+    offsets_where(neighborhood, |state| state == wanted)
+        .into_iter()
+        .filter(|offset| neighbor_at(*offset).is_none())
+        .collect()
+}
+
+fn positions(offsets: &[Cell]) -> Vec<String> {
+    offsets.iter().map(|(x, y)| format!("[{x}, {y}]")).collect()
 }
 
 fn picked_tests(neighborhood: &Neighborhood) -> Vec<String> {
     let mut tiles: Vec<usize> = Vec::new();
-    for state in neighborhood.states() {
+    for (_, state) in neighborhood.cells() {
         if let Some(tile) = state.tile()
             && !tiles.contains(&tile)
         {
@@ -550,8 +562,8 @@ fn picked_tests(neighborhood: &Neighborhood) -> Vec<String> {
     tiles
         .into_iter()
         .map(|tile| {
-            let positions = positions_where(neighborhood, |state| state.tile() == Some(tile));
-            format!("IndexAt({}).Is({tile})", positions.join(", "))
+            let offsets = offsets_where(neighborhood, |state| state.tile() == Some(tile));
+            format!("IndexAt({}).Is({tile})", positions(&offsets).join(", "))
         })
         .collect()
 }
@@ -561,17 +573,17 @@ fn inside_map_test(member: &Variant) -> Option<String> {
         return None;
     }
 
-    let positions = positions_where(&member.neighborhood, |state| state == NeighborState::Full);
+    let offsets = offsets_where(&member.neighborhood, |state| state == NeighborState::Full);
 
-    (!positions.is_empty()).then(|| format!("IndexAt({}).IsNotOut()", positions.join(", ")))
+    (!offsets.is_empty()).then(|| format!("IndexAt({}).IsNotOut()", positions(&offsets).join(", ")))
 }
 
-fn names_with(neighborhood: &Neighborhood, state: NeighborState) -> Vec<&'static str> {
-    NEIGHBORS
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| neighborhood.state(*index) == state)
-        .map(|(_, neighbor)| neighbor.rpp_name)
+fn names_with(neighborhood: &Neighborhood, wanted: NeighborState) -> Vec<&'static str> {
+    neighborhood
+        .cells()
+        .filter(|(_, state)| *state == wanted)
+        .filter_map(|(offset, _)| neighbor_at(offset))
+        .map(|neighbor| neighbor.rpp_name)
         .collect()
 }
 
@@ -613,7 +625,7 @@ fn index_rule_line(member: &Variant, odds: Option<f32>) -> String {
         Centre::Full => "",
         Centre::Empty => NO_DEFAULT_POS_RULE,
     };
-    let tests: Vec<String> = centre_test(&member.neighborhood, member.centre)
+    let tests: Vec<String> = centre_tests(&member.neighborhood, member.centre)
         .into_iter()
         .chain(picked_tests(&member.neighborhood))
         .chain(inside_map_test(member))

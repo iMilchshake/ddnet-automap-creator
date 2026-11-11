@@ -1,20 +1,21 @@
-use crate::model::neighbor::{NEIGHBOR_COUNT, NEIGHBORS, NeighborState, Neighborhood};
+use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood, Offset, neighbor_at};
 use crate::model::tile::TileMods;
 use crate::model::transform::{Orientations, Transform};
 
-pub fn index_of(rpp_name: &str) -> usize {
+pub fn offset_of(rpp_name: &str) -> Offset {
     NEIGHBORS
         .iter()
-        .position(|neighbor| neighbor.rpp_name == rpp_name)
+        .find(|neighbor| neighbor.rpp_name == rpp_name)
+        .map(|neighbor| (neighbor.dx, neighbor.dy))
         .unwrap_or_else(|| panic!("no neighbor is called {rpp_name}"))
 }
 
 pub fn named(neighborhood: &Neighborhood, state: NeighborState) -> Vec<&'static str> {
-    NEIGHBORS
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| neighborhood.state(*index) == state)
-        .map(|(_, neighbor)| neighbor.rpp_name)
+    neighborhood
+        .cells()
+        .filter(|(_, cell)| *cell == state)
+        .filter_map(|(offset, _)| neighbor_at(offset))
+        .map(|neighbor| neighbor.rpp_name)
         .collect()
 }
 
@@ -40,8 +41,8 @@ pub fn half_turn() -> Orientations {
 
 pub fn all_distinct() -> Neighborhood {
     let mut neighborhood = Neighborhood::default();
-    for index in 0..NEIGHBOR_COUNT {
-        neighborhood.set_state(index, NeighborState::Is(index + 1));
+    for (index, neighbor) in NEIGHBORS.iter().enumerate() {
+        neighborhood.set_state((neighbor.dx, neighbor.dy), NeighborState::Is(index + 1));
     }
 
     neighborhood
@@ -51,10 +52,10 @@ pub fn all_distinct() -> Neighborhood {
 pub fn outer_corner() -> Neighborhood {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
     for name in ["right", "bottom", "bottomRight"] {
-        neighborhood.set_state(index_of(name), NeighborState::Full);
+        neighborhood.set_state(offset_of(name), NeighborState::Full);
     }
     for name in ["top", "left"] {
-        neighborhood.set_state(index_of(name), NeighborState::Empty);
+        neighborhood.set_state(offset_of(name), NeighborState::Empty);
     }
 
     neighborhood

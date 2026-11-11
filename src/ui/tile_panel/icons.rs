@@ -23,6 +23,7 @@ const FLIP_BASE_FRACTION: f32 = 0.7;
 const POWER_INSET_FRACTION: f32 = 0.25;
 const POWER_GAP_HALF_ANGLE: f32 = 0.28 * PI;
 const POWER_OFF_FILL_OPACITY: f32 = 0.25;
+const RESIZE_HEAD_FRACTION: f32 = 0.4;
 
 const ROTATE_NEIGHBORS_TOOLTIP: &str = "Rotate neighbors 90° clockwise";
 const FLIP_NEIGHBORS_HORIZONTALLY_TOOLTIP: &str = "Flip neighbors horizontally";
@@ -39,6 +40,9 @@ pub(super) enum Icon {
     FlipVertically,
     Reset,
     Power,
+    Add,
+    Remove,
+    Resize,
 }
 
 pub(super) struct TurnButton {
@@ -85,12 +89,20 @@ pub(super) fn button_rect(bounds: Rect, align: Align2, index: usize) -> Rect {
 }
 
 pub(super) fn turn_button(ui: &Ui, rect: Rect, icon: Icon, tooltip: &str) -> bool {
+    icon_button(ui, rect, icon, tooltip, false)
+}
+
+pub(super) fn icon_button(ui: &Ui, rect: Rect, icon: Icon, tooltip: &str, active: bool) -> bool {
     let response = ui.interact(rect, ui.id().with(tooltip), Sense::click());
     let visuals = ui.style().interact(&response);
+    let fill = match active {
+        true => ui.visuals().selection.bg_fill,
+        false => visuals.weak_bg_fill,
+    };
     ui.painter().rect(
         rect,
         CORNER_RADIUS,
-        visuals.weak_bg_fill,
+        fill,
         visuals.bg_stroke,
         StrokeKind::Inside,
     );
@@ -140,6 +152,12 @@ fn paint_icon(painter: &Painter, rect: Rect, stroke: Stroke, icon: Icon) {
         Icon::FlipHorizontally => paint_flip(painter, rect, stroke, true),
         Icon::FlipVertically => paint_flip(painter, rect, stroke, false),
         Icon::Power => paint_power(painter, rect, stroke),
+        Icon::Remove => paint_minus(painter, rect, stroke),
+        Icon::Add => {
+            paint_minus(painter, rect, stroke);
+            painter.line_segment([rect.center_top(), rect.center_bottom()], stroke);
+        }
+        Icon::Resize => paint_resize(painter, rect, stroke),
         Icon::Reset => {
             let font = FontId::proportional(rect.height());
             painter.text(
@@ -184,6 +202,24 @@ fn paint_power(painter: &Painter, rect: Rect, stroke: Stroke) {
 
     painter.add(Shape::line(arc, stroke));
     painter.line_segment([rect.center_top(), rect.center()], stroke);
+}
+
+fn paint_minus(painter: &Painter, rect: Rect, stroke: Stroke) {
+    painter.line_segment([rect.left_center(), rect.right_center()], stroke);
+}
+
+fn paint_resize(painter: &Painter, rect: Rect, stroke: Stroke) {
+    let corner = rect.right_bottom();
+    let head = rect.width() * RESIZE_HEAD_FRACTION;
+    let wedge = vec![
+        corner,
+        corner - Vec2::new(head, 0.0),
+        corner - Vec2::new(0.0, head),
+    ];
+
+    painter.rect_stroke(rect, 0.0, stroke, StrokeKind::Inside);
+    painter.line_segment([rect.center(), corner], stroke);
+    painter.add(Shape::convex_polygon(wedge, stroke.color, Stroke::NONE));
 }
 
 fn paint_flip(painter: &Painter, rect: Rect, stroke: Stroke, horizontal: bool) {

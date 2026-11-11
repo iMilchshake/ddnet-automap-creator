@@ -17,7 +17,7 @@ use crate::model::group::{GroupError, TileGroup};
 use crate::model::pool::{self, Pool};
 use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{AIR_TILE, TileRule};
-use crate::preview::{CustomShape, Sample, placing_rule};
+use crate::preview::{CustomShape, PlacedTile, Sample, placing_rule};
 use crate::tileset::{self, Tileset};
 use crate::ui::code_frame::code_chip;
 use crate::ui::discard::{self, DiscardDecision, Leaving};
@@ -166,7 +166,7 @@ impl Inspector {
         }
     }
 
-    fn picking_label(&self) -> Option<&'static str> {
+    fn picking_label(&self) -> Option<String> {
         match self {
             Self::Tile(panel) => panel.picking_label(),
             _ => None,
@@ -440,7 +440,7 @@ impl AutomapperApp {
         let Some(label) = self.inspector.picking_label() else {
             return;
         };
-        if picking::show(ctx, view, &picking::neighbor_heading(label)) {
+        if picking::show(ctx, view, &picking::neighbor_heading(&label)) {
             self.inspector.stop_picking();
         }
     }
@@ -714,6 +714,9 @@ impl AutomapperApp {
                     .len()
                     .saturating_sub(1);
                 self.select_tile(panel.tile(), panel.index().min(last));
+                if let Inspector::Tile(restored) = &mut self.inspector {
+                    restored.keep_resizing_of(&panel);
+                }
             }
             Inspector::Group(panel) => self.select_group(panel.index()),
             Inspector::Empty => {}
@@ -1211,7 +1214,7 @@ impl AutomapperApp {
                 }
             }
             TileEdit::Duplicate(index) => {
-                if let Some(&rule) = self.rule_sets.active().rules_of(tile).get(index) {
+                if let Some(rule) = self.rule_sets.active().rules_of(tile).get(index).cloned() {
                     self.append_rule(tile, rule);
                 }
             }
@@ -1226,7 +1229,7 @@ impl AutomapperApp {
     }
 
     fn copy_rule(&mut self, ctx: &Context, tile: usize, index: usize) {
-        if let Some(&rule) = self.rule_sets.active().rules_of(tile).get(index) {
+        if let Some(rule) = self.rule_sets.active().rules_of(tile).get(index).cloned() {
             self.clipboard = Some(CopiedRule { rule, tile, index });
             self.start_flash(ctx, FlashKind::Copy);
             self.status.info(ctx, format!("Copied tile {tile}"));
@@ -1243,9 +1246,9 @@ impl AutomapperApp {
         let rule = match existing.get(target) {
             Some(replaced) => TileRule {
                 drawn: replaced.drawn,
-                ..copied.rule
+                ..copied.rule.clone()
             },
-            None => copied.rule,
+            None => copied.rule.clone(),
         };
         let source = copied.tile;
         self.store_rule(tile, target, rule);
@@ -1479,14 +1482,18 @@ impl AutomapperApp {
         }
 
         let (rule, has_rule) = match self.rule_sets.active().rules_of(tile).get(index) {
-            Some(&rule) => (rule, true),
+            Some(rule) => (rule.clone(), true),
             None => (seed_rule(&loaded.tileset, tile), false),
         };
         self.inspector = Inspector::Tile(TilePanel::new(tile, index, rule, has_rule));
     }
 
     fn select_rule_of(&mut self, clicked: ClickedTile) {
-        let ClickedTile { placed, around } = clicked;
+        let ClickedTile {
+            placed,
+            column,
+            row,
+        } = clicked;
         self.drag_anchor = None;
         match self.rule_sets.active().group_at(placed.index) {
             Some(index) => {
@@ -1495,11 +1502,25 @@ impl AutomapperApp {
             }
             None => {
                 self.define_groups = false;
-                let rule =
-                    placing_rule(self.rule_sets.active(), placed, around).unwrap_or(FIRST_RULE);
+                let rule = self.placing_rule_at(placed, column, row);
                 self.select_tile(placed.index, rule);
             }
         }
+    }
+
+    fn placing_rule_at(&self, placed: PlacedTile, column: usize, row: usize) -> usize {
+        let (PreviewResult::NoRules(map)
+        | PreviewResult::Ready {
+            automapped: map, ..
+        }) = &self.preview
+        else {
+            return FIRST_RULE;
+        };
+
+        placing_rule(self.rule_sets.active(), placed, |offset| {
+            map.is_solid_near(column, row, offset)
+        })
+        .unwrap_or(FIRST_RULE)
     }
 
     fn handle_group_grid(&mut self, ctx: &Context, response: GridResponse) {

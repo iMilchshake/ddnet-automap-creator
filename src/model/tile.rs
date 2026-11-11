@@ -17,8 +17,8 @@ pub fn highest_free_tile(is_free: impl Fn(usize) -> bool) -> Option<usize> {
 pub fn referenced_tiles(tiles: &[(usize, TileRule)]) -> BTreeSet<usize> {
     tiles
         .iter()
-        .flat_map(|(_, rule)| rule.neighborhood.states())
-        .filter_map(|state| state.tile())
+        .flat_map(|(_, rule)| rule.neighborhood.cells())
+        .filter_map(|(_, state)| state.tile())
         .collect()
 }
 
@@ -42,6 +42,10 @@ impl Chance {
 
     pub fn percent(self) -> f32 {
         self.0
+    }
+
+    pub fn split(self, parts: usize) -> Self {
+        Self(self.0 / parts as f32)
     }
 
     pub fn is_full(self) -> bool {
@@ -83,7 +87,7 @@ pub enum Centre {
     Empty,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TileRule {
     pub neighborhood: Neighborhood,
     pub centre: Centre,

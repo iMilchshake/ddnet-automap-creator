@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::model::neighbor::{NeighborState, Neighborhood};
+use crate::model::neighbor::Neighborhood;
 use crate::model::tile::{Centre, Chance, TileRule};
 use crate::model::transform::Transform;
 
@@ -17,7 +17,7 @@ pub enum ChanceMode {
     Exact,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Variant {
     pub tile: usize,
     pub rule: usize,
@@ -73,17 +73,18 @@ impl Pool {
     }
 
     pub fn places_primary(&self, tile: usize) -> bool {
-        self.member_of(tile).is_some_and(|member| member.primary)
-    }
-
-    pub fn member_of(&self, tile: usize) -> Option<&Variant> {
-        self.members.iter().find(|member| member.tile == tile)
+        self.members
+            .iter()
+            .any(|member| member.tile == tile && member.primary)
     }
 
     pub fn share_of(&self, tile: usize, mode: ChanceMode) -> Option<f32> {
-        let position = self.members.iter().position(|member| member.tile == tile)?;
-
-        Some(self.shares(mode)[position])
+        self.members
+            .iter()
+            .zip(self.shares(mode))
+            .filter(|(member, _)| member.tile == tile)
+            .map(|(_, share)| share)
+            .reduce(|sum, share| sum + share)
     }
 }
 
@@ -99,10 +100,11 @@ pub fn pools_of(pools: &[Pool], tile: usize) -> Vec<&Pool> {
 pub fn base_shares(pools: &[Pool], mode: ChanceMode) -> BTreeMap<usize, f32> {
     let mut shares = BTreeMap::new();
     for pool in pools {
-        for (member, share) in pool.members.iter().zip(pool.shares(mode)) {
-            if member.primary {
-                shares.insert(member.tile, share);
-            }
+        for member in pool.members.iter().filter(|member| member.primary) {
+            shares.extend(
+                pool.share_of(member.tile, mode)
+                    .map(|share| (member.tile, share)),
+            );
         }
     }
 
@@ -115,13 +117,13 @@ pub fn pools(tiles: &[(usize, TileRule)]) -> Vec<Pool> {
     let mut pools: Vec<Pool> = Vec::new();
 
     for variant in expand(tiles) {
-        match pools
-            .iter_mut()
-            .find(|pool| pool.neighborhood == variant.neighborhood && pool.centre == variant.centre)
-        {
+        let constraints = variant.neighborhood.constraints();
+        match pools.iter_mut().find(|pool| {
+            pool.neighborhood.constraints() == constraints && pool.centre == variant.centre
+        }) {
             Some(pool) => pool.members.push(variant),
             None => pools.push(Pool {
-                neighborhood: variant.neighborhood,
+                neighborhood: variant.neighborhood.clone(),
                 centre: variant.centre,
                 members: vec![variant],
             }),
@@ -164,43 +166,57 @@ impl<'a> PoolRuns<'a> {
 fn expand(tiles: &[(usize, TileRule)]) -> Vec<Variant> {
     let mut variants = Vec::new();
 
-    let mut rules_by_tile: BTreeMap<usize, Vec<TileRule>> = BTreeMap::new();
-    for &(tile, rule) in tiles {
-        rules_by_tile.entry(tile).or_default().push(rule);
+    let mut rules_by_tile: BTreeMap<usize, Vec<&TileRule>> = BTreeMap::new();
+    for (tile, rule) in tiles {
+        rules_by_tile.entry(*tile).or_default().push(rule);
     }
 
     for (tile, rules) in rules_by_tile {
-        let mut seen = Vec::new();
-        for (index, rule) in rules.into_iter().enumerate() {
-            for relative in rule.orientations().transforms() {
-                let neighborhood = relative.apply(&rule.neighborhood);
-                if seen.contains(&(neighborhood, rule.centre)) {
-                    continue;
-                }
-                let primary = seen.is_empty();
-                seen.push((neighborhood, rule.centre));
-
-                variants.push(Variant {
-                    tile,
-                    rule: index,
-                    transform: relative.after(rule.drawn),
-                    primary,
-                    neighborhood,
-                    centre: rule.centre,
-                    chance: rule.chance,
-                });
-            }
+        let mut of_tile: Vec<Variant> = rules
+            .into_iter()
+            .enumerate()
+            .flat_map(|(index, rule)| rule_variants(tile, index, rule))
+            .collect();
+        if let Some(first) = of_tile.first_mut() {
+            first.primary = true;
         }
+        variants.extend(of_tile);
     }
 
-    variants.sort_by_key(|variant| (specificity(&variant.neighborhood), variant.tile));
+    variants.sort_by_key(|variant| (variant.neighborhood.specificity(), variant.tile));
     variants
 }
 
-fn specificity(neighborhood: &Neighborhood) -> usize {
-    neighborhood
-        .states()
+fn rule_variants(tile: usize, index: usize, rule: &TileRule) -> Vec<Variant> {
+    let placements: Vec<(Neighborhood, Transform)> = rule
+        .orientations()
+        .transforms()
+        .into_iter()
+        .map(|relative| {
+            (
+                relative.apply(&rule.neighborhood),
+                relative.after(rule.drawn),
+            )
+        })
+        .collect();
+
+    placements
         .iter()
-        .filter(|state| **state != NeighborState::Any)
-        .count()
+        .map(|(neighborhood, transform)| {
+            let sharing = placements
+                .iter()
+                .filter(|(other, _)| other.constraints() == neighborhood.constraints())
+                .count();
+
+            Variant {
+                tile,
+                rule: index,
+                transform: *transform,
+                primary: false,
+                neighborhood: neighborhood.clone(),
+                centre: rule.centre,
+                chance: rule.chance.split(sharing),
+            }
+        })
+        .collect()
 }
