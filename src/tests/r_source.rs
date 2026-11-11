@@ -1,6 +1,6 @@
 use crate::export::r_source::{ExportError, RuleSet, last_wins_odds, render, render_rule_sets};
 use crate::model::group::{CellState, GroupPreset, TileGroup};
-use crate::model::neighbor::{NeighborState, Neighborhood, Reach};
+use crate::model::neighbor::{Extent, NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
@@ -1035,20 +1035,20 @@ fn the_mask_skips_tiles_a_neighbor_refers_to() {
     assert!(emit(&tiles).contains("g:mask = 253;"));
 }
 
-fn reaching_two_cells() -> Neighborhood {
-    let reach = Reach {
+fn extending_two_cells() -> Neighborhood {
+    let extent = Extent {
         left: 2,
         right: 2,
         up: 2,
         down: 1,
     };
 
-    Neighborhood::with_reach(reach, NeighborState::Any)
+    Neighborhood::with_extent(extent, NeighborState::Any)
 }
 
 #[test]
 fn outer_cells_are_tested_by_position_next_to_the_named_ones() {
-    let mut neighborhood = reaching_two_cells();
+    let mut neighborhood = extending_two_cells();
     neighborhood.set_state(offset_of("top"), NeighborState::Full);
     neighborhood.set_state((2, 0), NeighborState::Full);
     neighborhood.set_state((0, -2), NeighborState::Empty);
@@ -1065,7 +1065,7 @@ fn outer_cells_are_tested_by_position_next_to_the_named_ones() {
 
 #[test]
 fn outer_cells_are_tested_in_the_tile_specific_copy_run() {
-    let mut neighborhood = reaching_two_cells();
+    let mut neighborhood = extending_two_cells();
     neighborhood.set_state(offset_of("top"), NeighborState::Empty);
     neighborhood.set_state((2, 0), NeighborState::Full);
     neighborhood.set_state((0, -2), NeighborState::Empty);
@@ -1085,7 +1085,7 @@ fn outer_cells_are_tested_in_the_tile_specific_copy_run() {
 fn outer_cells_that_are_any_do_not_change_the_output() {
     let mut small = Neighborhood::uniform(NeighborState::Any);
     small.set_state(offset_of("top"), NeighborState::Full);
-    let mut large = reaching_two_cells();
+    let mut large = extending_two_cells();
     large.set_state(offset_of("top"), NeighborState::Full);
 
     assert_eq!(

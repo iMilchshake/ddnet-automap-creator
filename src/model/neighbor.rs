@@ -1,7 +1,7 @@
 pub type Offset = (i32, i32);
 
 pub const CENTRE: Offset = (0, 0);
-pub const MIN_REACH: i32 = 1;
+pub const MIN_EXTENT: i32 = 1;
 
 const NEIGHBOR_COUNT: usize = 8;
 
@@ -101,29 +101,29 @@ impl Side {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Reach {
+pub struct Extent {
     pub left: i32,
     pub right: i32,
     pub up: i32,
     pub down: i32,
 }
 
-impl Reach {
-    pub const DEFAULT: Self = Self::uniform(MIN_REACH);
+impl Extent {
+    pub const DEFAULT: Self = Self::uniform(MIN_EXTENT);
 
-    pub const fn uniform(reach: i32) -> Self {
+    pub const fn uniform(extent: i32) -> Self {
         Self {
-            left: reach,
-            right: reach,
-            up: reach,
-            down: reach,
+            left: extent,
+            right: extent,
+            up: extent,
+            down: extent,
         }
     }
 
     pub fn is_valid(self) -> bool {
         Side::ALL
             .into_iter()
-            .all(|side| self.side(side) >= MIN_REACH)
+            .all(|side| self.side(side) >= MIN_EXTENT)
     }
 
     pub fn width(self) -> i32 {
@@ -151,19 +151,19 @@ impl Reach {
         }
     }
 
-    pub fn with_side(self, side: Side, reach: i32) -> Self {
+    pub fn with_side(self, side: Side, extent: i32) -> Self {
         match side {
             Side::Left => Self {
-                left: reach,
+                left: extent,
                 ..self
             },
             Side::Right => Self {
-                right: reach,
+                right: extent,
                 ..self
             },
-            Side::Up => Self { up: reach, ..self },
+            Side::Up => Self { up: extent, ..self },
             Side::Down => Self {
-                down: reach,
+                down: extent,
                 ..self
             },
         }
@@ -186,7 +186,7 @@ impl Reach {
     }
 }
 
-impl Default for Reach {
+impl Default for Extent {
     fn default() -> Self {
         Self::DEFAULT
     }
@@ -194,32 +194,33 @@ impl Default for Reach {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Neighborhood {
-    reach: Reach,
+    extent: Extent,
     states: Vec<NeighborState>,
 }
 
 impl Neighborhood {
     pub fn uniform(state: NeighborState) -> Self {
-        Self::with_reach(Reach::DEFAULT, state)
+        Self::with_extent(Extent::DEFAULT, state)
     }
 
-    pub fn with_reach(reach: Reach, state: NeighborState) -> Self {
+    pub fn with_extent(extent: Extent, state: NeighborState) -> Self {
         Self {
-            reach,
-            states: vec![state; reach.cell_count()],
+            extent,
+            states: vec![state; extent.cell_count()],
         }
     }
 
-    pub fn from_states(reach: Reach, states: Vec<NeighborState>) -> Option<Self> {
-        (reach.is_valid() && states.len() == reach.cell_count()).then_some(Self { reach, states })
+    pub fn from_states(extent: Extent, states: Vec<NeighborState>) -> Option<Self> {
+        (extent.is_valid() && states.len() == extent.cell_count())
+            .then_some(Self { extent, states })
     }
 
-    pub fn reach(&self) -> Reach {
-        self.reach
+    pub fn extent(&self) -> Extent {
+        self.extent
     }
 
     pub fn state(&self, offset: Offset) -> NeighborState {
-        match self.reach.cell_index(offset) {
+        match self.extent.cell_index(offset) {
             Some(index) => self.states[index],
             None => NeighborState::Any,
         }
@@ -227,14 +228,14 @@ impl Neighborhood {
 
     pub fn set_state(&mut self, offset: Offset, state: NeighborState) {
         let index = self
-            .reach
+            .extent
             .cell_index(offset)
             .expect("the offset is a cell of the neighborhood");
         self.states[index] = state;
     }
 
     pub fn cells(&self) -> impl Iterator<Item = (Offset, NeighborState)> {
-        self.reach
+        self.extent
             .offsets()
             .filter(|offset| *offset != CENTRE)
             .zip(self.states.iter().copied())
@@ -251,25 +252,25 @@ impl Neighborhood {
     }
 
     pub fn grown(&self, side: Side) -> Self {
-        self.resized(self.reach.with_side(side, self.reach.side(side) + 1))
+        self.resized(self.extent.with_side(side, self.extent.side(side) + 1))
     }
 
     pub fn shrunk(&self, side: Side) -> Option<Self> {
         self.can_shrink(side)
-            .then(|| self.resized(self.reach.with_side(side, self.reach.side(side) - 1)))
+            .then(|| self.resized(self.extent.with_side(side, self.extent.side(side) - 1)))
     }
 
     pub fn can_shrink(&self, side: Side) -> bool {
-        self.reach.side(side) > MIN_REACH
+        self.extent.side(side) > MIN_EXTENT
     }
 
     pub fn is_tile_specific(&self) -> bool {
         self.cells().any(|(_, state)| state.tile().is_some())
     }
 
-    fn resized(&self, reach: Reach) -> Self {
-        let mut resized = Self::with_reach(reach, NeighborState::Any);
-        for (offset, state) in self.cells().filter(|(offset, _)| reach.contains(*offset)) {
+    fn resized(&self, extent: Extent) -> Self {
+        let mut resized = Self::with_extent(extent, NeighborState::Any);
+        for (offset, state) in self.cells().filter(|(offset, _)| extent.contains(*offset)) {
             resized.set_state(offset, state);
         }
 

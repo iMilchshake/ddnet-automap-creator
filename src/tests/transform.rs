@@ -1,4 +1,4 @@
-use crate::model::neighbor::{NeighborState, Neighborhood, Reach, Side};
+use crate::model::neighbor::{Extent, NeighborState, Neighborhood, Side};
 use crate::model::tile::TileMods;
 use crate::model::transform::{Orientations, Transform};
 use crate::tests::support::{all_distinct, half_turn, mods, named, offset_of, outer_corner};
@@ -91,12 +91,12 @@ fn wide_neighborhood() -> Neighborhood {
 }
 
 #[test]
-fn rotating_a_wide_neighborhood_turns_its_cells_and_reach() {
+fn rotating_a_wide_neighborhood_turns_its_cells_and_extent() {
     let turned = Transform::ROTATE_CLOCKWISE.apply(&wide_neighborhood());
 
     assert_eq!(
-        turned.reach(),
-        Reach {
+        turned.extent(),
+        Extent {
             left: 1,
             right: 2,
             up: 1,
@@ -109,12 +109,12 @@ fn rotating_a_wide_neighborhood_turns_its_cells_and_reach() {
 }
 
 #[test]
-fn flipping_a_wide_neighborhood_swaps_the_reach_of_one_axis() {
+fn flipping_a_wide_neighborhood_swaps_the_extent_of_one_axis() {
     let flipped = Transform::FLIP_HORIZONTALLY.apply(&wide_neighborhood());
 
     assert_eq!(
-        flipped.reach(),
-        Reach {
+        flipped.extent(),
+        Extent {
             left: 3,
             right: 1,
             up: 2,
@@ -125,8 +125,8 @@ fn flipping_a_wide_neighborhood_swaps_the_reach_of_one_axis() {
     assert_eq!(flipped.state((1, -2)), NeighborState::Empty);
 
     let vertical = Transform::FLIP_VERTICALLY.apply(&wide_neighborhood());
-    assert_eq!(vertical.reach().up, 1);
-    assert_eq!(vertical.reach().down, 2);
+    assert_eq!(vertical.extent().up, 1);
+    assert_eq!(vertical.extent().down, 2);
 }
 
 #[test]

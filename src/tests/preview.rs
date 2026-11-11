@@ -9,7 +9,7 @@ use crate::blueprint;
 use crate::export::compiler::RulesCompiler;
 use crate::export::r_source::{RuleSet, output_file, render};
 use crate::model::group::{GroupPreset, TileGroup};
-use crate::model::neighbor::{NEIGHBORS, NeighborState, Neighborhood, Offset, Reach, Side};
+use crate::model::neighbor::{Extent, NEIGHBORS, NeighborState, Neighborhood, Offset, Side};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
@@ -349,13 +349,13 @@ fn an_unmapped_sample_marks_every_solid_cell_unmatched() {
 
 #[test]
 fn an_exported_rule_with_outer_cells_compiles_to_positioned_tests() {
-    let reach = Reach {
+    let extent = Extent {
         left: 2,
         right: 2,
         up: 2,
         down: 1,
     };
-    let mut neighborhood = Neighborhood::with_reach(reach, NeighborState::Any);
+    let mut neighborhood = Neighborhood::with_extent(extent, NeighborState::Any);
     neighborhood.set_state((2, 0), NeighborState::Full);
     neighborhood.set_state((0, -2), NeighborState::Empty);
     neighborhood.set_state((-2, 0), NeighborState::Is(17));

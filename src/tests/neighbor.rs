@@ -1,5 +1,5 @@
 use crate::model::neighbor::{
-    CENTRE, NEIGHBORS, NeighborState, Neighborhood, Reach, Side, neighbor_at, offset_label,
+    CENTRE, Extent, NEIGHBORS, NeighborState, Neighborhood, Side, neighbor_at, offset_label,
 };
 
 const DIRECT_NEIGHBORS: usize = 8;
@@ -58,16 +58,16 @@ fn uniform_sets_every_state() {
 
 #[test]
 fn cells_walk_the_rectangle_in_reading_order_without_the_center() {
-    let reach = Reach {
+    let extent = Extent {
         left: 2,
         right: 1,
         up: 1,
         down: 1,
     };
-    let neighborhood = Neighborhood::with_reach(reach, NeighborState::Any);
+    let neighborhood = Neighborhood::with_extent(extent, NeighborState::Any);
     let offsets: Vec<(i32, i32)> = neighborhood.cells().map(|(offset, _)| offset).collect();
 
-    assert_eq!(offsets.len(), reach.cell_count());
+    assert_eq!(offsets.len(), extent.cell_count());
     assert_eq!(offsets[0], (-2, -1));
     assert_eq!(offsets[2], (0, -1));
     assert!(!offsets.contains(&CENTRE));
@@ -81,7 +81,7 @@ fn growing_adds_any_cells_and_shrinking_drops_them() {
 
     let grown = neighborhood.grown(Side::Right);
 
-    assert_eq!(grown.reach().right, 2);
+    assert_eq!(grown.extent().right, 2);
     assert_eq!(grown.state((2, 1)), NeighborState::Any);
     assert_eq!(grown.state((1, 0)), NeighborState::Empty);
     assert_eq!(grown.shrunk(Side::Right), Some(neighborhood));
@@ -98,7 +98,7 @@ fn the_three_by_three_core_cannot_be_shrunk() {
 }
 
 #[test]
-fn constraints_ignore_any_cells_and_reach() {
+fn constraints_ignore_any_cells_and_extent() {
     let mut small = Neighborhood::uniform(NeighborState::Any);
     small.set_state((1, 0), NeighborState::Full);
     let grown = small.grown(Side::Up).grown(Side::Left);

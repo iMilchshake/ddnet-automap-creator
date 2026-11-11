@@ -2,8 +2,8 @@ use json_pretty_compact::PrettyCompactFormatter;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::model::group::{self, CellState, GroupError, TileGroup};
-use crate::model::neighbor::{NeighborState, Neighborhood, Reach};
+use crate::model::group::{self, Cell, CellState, GroupError, RING_EXTENT, TileGroup};
+use crate::model::neighbor::{Extent, NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
@@ -17,6 +17,18 @@ const IDENTITY_LETTER: char = 'N';
 const X_FLIP_LETTER: char = 'V';
 const Y_FLIP_LETTER: char = 'H';
 const ROTATE_LETTER: char = 'R';
+
+const EMPTY_LETTER: char = 'E';
+const FULL_LETTER: char = 'F';
+const ANY_LETTER: char = 'A';
+const TILE_OPEN: char = '[';
+const TILE_CLOSE: char = ']';
+
+const STATE_LETTERS: [(char, NeighborState); 3] = [
+    (EMPTY_LETTER, NeighborState::Empty),
+    (FULL_LETTER, NeighborState::Full),
+    (ANY_LETTER, NeighborState::Any),
+];
 
 /// Wide enough to keep one rule on one line; the default 120 breaks them up.
 const MAX_LINE: u32 = 150;
@@ -49,14 +61,26 @@ pub enum BlueprintError {
     #[error("group `{0}` lists orientations that flipping and rotating cannot make")]
     GroupOrientations(String),
 
-    #[error("group `{0}` lists a surrounding tile that is not on or next to the group")]
-    GroupNeighbor(String),
+    #[error("group `{0}` has a neighborhood whose size does not match its tiles")]
+    GroupNeighborShape(String),
 
-    #[error("group `{0}` lists the same surrounding tile more than once")]
-    GroupNeighborRepeated(String),
+    #[error("group `{0}` sets a neighbor that is not on or next to the group")]
+    GroupNeighborCell(String),
 
-    #[error("`{0}` is not a neighbor state, expected 0 (empty), 1 (full) or 2 (any)")]
-    NeighborCode(u8),
+    #[error("group `{group}`: {source}")]
+    GroupNeighborText {
+        group: String,
+        source: Box<BlueprintError>,
+    },
+
+    #[error("group `{0}` lists a specific tile as a neighbor, only E, F and A are allowed")]
+    GroupNeighborTile(String),
+
+    #[error("`{0}` is not a neighbor state, expected E (empty), F (full), A (any) or [tile]")]
+    NeighborLetter(char),
+
+    #[error("`{0}` is not a tile number in a neighbor list")]
+    NeighborTileText(String),
 
     #[error("tile {0} has a neighborhood whose size does not match its cells")]
     NeighborhoodShape(usize),
@@ -117,9 +141,9 @@ pub struct BlueprintTile {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlueprintRule {
-    pub con: Vec<BlueprintState>,
-    #[serde(default, skip_serializing_if = "BlueprintReach::is_default")]
-    pub reach: BlueprintReach,
+    pub neighbors: String,
+    #[serde(default, skip_serializing_if = "BlueprintExtent::is_default")]
+    pub extent: BlueprintExtent,
     pub chance: f32,
     pub orientations: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,43 +153,33 @@ pub struct BlueprintRule {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlueprintReach {
-    pub left: i32,
-    pub right: i32,
-    pub up: i32,
-    pub down: i32,
-}
+pub struct BlueprintExtent([i32; 4]);
 
-impl BlueprintReach {
+impl BlueprintExtent {
     fn is_default(&self) -> bool {
-        Reach::from(*self) == Reach::DEFAULT
+        Extent::from(*self) == Extent::DEFAULT
     }
 }
 
-impl Default for BlueprintReach {
+impl Default for BlueprintExtent {
     fn default() -> Self {
-        Reach::DEFAULT.into()
+        Extent::DEFAULT.into()
     }
 }
 
-impl From<Reach> for BlueprintReach {
-    fn from(reach: Reach) -> Self {
-        Self {
-            left: reach.left,
-            right: reach.right,
-            up: reach.up,
-            down: reach.down,
-        }
+impl From<Extent> for BlueprintExtent {
+    fn from(extent: Extent) -> Self {
+        Self([extent.left, extent.right, extent.up, extent.down])
     }
 }
 
-impl From<BlueprintReach> for Reach {
-    fn from(reach: BlueprintReach) -> Self {
+impl From<BlueprintExtent> for Extent {
+    fn from(BlueprintExtent([left, right, up, down]): BlueprintExtent) -> Self {
         Self {
-            left: reach.left,
-            right: reach.right,
-            up: reach.up,
-            down: reach.down,
+            left,
+            right,
+            up,
+            down,
         }
     }
 }
@@ -185,26 +199,13 @@ impl BlueprintCentre {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum BlueprintState {
-    Code(u8),
-    Is { is: usize },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct BlueprintGroup {
     pub name: String,
     pub tiles: Vec<usize>,
-    pub neighbors: BlueprintNeighbors,
+    pub neighbors: String,
     pub chance: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orientations: Option<Vec<String>>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BlueprintNeighbors {
-    pub full: Vec<[i32; 2]>,
-    pub empty: Vec<[i32; 2]>,
 }
 
 pub struct Loaded {
@@ -381,12 +382,8 @@ fn store_rule(rule: &TileRule) -> BlueprintRule {
     let orientations = rule.orientations().transforms();
 
     BlueprintRule {
-        con: rule
-            .neighborhood
-            .cells()
-            .map(|(_, state)| store_state(state))
-            .collect(),
-        reach: rule.neighborhood.reach().into(),
+        neighbors: store_states(rule.neighborhood.cells().map(|(_, state)| state)),
+        extent: rule.neighborhood.extent().into(),
         chance: rule.chance.percent(),
         orientations: orientations.into_iter().map(orientation_name).collect(),
         drawn: (rule.drawn != Transform::IDENTITY).then(|| orientation_name(rule.drawn)),
@@ -440,8 +437,8 @@ fn load_orientations(tile: usize, names: &[String]) -> Result<Orientations, Blue
 }
 
 fn load_rule(tile: usize, rule: &BlueprintRule) -> Result<TileRule, BlueprintError> {
-    let states = rule.con.iter().map(load_state).collect::<Result<_, _>>()?;
-    let neighborhood = Neighborhood::from_states(rule.reach.into(), states)
+    let states = load_states(&rule.neighbors)?;
+    let neighborhood = Neighborhood::from_states(rule.extent.into(), states)
         .ok_or(BlueprintError::NeighborhoodShape(tile))?;
 
     let orientations = load_orientations(tile, &rule.orientations)?;
@@ -467,60 +464,74 @@ fn load_rule(tile: usize, rule: &BlueprintRule) -> Result<TileRule, BlueprintErr
     })
 }
 
+fn neighbor_box(((min_x, min_y), (max_x, max_y)): (Cell, Cell)) -> impl Iterator<Item = Cell> {
+    (min_y - RING_EXTENT..=max_y + RING_EXTENT)
+        .flat_map(move |y| (min_x - RING_EXTENT..=max_x + RING_EXTENT).map(move |x| (x, y)))
+}
+
 fn store_group(group: &TileGroup) -> BlueprintGroup {
+    let bounds = group.bounds().expect("a validated group has tiles");
+
     BlueprintGroup {
         name: group.name.clone(),
         tiles: group.footprint(),
-        neighbors: BlueprintNeighbors {
-            full: stored_offsets(group, CellState::Full),
-            empty: stored_offsets(group, CellState::Empty),
-        },
+        neighbors: store_states(neighbor_box(bounds).map(|cell| {
+            group
+                .neighbors
+                .get(&cell)
+                .copied()
+                .unwrap_or(CellState::Any)
+                .into()
+        })),
         chance: group.chance.percent(),
         orientations: store_group_orientations(group.mods),
     }
 }
 
-fn stored_offsets(group: &TileGroup, wanted: CellState) -> Vec<[i32; 2]> {
-    let Some((left, top)) = group.origin() else {
-        return Vec::new();
-    };
-    let mut offsets: Vec<[i32; 2]> = group
-        .neighbors
-        .iter()
-        .filter(|(_, state)| **state == wanted)
-        .map(|(&(x, y), _)| [x - left, y - top])
-        .collect();
-    offsets.sort_by_key(|&[x, y]| (y, x));
+fn load_group_states(group: &TileGroup, text: &str) -> Result<Vec<CellState>, BlueprintError> {
+    if text.contains(TILE_OPEN) {
+        return Err(BlueprintError::GroupNeighborTile(group.name.clone()));
+    }
 
-    offsets
+    let states = load_states(text).map_err(|source| BlueprintError::GroupNeighborText {
+        group: group.name.clone(),
+        source: Box::new(source),
+    })?;
+
+    states
+        .into_iter()
+        .map(|state| {
+            CellState::from_neighbor(state)
+                .ok_or_else(|| BlueprintError::GroupNeighborTile(group.name.clone()))
+        })
+        .collect()
 }
 
-fn load_neighbors(
-    group: &mut TileGroup,
-    stored: &BlueprintNeighbors,
-) -> Result<(), BlueprintError> {
-    let Some((left, top)) = group.origin() else {
-        return Ok(());
-    };
+fn load_neighbors(group: &mut TileGroup, text: &str) -> Result<(), BlueprintError> {
+    let bounds = group.bounds().ok_or(GroupError::TooSmall)?;
+    let states = load_group_states(group, text)?;
+    let cells: Vec<Cell> = neighbor_box(bounds).collect();
+    if cells.len() != states.len() {
+        return Err(BlueprintError::GroupNeighborShape(group.name.clone()));
+    }
+
+    let conditions: Vec<(Cell, CellState)> = cells
+        .into_iter()
+        .zip(states)
+        .filter(|(_, state)| *state != CellState::Any)
+        .collect();
+    if conditions
+        .iter()
+        .any(|(cell, _)| !group.neighbors.contains_key(cell))
+    {
+        return Err(BlueprintError::GroupNeighborCell(group.name.clone()));
+    }
+
     group
         .neighbors
         .values_mut()
         .for_each(|state| *state = CellState::Any);
-    for (offsets, state) in [
-        (&stored.full, CellState::Full),
-        (&stored.empty, CellState::Empty),
-    ] {
-        for &[dx, dy] in offsets {
-            let slot = group
-                .neighbors
-                .get_mut(&(left + dx, top + dy))
-                .ok_or_else(|| BlueprintError::GroupNeighbor(group.name.clone()))?;
-            if *slot != CellState::Any {
-                return Err(BlueprintError::GroupNeighborRepeated(group.name.clone()));
-            }
-            *slot = state;
-        }
-    }
+    group.neighbors.extend(conditions);
 
     Ok(())
 }
@@ -563,23 +574,55 @@ fn load_group(group: &BlueprintGroup) -> Result<TileGroup, BlueprintError> {
     Ok(loaded)
 }
 
-fn store_state(state: NeighborState) -> BlueprintState {
-    match state {
-        NeighborState::Empty => BlueprintState::Code(0),
-        NeighborState::Full => BlueprintState::Code(1),
-        NeighborState::Any => BlueprintState::Code(2),
-        NeighborState::Is(tile) => BlueprintState::Is { is: tile },
+fn store_states(states: impl Iterator<Item = NeighborState>) -> String {
+    states.fold(String::new(), |mut text, state| {
+        match state {
+            NeighborState::Is(tile) => {
+                text.push(TILE_OPEN);
+                text.push_str(&tile.to_string());
+                text.push(TILE_CLOSE);
+            }
+            NeighborState::Empty => text.push(EMPTY_LETTER),
+            NeighborState::Full => text.push(FULL_LETTER),
+            NeighborState::Any => text.push(ANY_LETTER),
+        }
+        text
+    })
+}
+
+fn load_tile_state(digits: &str) -> Result<NeighborState, BlueprintError> {
+    if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
+        return Err(BlueprintError::NeighborTileText(digits.to_owned()));
+    }
+    match digits.parse::<usize>() {
+        Err(_) => Err(BlueprintError::NeighborTileText(digits.to_owned())),
+        Ok(tile) if tile >= TILE_COUNT => Err(BlueprintError::TileId(tile)),
+        Ok(tile) if tile == AIR_TILE => Err(BlueprintError::AirNeighborTile),
+        Ok(tile) => Ok(NeighborState::Is(tile)),
     }
 }
 
-fn load_state(state: &BlueprintState) -> Result<NeighborState, BlueprintError> {
-    match state {
-        BlueprintState::Code(0) => Ok(NeighborState::Empty),
-        BlueprintState::Code(1) => Ok(NeighborState::Full),
-        BlueprintState::Code(2) => Ok(NeighborState::Any),
-        BlueprintState::Code(code) => Err(BlueprintError::NeighborCode(*code)),
-        BlueprintState::Is { is } if *is >= TILE_COUNT => Err(BlueprintError::TileId(*is)),
-        BlueprintState::Is { is } if *is == AIR_TILE => Err(BlueprintError::AirNeighborTile),
-        BlueprintState::Is { is } => Ok(NeighborState::Is(*is)),
+fn load_states(text: &str) -> Result<Vec<NeighborState>, BlueprintError> {
+    let mut chars = text.chars();
+    let mut states = Vec::new();
+    while let Some(next) = chars.next() {
+        let state = match next {
+            TILE_OPEN => {
+                let (digits, rest) = chars
+                    .as_str()
+                    .split_once(TILE_CLOSE)
+                    .ok_or_else(|| BlueprintError::NeighborTileText(chars.as_str().to_owned()))?;
+                chars = rest.chars();
+                load_tile_state(digits)?
+            }
+            letter => STATE_LETTERS
+                .iter()
+                .find(|(candidate, _)| *candidate == letter)
+                .map(|(_, state)| *state)
+                .ok_or(BlueprintError::NeighborLetter(letter))?,
+        };
+        states.push(state);
     }
+
+    Ok(states)
 }

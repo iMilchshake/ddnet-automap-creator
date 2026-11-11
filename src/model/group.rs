@@ -121,8 +121,8 @@ fn own_cells(tiles: &BTreeSet<usize>) -> BTreeSet<Cell> {
 fn ring_around(own: &BTreeSet<Cell>) -> BTreeSet<Cell> {
     own.iter()
         .flat_map(|&(x, y)| {
-            (-RING_REACH..=RING_REACH)
-                .flat_map(move |dy| (-RING_REACH..=RING_REACH).map(move |dx| (x + dx, y + dy)))
+            (-RING_EXTENT..=RING_EXTENT)
+                .flat_map(move |dy| (-RING_EXTENT..=RING_EXTENT).map(move |dx| (x + dx, y + dy)))
         })
         .filter(|cell| !own.contains(cell))
         .collect()
@@ -178,7 +178,7 @@ pub enum GroupError {
 
 pub const MIN_GROUP_TILES: usize = 2;
 
-const RING_REACH: i32 = 1;
+pub const RING_EXTENT: i32 = 1;
 
 fn column_of(tile: usize) -> usize {
     tile % TILESET_SIDE
@@ -252,12 +252,12 @@ impl TileGroup {
             .find(|&tile| cell_of(tile) == cell)
     }
 
-    pub fn origin(&self) -> Option<Cell> {
+    pub fn bounds(&self) -> Option<(Cell, Cell)> {
         let cells = own_cells(&self.tiles);
-        let left = cells.iter().map(|&(x, _)| x).min()?;
-        let top = cells.iter().map(|&(_, y)| y).min()?;
+        let xs = || cells.iter().map(|&(x, _)| x);
+        let ys = || cells.iter().map(|&(_, y)| y);
 
-        Some((left, top))
+        Some(((xs().min()?, ys().min()?), (xs().max()?, ys().max()?)))
     }
 
     pub fn rect_tiles(top_left: usize, bottom_right: usize) -> BTreeSet<usize> {

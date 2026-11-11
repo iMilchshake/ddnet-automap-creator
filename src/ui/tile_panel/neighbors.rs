@@ -9,7 +9,7 @@ use super::icons::{
 };
 use super::orientations::drawn_name;
 use super::{CELL_GAP, FlashKind, GridFlash, TileContext, TilePanel};
-use crate::model::neighbor::{CENTRE, NeighborState, Neighborhood, Offset, Reach, Side};
+use crate::model::neighbor::{CENTRE, Extent, NeighborState, Neighborhood, Offset, Side};
 use crate::model::tile::{Centre, TileRule};
 use crate::model::transform::Transform;
 use crate::tileset::Tileset;
@@ -71,7 +71,7 @@ impl TilePanel {
         context: &TileContext,
     ) -> bool {
         let margin = self.edge_margin();
-        let size = cell_size(ui, self.neighborhood.reach().width(), margin);
+        let size = cell_size(ui, self.neighborhood.extent().width(), margin);
 
         ScrollArea::horizontal()
             .auto_shrink([false, true])
@@ -89,19 +89,19 @@ impl TilePanel {
         context: &TileContext,
         size: f32,
     ) -> bool {
-        let reach = self.neighborhood.reach();
+        let extent = self.neighborhood.extent();
         let margin = self.edge_margin();
         let grid_size = Vec2::new(
-            grid_extent(size, reach.width()),
-            grid_extent(size, reach.height()),
+            grid_extent(size, extent.width()),
+            grid_extent(size, extent.height()),
         );
         let (outer, _response) =
             ui.allocate_exact_size(grid_size + Vec2::splat(2.0 * margin), Sense::hover());
         let grid = Rect::from_min_size(outer.min + Vec2::splat(margin), grid_size);
 
         let mut changed = false;
-        for offset in reach.offsets() {
-            let rect = cell_rect(grid, size, reach, offset);
+        for offset in extent.offsets() {
+            let rect = cell_rect(grid, size, extent, offset);
             changed |= match offset {
                 CENTRE => self.show_centre_cell(ui, tileset, texture, rect),
                 _ => self.show_state_cell(ui, tileset, texture, offset, rect),
@@ -136,7 +136,7 @@ impl TilePanel {
         self.neighborhood = resized;
         self.picking = self
             .picking
-            .filter(|offset| self.neighborhood.reach().contains(*offset));
+            .filter(|offset| self.neighborhood.extent().contains(*offset));
         true
     }
 
@@ -309,9 +309,9 @@ fn cell_size(ui: &Ui, columns: i32, margin: f32) -> f32 {
         .max(MIN_CELL_SIZE)
 }
 
-fn cell_rect(grid: Rect, size: f32, reach: Reach, (dx, dy): Offset) -> Rect {
-    let column = (dx + reach.left) as f32;
-    let row = (dy + reach.up) as f32;
+fn cell_rect(grid: Rect, size: f32, extent: Extent, (dx, dy): Offset) -> Rect {
+    let column = (dx + extent.left) as f32;
+    let row = (dy + extent.up) as f32;
 
     Rect::from_min_size(
         grid.min + Vec2::new(column, row) * (size + CELL_GAP),

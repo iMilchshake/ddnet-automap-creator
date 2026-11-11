@@ -69,8 +69,8 @@ fn a_furnished_project_survives_a_round_trip_unchanged() {
     assert_eq!(round_trip(&project), project);
 }
 
-const RULE_HEAD: &str = r#"{"con": [0,0,0,0,0,0,0,0], "chance": 100.0"#;
-const PLAIN_RULE: &str = r#"{"con": [0,0,0,0,0,0,0,0], "chance": 100.0, "orientations": ["N"]}"#;
+const RULE_HEAD: &str = r#"{"neighbors": "EEEEEEEE", "chance": 100.0"#;
+const PLAIN_RULE: &str = r#"{"neighbors": "EEEEEEEE", "chance": 100.0, "orientations": ["N"]}"#;
 
 fn written(project: Project) -> String {
     let rule_sets = RuleSets::from_parts(vec![("Grass Main".to_owned(), project)], 0);
@@ -237,7 +237,7 @@ fn the_longest_rule_stays_on_one_line() {
 
     assert!(
         text.lines()
-            .any(|line| line.contains("\"con\"") && line.contains("\"HR\"")),
+            .any(|line| line.contains("\"neighbors\": \"") && line.contains("\"HR\"")),
         "{text}"
     );
 }
@@ -362,43 +362,109 @@ fn a_custom_neighborhood_survives_a_round_trip() {
 }
 
 #[test]
-fn a_neighbor_offset_outside_the_group_and_its_ring_is_refused() {
-    for offsets in ["[[5, 0]]", "[[-2, 0]]", "[[0, 4]]"] {
-        let json = document(
-            "",
-            "",
-            &format!(
-                r#"{{"name": "bones", "tiles": [64, 65, 80, 81],
-                    "neighbors": {{"full": {offsets}, "empty": []}}, "chance": 100.0}}"#
-            ),
-        );
+fn a_group_neighborhood_is_read_row_by_row_from_the_grown_bounding_box() {
+    const FULL_OFFSETS: [(i32, i32); 14] = [
+        (-1, -1),
+        (1, -1),
+        (-2, 0),
+        (0, 0),
+        (1, 0),
+        (-1, 1),
+        (0, 1),
+        (1, 1),
+        (2, 1),
+        (-1, 2),
+        (0, 2),
+        (1, 2),
+        (2, 2),
+        (0, 3),
+    ];
+    const EMPTY_OFFSETS: [(i32, i32); 4] = [(0, -1), (-1, 0), (-2, 1), (1, 3)];
+    const ANCHOR: (i32, i32) = (8, 1);
+    const NEIGHBORS: &str = "AFEFAFEFFAEFFFFAFFFFAAFEA";
+    let json = document(
+        "",
+        "",
+        &format!(
+            r#"{{"name": "bones", "tiles": [24, 25, 39, 40, 41, 56, 57],
+                "neighbors": "{NEIGHBORS}", "chance": 100.0}}"#
+        ),
+    );
 
-        assert!(
-            matches!(load(&json).unwrap_err(), BlueprintError::GroupNeighbor(_)),
-            "{offsets}"
-        );
+    let project = load(&json).unwrap();
+    let neighbors = &project.groups()[0].neighbors;
+    let state_at = |(dx, dy): (i32, i32)| neighbors.get(&(ANCHOR.0 + dx, ANCHOR.1 + dy));
+
+    for offset in FULL_OFFSETS {
+        assert_eq!(state_at(offset), Some(&CellState::Full), "{offset:?}");
     }
+    for offset in EMPTY_OFFSETS {
+        assert_eq!(state_at(offset), Some(&CellState::Empty), "{offset:?}");
+    }
+    assert_eq!(
+        neighbors
+            .values()
+            .filter(|state| **state != CellState::Any)
+            .count(),
+        FULL_OFFSETS.len() + EMPTY_OFFSETS.len()
+    );
+    assert_eq!(round_trip(&project), project);
+    assert!(written(project).contains(&format!(r#""neighbors": "{NEIGHBORS}""#)));
 }
 
 #[test]
-fn an_offset_listed_twice_is_refused() {
-    for neighbors in [
-        r#"{"full": [[0, 0]], "empty": [[0, 0]]}"#,
-        r#"{"full": [[0, 0], [0, 0]], "empty": []}"#,
-    ] {
+fn a_neighborhood_of_the_wrong_length_is_refused() {
+    for neighbors in ["", "AAA", "AAAA", "AAAAAAAAAAAAAAAAA"] {
         let json = document(
             "",
             "",
             &format!(
                 r#"{{"name": "bones", "tiles": [64, 65, 80, 81],
-                    "neighbors": {neighbors}, "chance": 100.0}}"#
+                    "neighbors": "{neighbors}", "chance": 100.0}}"#
             ),
         );
 
         assert!(
             matches!(
                 load(&json).unwrap_err(),
-                BlueprintError::GroupNeighborRepeated(_)
+                BlueprintError::GroupNeighborShape(name) if name == "bones"
+            ),
+            "{neighbors}"
+        );
+    }
+}
+
+#[test]
+fn a_condition_on_a_corner_away_from_a_non_rectangular_group_is_refused() {
+    let json = document(
+        "",
+        "",
+        r#"{"name": "bones", "tiles": [24, 25, 39, 40, 41, 56, 57],
+            "neighbors": "FFEFAFEFFAEFFFFAFFFFAAFEA", "chance": 100.0}"#,
+    );
+
+    assert!(matches!(
+        load(&json).unwrap_err(),
+        BlueprintError::GroupNeighborCell(name) if name == "bones"
+    ));
+}
+
+#[test]
+fn a_specific_tile_in_a_group_neighborhood_is_refused() {
+    for neighbors in ["[5]AAA", "[0]AAA", "[9999]AAA"] {
+        let json = document(
+            "",
+            "",
+            &format!(
+                r#"{{"name": "bones", "tiles": [64, 65, 80, 81],
+                    "neighbors": "{neighbors}", "chance": 100.0}}"#
+            ),
+        );
+
+        assert!(
+            matches!(
+                load(&json).unwrap_err(),
+                BlueprintError::GroupNeighborTile(name) if name == "bones"
             ),
             "{neighbors}"
         );
@@ -411,7 +477,7 @@ fn a_group_without_tiles_reports_that_it_is_too_small() {
         "",
         "",
         r#"{"name": "bones", "tiles": [],
-            "neighbors": {"full": [], "empty": []}, "chance": 100.0}"#,
+            "neighbors": "", "chance": 100.0}"#,
     );
 
     assert!(matches!(
@@ -438,7 +504,7 @@ fn a_group_without_orientations_loads_as_the_identity_only() {
         "",
         "",
         r#"{"name": "bones", "tiles": [64, 65, 80, 81],
-            "neighbors": {"full": [], "empty": []}, "chance": 100.0}"#,
+            "neighbors": "AAAAAAAAAAAAAAAA", "chance": 100.0}"#,
     );
 
     assert_eq!(load(&json).unwrap().groups()[0].mods, TileMods::default());
@@ -452,7 +518,7 @@ fn group_orientations_no_flags_can_make_are_refused() {
             "",
             &format!(
                 r#"{{"name": "bones", "tiles": [64, 65, 80, 81],
-                    "neighbors": {{"full": [], "empty": []}}, "chance": 100.0,
+                    "neighbors": "AAAAAAAAAAAAAAAA", "chance": 100.0,
                     "orientations": {list}}}"#
             ),
         );
@@ -597,14 +663,11 @@ fn a_repeated_tile_is_refused() {
 }
 
 #[test]
-fn an_unknown_neighbor_code_is_refused() {
-    let json = one_tile(&tile_of(
-        5,
-        r#"{"con": [0,1,2,3,0,0,0,0], "chance": 100.0, "orientations": ["N"]}"#,
-    ));
+fn an_unknown_neighbor_letter_is_refused() {
+    let json = with_neighbors("EFAXEEEE");
     assert!(matches!(
         load(&json).unwrap_err(),
-        BlueprintError::NeighborCode(3)
+        BlueprintError::NeighborLetter('X')
     ));
 }
 
@@ -612,7 +675,7 @@ fn an_unknown_neighbor_code_is_refused() {
 fn a_chance_outside_its_range_is_refused() {
     let json = one_tile(&tile_of(
         5,
-        r#"{"con": [0,0,0,0,0,0,0,0], "chance": 0.0, "orientations": ["N"]}"#,
+        r#"{"neighbors": "EEEEEEEE", "chance": 0.0, "orientations": ["N"]}"#,
     ));
     assert!(matches!(
         load(&json).unwrap_err(),
@@ -626,7 +689,7 @@ fn an_invalid_group_is_refused() {
         "",
         "",
         r#"{"name": "bones", "tiles": [64],
-            "neighbors": {"full": [], "empty": []}, "chance": 100.0}"#,
+            "neighbors": "AAAAAAAAA", "chance": 100.0}"#,
     );
     assert!(matches!(load(&json).unwrap_err(), BlueprintError::Group(_)));
 }
@@ -639,7 +702,7 @@ fn group_tiles_must_ascend_without_repeats() {
             "",
             &format!(
                 r#"{{"name": "bones", "tiles": [{tiles}],
-                    "neighbors": {{"full": [], "empty": []}}, "chance": 100.0}}"#
+                    "neighbors": "AA", "chance": 100.0}}"#
             ),
         );
         assert!(matches!(
@@ -655,9 +718,9 @@ fn two_groups_sharing_a_name_are_refused() {
         "",
         "",
         r#"{"name": "bones", "tiles": [64, 65, 80, 81],
-            "neighbors": {"full": [], "empty": []}, "chance": 100.0},
+            "neighbors": "AAAAAAAAAAAAAAAA", "chance": 100.0},
            {"name": "bones", "tiles": [100, 101, 116, 117],
-            "neighbors": {"full": [], "empty": []}, "chance": 100.0}"#,
+            "neighbors": "AAAAAAAAAAAAAAAA", "chance": 100.0}"#,
     );
     assert!(matches!(load(&json).unwrap_err(), BlueprintError::Group(_)));
 }
@@ -668,7 +731,7 @@ fn a_group_over_a_configured_tile_is_refused() {
         &plain_tile(65),
         "",
         r#"{"name": "bones", "tiles": [64, 65, 80, 81],
-            "neighbors": {"full": [], "empty": []}, "chance": 100.0}"#,
+            "neighbors": "AAAAAAAAAAAAAAAA", "chance": 100.0}"#,
     );
     assert!(matches!(
         load(&json).unwrap_err(),
@@ -693,23 +756,20 @@ fn deactivated_tiles_survive_with_their_rules() {
 fn a_neighborhood_is_stored_in_index_order() {
     let rule_sets = RuleSets::from_parts(vec![("Grass Main".to_owned(), furnished())], 0);
     let text = blueprint::to_json(&rule_sets, IMAGE).unwrap();
-    assert!(
-        text.contains("\"con\": [ 2, 0, 2, 0, 1, 2, 1, 1 ]"),
-        "{text}"
-    );
+    assert!(text.contains(r#""neighbors": "AEAEFAFF""#), "{text}");
 }
 
 #[test]
 fn a_neighborhood_is_read_back_in_index_order() {
-    let project = load(&with_con("[2,0,2,0,1,2,1,1]")).unwrap();
+    let project = load(&with_neighbors("AEAEFAFF")).unwrap();
 
     assert_eq!(project.rules_of(5)[0].neighborhood, outer_corner());
 }
 
-fn with_con(con: &str) -> String {
+fn with_neighbors(neighbors: &str) -> String {
     one_tile(&tile_of(
         5,
-        &format!(r#"{{"con": {con}, "chance": 100.0, "orientations": ["N"]}}"#),
+        &format!(r#"{{"neighbors": "{neighbors}", "chance": 100.0, "orientations": ["N"]}}"#),
     ))
 }
 
@@ -722,13 +782,13 @@ fn a_tile_requirement_survives_a_round_trip() {
 
     let text = written(project.clone());
 
-    assert!(text.contains(r#"{ "is": 17 }"#), "{text}");
+    assert!(text.contains(r#""neighbors": "[17]"#), "{text}");
     assert_eq!(round_trip(&project), project);
 }
 
 #[test]
-fn a_tile_requirement_loads_from_its_object_form() {
-    let project = load(&with_con(r#"[{"is": 17}, 0, 2, 0, 1, 2, 1, 1]"#)).unwrap();
+fn a_tile_requirement_loads_from_brackets() {
+    let project = load(&with_neighbors("[17]EAEFAFF")).unwrap();
     let neighborhood = &project.rules_of(5)[0].neighborhood;
 
     assert_eq!(
@@ -740,7 +800,7 @@ fn a_tile_requirement_loads_from_its_object_form() {
 
 #[test]
 fn the_air_tile_as_a_neighbor_tile_is_refused() {
-    let json = with_con(r#"[{"is": 0}, 0, 0, 0, 0, 0, 0, 0]"#);
+    let json = with_neighbors("[0]EEEEEEE");
 
     assert!(matches!(
         load(&json).unwrap_err(),
@@ -750,7 +810,7 @@ fn the_air_tile_as_a_neighbor_tile_is_refused() {
 
 #[test]
 fn a_neighbor_tile_outside_the_tileset_is_refused() {
-    let json = with_con(r#"[{"is": 256}, 0, 0, 0, 0, 0, 0, 0]"#);
+    let json = with_neighbors("[256]EEEEEEE");
 
     assert!(matches!(
         load(&json).unwrap_err(),
@@ -759,22 +819,43 @@ fn a_neighbor_tile_outside_the_tileset_is_refused() {
 }
 
 #[test]
-fn a_con_of_the_wrong_length_is_refused() {
-    for con in ["[2,0,2,0,1,2,1]", "[2,0,2,0,1,2,1,1,1]"] {
+fn a_malformed_bracket_is_refused() {
+    for neighbors in [
+        "[17EEEEEEE",
+        "EEEEEEE[17",
+        "[]EEEEEEE",
+        "[x]EEEEEEE",
+        "[+17]EEEEEEE",
+    ] {
         assert!(
             matches!(
-                load(&with_con(con)).unwrap_err(),
-                BlueprintError::NeighborhoodShape(5)
+                load(&with_neighbors(neighbors)).unwrap_err(),
+                BlueprintError::NeighborTileText(_)
             ),
-            "{con}"
+            "{neighbors}"
         );
     }
 }
 
-fn with_reach(con: &str, reach: &str) -> String {
+#[test]
+fn a_neighbor_list_of_the_wrong_length_is_refused() {
+    for neighbors in ["AEAEFAF", "AEAEFAFFF"] {
+        assert!(
+            matches!(
+                load(&with_neighbors(neighbors)).unwrap_err(),
+                BlueprintError::NeighborhoodShape(5)
+            ),
+            "{neighbors}"
+        );
+    }
+}
+
+fn with_extent(neighbors: &str, extent: &str) -> String {
     one_tile(&tile_of(
         5,
-        &format!(r#"{{"con": {con}, "reach": {reach}, "chance": 100.0, "orientations": ["N"]}}"#),
+        &format!(
+            r#"{{"neighbors": "{neighbors}", "extent": {extent}, "chance": 100.0, "orientations": ["N"]}}"#
+        ),
     ))
 }
 
@@ -792,32 +873,76 @@ fn a_non_square_neighborhood_survives_a_round_trip() {
 
     let text = written(project.clone());
 
-    assert!(text.contains(r#""reach""#), "{text}");
+    assert!(text.contains(r#""extent""#), "{text}");
     assert_eq!(round_trip(&project), project);
 }
 
 #[test]
-fn a_three_by_three_neighborhood_writes_no_reach() {
-    assert!(!written(furnished()).contains("reach"));
+fn a_three_by_three_neighborhood_writes_no_extent() {
+    let mut project = Project::default();
+    project.add_rule(5, TileRule::new(Neighborhood::uniform(NeighborState::Any)));
+
+    assert!(!written(project).contains("extent"));
 }
 
 #[test]
-fn a_con_matching_the_reach_is_loaded() {
-    let json = with_reach(
-        "[2,2,2,2,2,2,2,2,2,2,2]",
-        r#"{"left":2,"right":1,"up":1,"down":1}"#,
+fn a_two_by_two_fill_group_writes_its_full_ring_without_an_extent() {
+    let mut project = Project::default();
+    project.append_group(group("bones", 64, GroupPreset::Fill, 100.0));
+
+    let text = written(project);
+
+    assert!(
+        text.contains(r#""neighbors": "AAAAAFFAAFFAAAAA""#),
+        "{text}"
     );
+    assert!(!text.contains("extent"), "{text}");
+}
+
+#[test]
+fn a_two_by_two_group_loads_and_saves_back_identically() {
+    const NEIGHBORS: &str = "EFAAAFEAAFFAEAAE";
+    let json = document(
+        "",
+        "",
+        &format!(
+            r#"{{"name": "bones", "tiles": [5, 6, 21, 22],
+                "neighbors": "{NEIGHBORS}", "chance": 100.0}}"#
+        ),
+    );
+
     let project = load(&json).unwrap();
 
-    assert_eq!(project.rules_of(5)[0].neighborhood.reach().left, 2);
+    assert_eq!(round_trip(&project), project);
+    assert!(written(project).contains(&format!(r#""neighbors": "{NEIGHBORS}""#)));
 }
 
 #[test]
-fn a_con_not_matching_the_reach_is_refused() {
-    let json = with_reach(
-        "[2,2,2,2,2,2,2,2]",
-        r#"{"left":2,"right":1,"up":1,"down":1}"#,
+fn a_bad_group_neighbor_letter_names_the_group() {
+    let json = document(
+        "",
+        "",
+        r#"{"name": "bones", "tiles": [64, 65, 80, 81],
+            "neighbors": "AAAX", "chance": 100.0}"#,
     );
+
+    assert!(matches!(
+        load(&json).unwrap_err(),
+        BlueprintError::GroupNeighborText { group, .. } if group == "bones"
+    ));
+}
+
+#[test]
+fn neighbors_matching_the_extent_are_loaded() {
+    let json = with_extent("AAAAAAAAAAA", "[2,1,1,1]");
+    let project = load(&json).unwrap();
+
+    assert_eq!(project.rules_of(5)[0].neighborhood.extent().left, 2);
+}
+
+#[test]
+fn neighbors_not_matching_the_extent_are_refused() {
+    let json = with_extent("AAAAAAAA", "[2,1,1,1]");
 
     assert!(matches!(
         load(&json).unwrap_err(),
@@ -826,8 +951,8 @@ fn a_con_not_matching_the_reach_is_refused() {
 }
 
 #[test]
-fn a_reach_below_one_is_refused() {
-    let json = with_reach("[2,2,2,2,2]", r#"{"left":0,"right":1,"up":1,"down":1}"#);
+fn an_extent_below_one_is_refused() {
+    let json = with_extent("AAAAA", "[0,1,1,1]");
 
     assert!(matches!(
         load(&json).unwrap_err(),

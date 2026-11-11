@@ -1,4 +1,4 @@
-use crate::model::neighbor::{NeighborState, Neighborhood, Reach};
+use crate::model::neighbor::{Extent, NeighborState, Neighborhood};
 use crate::model::tile::TileMods;
 
 /// A variant's transform is `R^rot ∘ X^x_flip ∘ Y^y_flip`, applied right to
@@ -54,8 +54,8 @@ impl Transform {
     }
 
     pub fn apply(self, base: &Neighborhood) -> Neighborhood {
-        let reach = self.move_reach(base.reach());
-        let mut moved = Neighborhood::with_reach(reach, NeighborState::Any);
+        let extent = self.move_extent(base.extent());
+        let mut moved = Neighborhood::with_extent(extent, NeighborState::Any);
         for ((dx, dy), state) in base.cells() {
             moved.set_state(self.move_offset(dx, dy), state);
         }
@@ -63,11 +63,11 @@ impl Transform {
         moved
     }
 
-    fn move_reach(self, reach: Reach) -> Reach {
-        let (first_x, first_y) = self.move_offset(-reach.left, -reach.up);
-        let (second_x, second_y) = self.move_offset(reach.right, reach.down);
+    fn move_extent(self, extent: Extent) -> Extent {
+        let (first_x, first_y) = self.move_offset(-extent.left, -extent.up);
+        let (second_x, second_y) = self.move_offset(extent.right, extent.down);
 
-        Reach {
+        Extent {
             left: -first_x.min(second_x),
             right: first_x.max(second_x),
             up: -first_y.min(second_y),

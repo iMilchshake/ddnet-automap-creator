@@ -42,10 +42,10 @@ fn show_rule_pictures(ui: &mut Ui, view: &GridView, tile: usize) {
 }
 
 fn show_rule_picture(ui: &mut Ui, view: &GridView, tile: usize, rule: &TileRule) {
-    let reach = rule.neighborhood.reach();
+    let extent = rule.neighborhood.extent();
     show_pattern(
         ui,
-        reach,
+        extent,
         CARD_CELL_SIZE,
         |ui, rect, neighbor| match neighbor {
             Some(offset) => paint_neighbor(
