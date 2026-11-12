@@ -1158,10 +1158,7 @@ impl AutomapperApp {
                     self.select_group(index);
                 }
             }
-            Some(GroupCommand::Remove(index)) => {
-                self.rule_sets.active_mut().remove_group(index);
-                self.forget_group_selection();
-            }
+            Some(GroupCommand::Remove(index)) => self.remove_group(index),
             None => {}
         }
 
@@ -1332,6 +1329,16 @@ impl AutomapperApp {
     fn select_group(&mut self, index: usize) {
         if let Some(group) = self.rule_sets.active().groups().get(index) {
             self.inspector = Inspector::Group(GroupPanel::new(index, group));
+        }
+    }
+
+    fn remove_group(&mut self, index: usize) {
+        let selected = self.inspector.group();
+        self.rule_sets.active_mut().remove_group(index);
+        match selected {
+            Some(selected) if selected == index => self.inspector = Inspector::Empty,
+            Some(selected) if selected > index => self.select_group(selected - 1),
+            _ => {}
         }
     }
 
@@ -1548,8 +1555,7 @@ impl AutomapperApp {
             && let Some(index) = self.rule_sets.active().group_at(tile)
         {
             let name = self.rule_sets.active().groups()[index].name.clone();
-            self.rule_sets.active_mut().remove_group(index);
-            self.forget_group_selection();
+            self.remove_group(index);
             self.status.info(ctx, format!("Removed group {name}"));
             self.drag_anchor = None;
             return;
