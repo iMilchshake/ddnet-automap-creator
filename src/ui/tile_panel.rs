@@ -13,8 +13,10 @@ pub(super) mod orientations;
 mod pools;
 
 const CELL_GAP: f32 = 3.0;
-const HEADING_SPACING: f32 = 4.0;
+const HEADER_SPACING: f32 = 4.0;
 const SECTION_SPACING: f32 = 6.0;
+const DRAFT_OPACITY: f32 = 0.5;
+const FULL_OPACITY: f32 = 1.0;
 
 pub struct TileContext<'a> {
     pub pools: Vec<&'a Pool>,
@@ -57,7 +59,6 @@ pub enum TileEdit {
     Remove(usize),
     Copy(usize),
     Paste(usize),
-    ToggleActive,
 }
 
 pub struct TilePanel {
@@ -139,24 +140,35 @@ impl TilePanel {
         texture: &TextureHandle,
         context: &TileContext,
     ) -> Option<TileEdit> {
-        let heading_edit = self.show_heading(ui, context);
-        ui.add_space(HEADING_SPACING);
+        let header_edit = self.show_header_row(ui, context);
+        ui.add_space(HEADER_SPACING);
 
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.stop_picking();
         }
 
-        let changed = self.show_neighborhood(ui, tileset, texture, context);
-        ui.add_space(SECTION_SPACING);
-        let edit = self.show_options(ui, tileset, texture, changed);
+        let opacity = if self.has_rule {
+            FULL_OPACITY
+        } else {
+            DRAFT_OPACITY
+        };
+        let edit = ui
+            .scope(|ui| {
+                ui.multiply_opacity(opacity);
+                let changed = self.show_neighborhood(ui, tileset, texture, context);
+                ui.add_space(SECTION_SPACING);
+                let edit = self.show_options(ui, tileset, texture, changed);
 
-        if let Some(error) = &self.error {
-            ui.colored_label(ui.visuals().error_fg_color, error);
-        }
+                if let Some(error) = &self.error {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
 
-        self.show_pools(ui, tileset, texture, context);
+                self.show_pools(ui, tileset, texture, context);
+                edit
+            })
+            .inner;
 
-        heading_edit.or(edit).or(self.key_edit(ui, context))
+        header_edit.or(edit).or(self.key_edit(ui, context))
     }
 
     fn key_edit(&self, ui: &Ui, context: &TileContext) -> Option<TileEdit> {

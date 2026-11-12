@@ -38,8 +38,8 @@ use crate::ui::tile_panel::{CopiedRule, FlashKind, GridFlash, TileContext, TileE
 use crate::ui::tile_state::{TileState, seed_rule, tile_state};
 use crate::ui::welcome::{self, WelcomeAction};
 use crate::ui::{
-    ADD_ICON, APP_NAME, APPEND_ICON, BUTTON_GAP, DUPLICATE_ICON, REMOVE_ICON, SWITCH_ICON,
-    compact_button, icon_button_size, section_header, section_header_with,
+    ADD_ICON, APP_NAME, BUTTON_GAP, REMOVE_ICON, SWITCH_ICON, compact_button, icon_button_size,
+    section_header, section_header_with,
 };
 
 mod menu_bar;
@@ -77,6 +77,11 @@ const GROUP_ORDER_NOTE: &str = "top one is applied first";
 const DROP_HINT: &str = "Drop a tileset image or an automapper";
 const NO_IMAGE_FOR_BLUEPRINT: &str = "Open a tileset image first, then open the automapper.";
 const APPEND_HOVER: &str = "Append rule sets from an automapper file";
+const RULE_SET_MORE_HOVER: &str = "More rule set actions";
+const RULE_SET_DUPLICATE_LABEL: &str = "Duplicate this rule set";
+const RULE_SET_APPEND_LABEL: &str = "Append rule sets from file…";
+const RULE_SET_REMOVE_HOVER: &str = "Remove this rule set";
+const RULE_SET_ADD_HOVER: &str = "Add new empty rule set";
 const APPEND_HEADING: &str = "Append automapper";
 const APPEND_CONFIRM: &str = "Append anyway";
 const APPEND_CANCELLED: &str = "Append cancelled";
@@ -1224,7 +1229,6 @@ impl AutomapperApp {
             }
             TileEdit::Copy(index) => self.copy_rule(ctx, tile, index),
             TileEdit::Paste(index) => self.paste_rule(ctx, tile, index),
-            TileEdit::ToggleActive => self.toggle_deactivated(ctx, tile),
         }
     }
 
@@ -1758,34 +1762,7 @@ fn show_rule_set_row(ui: &mut Ui, rule_sets: &mut RuleSets, command: &mut Option
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BUTTON_GAP;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .add(compact_button(APPEND_ICON, size))
-                .on_hover_text(APPEND_HOVER)
-                .clicked()
-            {
-                *command = Some(RuleSetCommand::Append);
-            }
-            if ui
-                .add_enabled(can_remove, compact_button(REMOVE_ICON, size))
-                .on_hover_text("Remove this rule set")
-                .clicked()
-            {
-                *command = Some(RuleSetCommand::Remove);
-            }
-            if ui
-                .add(compact_button(DUPLICATE_ICON, size))
-                .on_hover_text("Duplicate this rule set")
-                .clicked()
-            {
-                *command = Some(RuleSetCommand::Duplicate);
-            }
-            if ui
-                .add(compact_button(ADD_ICON, size))
-                .on_hover_text("Add new empty rule set")
-                .clicked()
-            {
-                *command = Some(RuleSetCommand::Add);
-            }
+            show_rule_set_actions(ui, size, can_remove, command);
 
             ui.add_space(size);
             let switch = ui
@@ -1814,6 +1791,43 @@ fn show_rule_set_row(ui: &mut Ui, rule_sets: &mut RuleSets, command: &mut Option
                 });
         });
     });
+}
+
+fn show_rule_set_actions(
+    ui: &mut Ui,
+    size: f32,
+    can_remove: bool,
+    command: &mut Option<RuleSetCommand>,
+) {
+    let more = ui
+        .add(compact_button(SWITCH_ICON, size))
+        .on_hover_text(RULE_SET_MORE_HOVER);
+    egui::Popup::menu(&more).show(|ui| {
+        if ui.button(RULE_SET_DUPLICATE_LABEL).clicked() {
+            *command = Some(RuleSetCommand::Duplicate);
+        }
+        if ui
+            .button(RULE_SET_APPEND_LABEL)
+            .on_hover_text(APPEND_HOVER)
+            .clicked()
+        {
+            *command = Some(RuleSetCommand::Append);
+        }
+    });
+    if ui
+        .add_enabled(can_remove, compact_button(REMOVE_ICON, size))
+        .on_hover_text(RULE_SET_REMOVE_HOVER)
+        .clicked()
+    {
+        *command = Some(RuleSetCommand::Remove);
+    }
+    if ui
+        .add(compact_button(ADD_ICON, size))
+        .on_hover_text(RULE_SET_ADD_HOVER)
+        .clicked()
+    {
+        *command = Some(RuleSetCommand::Add);
+    }
 }
 
 fn show_rule_set_menu(ui: &mut Ui, rule_sets: &RuleSets, command: &mut Option<RuleSetCommand>) {

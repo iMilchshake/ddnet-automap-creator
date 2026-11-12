@@ -1,13 +1,12 @@
 use std::f32::consts::PI;
 
 use egui::{
-    Align2, Color32, FontId, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui,
-    Vec2,
+    Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
 };
 
 use crate::model::transform::Transform;
+use crate::ui::BUTTON_GAP;
 use crate::ui::neighbor_paint::CORNER_RADIUS;
-use crate::ui::{BUTTON_GAP, icon_button_size};
 
 pub(super) const TURN_BUTTON_SIZE: f32 = 20.0;
 const ICON_INSET_FRACTION: f32 = 0.22;
@@ -20,9 +19,6 @@ const ARROW_HEAD_FRACTION: f32 = 0.35;
 const ARROW_HEAD_WIDTH: f32 = 0.7;
 const FLIP_GAP_FRACTION: f32 = 0.25;
 const FLIP_BASE_FRACTION: f32 = 0.7;
-const POWER_INSET_FRACTION: f32 = 0.25;
-const POWER_GAP_HALF_ANGLE: f32 = 0.28 * PI;
-const POWER_OFF_FILL_OPACITY: f32 = 0.25;
 const RESIZE_HEAD_FRACTION: f32 = 0.4;
 
 const ROTATE_NEIGHBORS_TOOLTIP: &str = "Rotate neighbors 90° clockwise";
@@ -39,7 +35,6 @@ pub(super) enum Icon {
     FlipHorizontally,
     FlipVertically,
     Reset,
-    Power,
     Add,
     Remove,
     Resize,
@@ -118,29 +113,6 @@ pub(super) fn icon_button(ui: &Ui, rect: Rect, icon: Icon, tooltip: &str, active
     clicked
 }
 
-pub(super) fn power_button(ui: &mut Ui, off: bool) -> Response {
-    let size = Vec2::splat(icon_button_size(ui));
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    let visuals = ui.style().interact(&response);
-    let warn = ui.visuals().warn_fg_color;
-    let (fill, color) = match off {
-        true => (warn.gamma_multiply(POWER_OFF_FILL_OPACITY), warn),
-        false => (visuals.weak_bg_fill, visuals.fg_stroke.color),
-    };
-    ui.painter().rect(
-        rect,
-        CORNER_RADIUS,
-        fill,
-        visuals.bg_stroke,
-        StrokeKind::Inside,
-    );
-
-    let icon_area = rect.shrink(rect.width() * POWER_INSET_FRACTION);
-    paint_stroked_icon(ui.painter(), icon_area, color, Icon::Power);
-
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
 pub(super) fn paint_stroked_icon(painter: &Painter, rect: Rect, color: Color32, icon: Icon) {
     let width = (rect.width() * ICON_STROKE_FRACTION).max(MIN_ICON_STROKE);
     paint_icon(painter, rect, Stroke::new(width, color), icon);
@@ -151,7 +123,6 @@ fn paint_icon(painter: &Painter, rect: Rect, stroke: Stroke, icon: Icon) {
         Icon::Rotate => paint_curl(painter, rect, stroke),
         Icon::FlipHorizontally => paint_flip(painter, rect, stroke, true),
         Icon::FlipVertically => paint_flip(painter, rect, stroke, false),
-        Icon::Power => paint_power(painter, rect, stroke),
         Icon::Remove => paint_minus(painter, rect, stroke),
         Icon::Add => {
             paint_minus(painter, rect, stroke);
@@ -187,21 +158,6 @@ fn paint_curl(painter: &Painter, rect: Rect, stroke: Stroke) {
 
     painter.add(Shape::line(arc, stroke));
     painter.add(Shape::convex_polygon(arrow, stroke.color, Stroke::NONE));
-}
-
-fn paint_power(painter: &Painter, rect: Rect, stroke: Stroke) {
-    let radius = rect.width() / 2.0;
-    let start = -PI / 2.0 + POWER_GAP_HALF_ANGLE;
-    let sweep = 2.0 * PI - 2.0 * POWER_GAP_HALF_ANGLE;
-    let arc: Vec<Pos2> = (0..=ARC_SEGMENTS)
-        .map(|step| {
-            let angle = start + sweep * step as f32 / ARC_SEGMENTS as f32;
-            rect.center() + radius * Vec2::new(angle.cos(), angle.sin())
-        })
-        .collect();
-
-    painter.add(Shape::line(arc, stroke));
-    painter.line_segment([rect.center_top(), rect.center()], stroke);
 }
 
 fn paint_minus(painter: &Painter, rect: Rect, stroke: Stroke) {

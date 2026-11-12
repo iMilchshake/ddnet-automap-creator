@@ -30,11 +30,8 @@ const AUTHOR_CREDIT: &str = "by iMilchshake";
 const ALTERNATIVE_KEYS: &str = " / ";
 
 const ADD_ICON: &str = "+";
-const DUPLICATE_ICON: &str = "🗐";
-const APPEND_ICON: &str = "📥";
 const REMOVE_ICON: &str = "🗑";
 const DRAW_ICON: &str = "✏";
-const MENU_ICON: &str = "☰";
 
 const SWITCH_ICON: &str = "⏷";
 const BUTTON_GAP: f32 = 2.0;
