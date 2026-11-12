@@ -15,7 +15,7 @@ pub struct PickedFile {
 
 #[derive(Debug, Error)]
 pub enum PickError {
-    #[error("could not read `{name}`: {message}")]
+    #[error("Can't read {name}: {message}")]
     Read { name: String, message: String },
 }
 

@@ -6,7 +6,7 @@ use crate::export::r_source::credit;
 
 #[derive(Debug, Error)]
 pub enum CompileError {
-    #[error("rpp rejected the rule set:\n{0}")]
+    #[error("rpp compile failed:\n{0}")]
     Rpp(String),
 
     #[error("{0}")]
@@ -88,8 +88,9 @@ mod native {
     }
 
     fn run(source: &str, output_file: String) -> CompileResult {
-        let directory = work_directory()
-            .map_err(|error| CompileError::Unavailable(format!("no work directory: {error}")))?;
+        let directory = work_directory().map_err(|error| {
+            CompileError::Unavailable(format!("Can't create work directory: {error}"))
+        })?;
 
         let result = stage(&directory, source).and_then(|()| invoke(&directory, output_file));
         let _ = std::fs::remove_dir_all(&directory);
@@ -111,7 +112,9 @@ mod native {
     fn stage(directory: &Path, source: &str) -> Result<(), CompileError> {
         std::fs::write(directory.join("base.r"), BASE_SOURCE)
             .and_then(|()| std::fs::write(directory.join("input.r"), source))
-            .map_err(|error| CompileError::Unavailable(format!("could not stage rpp: {error}")))
+            .map_err(|error| {
+                CompileError::Unavailable(format!("Can't write rpp input files: {error}"))
+            })
     }
 
     fn invoke(directory: &Path, output_file: String) -> CompileResult {
@@ -120,7 +123,7 @@ mod native {
             .current_dir(directory)
             .output()
             .map_err(|error| {
-                CompileError::Unavailable(format!("could not run {RPP_BINARY}: {error}"))
+                CompileError::Unavailable(format!("Can't run {RPP_BINARY}: {error}"))
             })?;
 
         collect(finished, directory, output_file)
@@ -180,9 +183,7 @@ mod web {
                 file_name: output_file,
                 rules,
             }),
-            None => Err(CompileError::Unavailable(
-                "rpp returned something other than text".to_owned(),
-            )),
+            None => Err(CompileError::Unavailable("rpp returned no text".to_owned())),
         }
     }
 

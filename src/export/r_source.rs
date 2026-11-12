@@ -27,22 +27,22 @@ const ANCHOR: Cell = (0, 0);
 
 #[derive(Debug, Error)]
 pub enum ExportError {
-    #[error("rule set `{0}` has no tile and no group, there is nothing to export")]
+    #[error("Ruleset `{0}` is empty, nothing to export")]
     EmptyRuleSet(String),
 
-    #[error("`{0}` names more than one rule set")]
+    #[error("Ruleset name is already in use")]
     DuplicateName(String),
 
-    #[error("rule set name `{0}` must be 1 to 128 letters, digits, `_` or `-`")]
+    #[error("Ruleset name can only have 1 to 128 letters/digits/_/-")]
     Name(String),
 
-    #[error("group `{group}` covers tile {tile}, which is also configured on its own")]
+    #[error("Group `{group}` can't overlap with tile {tile}")]
     TileIsConfigured { group: String, tile: usize },
 
-    #[error("no free tile left for rpp's mask in rule set `{0}`, unconfigure one")]
+    #[error("Ruleset `{0}` uses all tiles, rpp needs 1 free tile")]
     NoMaskTile(String),
 
-    #[error("tile {AIR_TILE} is reserved for air and cannot hold a rule")]
+    #[error("Tile {AIR_TILE} (air) can't have rules")]
     AirTile,
 
     #[error(transparent)]

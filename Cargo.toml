@@ -8,6 +8,7 @@ repository = "https://github.com/iMilchshake/ddnet-automap-creator"
 [dependencies]
 eframe = "0.36"
 egui = "0.36"
+egui-toast = "0.22"
 image = { version = "0.25", default-features = false, features = [
     "png",
     "jpeg",

@@ -40,31 +40,31 @@ const BARE_COMMENT: &str = "#";
 
 #[derive(Debug, Error)]
 pub enum BlueprintError {
-    #[error("not a readable blueprint: {0}")]
+    #[error("no valid blueprint: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("blueprint version {0} is not supported, this app writes version {VERSION}")]
+    #[error("old blueprint that is no longer supported")]
     UnsupportedVersion(u32),
 
-    #[error("tile {0} is outside the tileset")]
+    #[error("tile {0} exceeds tileset bounds")]
     TileId(usize),
 
-    #[error("tile {0} appears more than once")]
+    #[error("tile {0} is listed twice")]
     DuplicateTile(usize),
 
-    #[error("tile {AIR_TILE} is reserved for air and cannot hold a rule")]
+    #[error("Tile {AIR_TILE} (air) can't have rules")]
     AirTile,
 
-    #[error("group `{0}` must list its tiles in ascending order, each once")]
+    #[error("group `{0}` has unsorted or repeated tiles")]
     GroupTiles(String),
 
-    #[error("group `{0}` lists orientations that flipping and rotating cannot make")]
+    #[error("group `{0}` has invalid orientations")]
     GroupOrientations(String),
 
-    #[error("group `{0}` has a neighborhood whose size does not match its tiles")]
+    #[error("group `{0}` has wrong neighborhood size")]
     GroupNeighborShape(String),
 
-    #[error("group `{0}` sets a neighbor that is not on or next to the group")]
+    #[error("group `{0}` has neighbors too far away")]
     GroupNeighborCell(String),
 
     #[error("group `{group}`: {source}")]
@@ -73,28 +73,28 @@ pub enum BlueprintError {
         source: Box<BlueprintError>,
     },
 
-    #[error("group `{0}` lists a specific tile as a neighbor, only E, F and A are allowed")]
+    #[error("group `{0}` can't have tile neighbors, only E/F/A")]
     GroupNeighborTile(String),
 
-    #[error("`{0}` is not a neighbor state, expected E (empty), F (full), A (any) or [tile]")]
+    #[error("`{0}` is no valid neighbor, only E/F/A/[tile]")]
     NeighborLetter(char),
 
-    #[error("`{0}` is not a tile number in a neighbor list")]
+    #[error("`{0}` is no valid neighbor tile")]
     NeighborTileText(String),
 
-    #[error("tile {0} has a neighborhood whose size does not match its cells")]
+    #[error("tile {0} has wrong neighborhood size")]
     NeighborhoodShape(usize),
 
-    #[error("tile {AIR_TILE} is reserved for air and cannot be listed as a neighbor tile")]
+    #[error("Tile {AIR_TILE} (air) can't be a neighbor tile")]
     AirNeighborTile,
 
-    #[error("tile {tile}: `{name}` is not an orientation name")]
+    #[error("tile {tile} has unknown orientation `{name}`")]
     OrientationName { tile: usize, name: String },
 
-    #[error("tile {0} needs at least one rule")]
+    #[error("tile {0} needs at least 1 rule")]
     NoRules(usize),
 
-    #[error("tile {0} needs at least one orientation")]
+    #[error("tile {0} needs at least 1 orientation")]
     NoOrientations(usize),
 
     #[error(transparent)]
@@ -103,16 +103,16 @@ pub enum BlueprintError {
     #[error(transparent)]
     Group(#[from] GroupError),
 
-    #[error("group `{group}` covers tile {tile}, which is also configured on its own")]
+    #[error("group `{group}` can't overlap with tile {tile}")]
     Claimed { group: String, tile: usize },
 
-    #[error("blueprint holds no rule sets")]
+    #[error("blueprint has no rulesets")]
     NoRuleSets,
 
     #[error("the file has no embedded blueprint")]
     NoEmbedded,
 
-    #[error("the embedded blueprint is incomplete")]
+    #[error("embedded blueprint is incomplete")]
     IncompleteEmbedded,
 }
 

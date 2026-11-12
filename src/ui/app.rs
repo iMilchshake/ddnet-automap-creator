@@ -13,7 +13,7 @@ use crate::export::r_source::{self, ExportError, RuleSet};
 use crate::file_filter::{AUTOMAPPER, BLUEPRINT, RPP_SOURCE, RULES, TILESET_IMAGE};
 use crate::file_picker::{FilePicker, PickedFile};
 use crate::file_saver::FileSaver;
-use crate::model::group::{GroupError, TileGroup};
+use crate::model::group::TileGroup;
 use crate::model::pool::{self, Pool};
 use crate::model::rule_sets::RuleSets;
 use crate::model::tile::{AIR_TILE, TileRule};
@@ -75,7 +75,7 @@ const GROUP_SECTION: &str = "Group";
 const GROUPS_SECTION: &str = "Groups";
 const GROUP_ORDER_NOTE: &str = "top one is applied first";
 const DROP_HINT: &str = "Drop a tileset image or an automapper";
-const NO_IMAGE_FOR_BLUEPRINT: &str = "Open a tileset image first, then open the automapper.";
+const NO_IMAGE_FOR_BLUEPRINT: &str = "Open a tileset first";
 const APPEND_HOVER: &str = "Append rule sets from an automapper file";
 const RULE_SET_MORE_HOVER: &str = "More rule set actions";
 const RULE_SET_DUPLICATE_LABEL: &str = "Duplicate this rule set";
@@ -99,8 +99,8 @@ const UNDONE: &str = "Undone";
 const REDONE: &str = "Redone";
 const NOTHING_TO_UNDO: &str = "Nothing to undo";
 const NOTHING_TO_REDO: &str = "Nothing to redo";
-const CLOSE_PENDING: &str = "Please answer the open question before opening more files.";
-const OPEN_PENDING: &str = "Please answer the open question before closing.";
+const CLOSE_PENDING: &str = "Handle pending prompt first";
+const OPEN_PENDING: &str = "Handle pending prompt first";
 const UNSAVED_MARK: char = '*';
 
 struct Flash {
@@ -394,7 +394,9 @@ impl eframe::App for AutomapperApp {
         self.show_menu_bar(ui);
         self.show_status_bar(ui);
         self.show_side_panel(ui);
+        let toast_area = ui.available_rect_before_wrap();
         self.show_view(ui, &ctx, displayed_view);
+        self.status.show_toasts(ui, toast_area);
         self.show_export(&ctx);
         self.show_save_failure(&ctx);
         self.show_not_editable(&ctx);
@@ -546,13 +548,8 @@ impl AutomapperApp {
         if AUTOMAPPER.matches(&picked.name) {
             return self.load_blueprint(ctx, picked);
         }
-        self.status.warning(
-            ctx,
-            format!(
-                "{} is neither a tileset image nor an automapper",
-                picked.name
-            ),
-        );
+        self.status
+            .warning(ctx, format!("{} has unknown extension", picked.name));
     }
 
     fn load_blueprint(&mut self, ctx: &Context, picked: PickedFile) {
@@ -833,7 +830,7 @@ impl AutomapperApp {
         match (decision, failure.pending.tag.not_opened.as_ref()) {
             (SaveFailureDecision::SaveBlueprint, _) => self.save_raw_blueprint(failure.pending),
             (SaveFailureDecision::Close, Some(names)) => {
-                self.status.warning(ctx, format!("Didn't open {names}."))
+                self.status.warning(ctx, format!("Didn't open {names}"))
             }
             (SaveFailureDecision::Close, None) => {}
         }
@@ -875,7 +872,7 @@ impl AutomapperApp {
                 match (tag.not_opened, tag.automapper) {
                     (Some(names), _) => self
                         .status
-                        .warning(ctx, format!("Saved {name}, but didn't open {names}.{hint}")),
+                        .warning(ctx, format!("Saved {name}, didn't open {names}")),
                     (None, true) => self.status.info(ctx, format!("Saved {name}.{hint}")),
                     (None, false) => self.status.info(ctx, format!("Saved {name}")),
                 }
@@ -1016,10 +1013,9 @@ impl AutomapperApp {
         );
         match width == height {
             true => self.status.info(ctx, message),
-            false => self.status.warning(
-                ctx,
-                format!("{message} The image isn't square, so tiles will look stretched."),
-            ),
+            false => self
+                .status
+                .warning(ctx, "Image isn't square, tiles will look stretched!"),
         }
 
         self.rule_sets = RuleSets::new(DEFAULT_RULE_SET_NAME.to_owned());
@@ -1576,7 +1572,7 @@ impl AutomapperApp {
             }
             (DragEdit::Create, Some(_)) => self
                 .status
-                .warning(ctx, "That rectangle starts inside another group"),
+                .warning(ctx, "Group can't overlap with other group"),
             (DragEdit::Create, None) => self.create_group(ctx, tiles),
             (DragEdit::Shape(shape), _) => self.edit_selected_group(ctx, shape, &tiles),
         }
@@ -1604,7 +1600,7 @@ impl AutomapperApp {
                     .all(|&tile| group.covers(tile) || project.is_free(tile))
                 {
                     self.status
-                        .warning(ctx, "Those tiles are air, in another group or have a rule");
+                        .warning(ctx, "Group can't overlap with other group/tiles");
                     return;
                 }
                 group.tiles.union(tiles).copied().collect()
@@ -1616,13 +1612,7 @@ impl AutomapperApp {
         }
         group.set_tiles(reshaped);
         if let Err(error) = group.validate() {
-            let message = match error {
-                GroupError::TooSmall => {
-                    "A group needs two tiles, right-click removes the whole group".to_owned()
-                }
-                other => other.to_string(),
-            };
-            self.status.warning(ctx, message);
+            self.status.warning(ctx, error.to_string());
             return;
         }
 
@@ -1643,7 +1633,7 @@ impl AutomapperApp {
             .all(|tile| self.rule_sets.active().is_free(*tile))
         {
             self.status
-                .warning(ctx, "Those tiles already belong to a group or a rule");
+                .warning(ctx, "Group can't overlap with other group/tiles");
             return;
         }
 
@@ -1693,7 +1683,7 @@ fn blueprint_text<'a>(
 
     std::str::from_utf8(&picked.bytes)
         .map(|text| (text, loaded.tileset.stem.as_str()))
-        .map_err(|_| format!("{} is not text", picked.name))
+        .map_err(|_| format!("{}: no valid text file", picked.name))
 }
 
 fn show_drop_hint(ctx: &Context) {
@@ -1936,7 +1926,7 @@ fn show_group_row(
 }
 
 fn air_warning() -> String {
-    format!("Tile {AIR_TILE} is always air in DDNet, so it can't have a rule.")
+    format!("Tile {AIR_TILE} (air) can't have rules")
 }
 
 pub(super) fn open_image_shortcut() -> egui::KeyboardShortcut {

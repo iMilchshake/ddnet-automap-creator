@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::file_filter::FileFilter;
 
 #[derive(Debug, Error)]
-#[error("could not save `{name}`: {message}")]
+#[error("Can't save {name}: {message}")]
 pub struct SaveError {
     pub name: String,
     pub message: String,

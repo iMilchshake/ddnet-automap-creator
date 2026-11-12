@@ -23,7 +23,7 @@ pub fn referenced_tiles(tiles: &[(usize, TileRule)]) -> BTreeSet<usize> {
 }
 
 #[derive(Debug, Error)]
-#[error("chance must be greater than 0 and at most 100, got {0}")]
+#[error("chance {0} not between 0 and 100")]
 pub struct InvalidChance(pub f32);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
