@@ -34,6 +34,16 @@ fn read_file(path: &str) -> Result<file_picker::PickedFile, file_picker::PickErr
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn window_icon() -> egui::IconData {
+    let rgba = ui::welcome::app_icon();
+    egui::IconData {
+        width: rgba.width(),
+        height: rgba.height(),
+        rgba: rgba.into_raw(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     use clap::Parser as _;
 
@@ -41,7 +51,9 @@ fn main() -> eframe::Result {
     env_logger::init();
 
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 800.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1100.0, 800.0])
+            .with_icon(window_icon()),
         ..Default::default()
     };
 

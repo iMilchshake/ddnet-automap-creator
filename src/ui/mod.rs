@@ -20,7 +20,7 @@ mod save_failure;
 mod status;
 mod tile_panel;
 mod tile_state;
-mod welcome;
+pub mod welcome;
 
 pub use app::AutomapperApp;
 

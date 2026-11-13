@@ -1,11 +1,18 @@
-use egui::{Align, Button, Frame, Id, Layout, Margin, RichText, ScrollArea, Stroke, Ui, Vec2};
+use egui::{
+    Align, Button, ColorImage, Context, Frame, Id, Image, Layout, Margin, RichText, ScrollArea,
+    Stroke, TextureHandle, TextureOptions, Ui, Vec2,
+};
 
 use crate::ui::{APP_NAME, centered_top_space, remember_height};
+
+const ICON_BYTES: &[u8] = include_bytes!("../../assets/ddnet-automap-creator.ico");
+const ICON_TEXTURE_ID: &str = "welcome_icon";
+const ICON_SIZE: f32 = 96.0;
+const ICON_GAP: f32 = 8.0;
 
 const WELCOME_WIDTH: f32 = 520.0;
 const WELCOME_ID: &str = "welcome";
 const TITLE_SIZE: f32 = 32.0;
-const TITLE_GAP: f32 = 8.0;
 const BLOCK_GAP: f32 = 20.0;
 const DISCLAIMER_GAP: f32 = 40.0;
 const DISCLAIMER_FILL_OPACITY: f32 = 0.08;
@@ -15,8 +22,6 @@ const OPEN_BUTTON_SIZE: Vec2 = Vec2::new(240.0, 40.0);
 const OPEN_BUTTON_TEXT_SIZE: f32 = 16.0;
 const DISCLAIMER_STROKE_WIDTH: f32 = 1.0;
 
-const FIRST_STEP: &str =
-    "Open a tileset image to get started. You can also drop it anywhere in this window.";
 const OPEN_LABEL: &str = "Open tileset image…";
 const FIRST_STEPS_LABEL: &str = "New here? Read the first steps";
 const DISCLAIMER: &str = "This is a preview build, intended for testing and feedback. Automappers you save now may not open in newer versions. From v1.0 on, every saved automapper will open in all later versions.";
@@ -52,9 +57,10 @@ pub fn show(ui: &mut Ui, open_shortcut: &str) -> Option<WelcomeAction> {
 
 fn show_column(ui: &mut Ui, open_shortcut: &str) -> Option<WelcomeAction> {
     ui.vertical_centered(|ui| {
+        let icon = icon_texture(ui.ctx());
+        ui.add(Image::new(&icon).fit_to_exact_size(Vec2::splat(ICON_SIZE)));
+        ui.add_space(ICON_GAP);
         ui.label(RichText::new(APP_NAME).size(TITLE_SIZE).strong());
-        ui.add_space(TITLE_GAP);
-        ui.label(FIRST_STEP);
         ui.add_space(BLOCK_GAP);
         let open = show_open_button(ui, open_shortcut);
         ui.add_space(BLOCK_GAP);
@@ -68,6 +74,26 @@ fn show_column(ui: &mut Ui, open_shortcut: &str) -> Option<WelcomeAction> {
         open.or(first_steps)
     })
     .inner
+}
+
+fn icon_texture(ctx: &Context) -> TextureHandle {
+    let id = Id::new(ICON_TEXTURE_ID);
+    if let Some(texture) = ctx.data(|data| data.get_temp::<TextureHandle>(id)) {
+        return texture;
+    }
+    let rgba = app_icon();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let color_image = ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    let texture = ctx.load_texture(ICON_TEXTURE_ID, color_image, TextureOptions::LINEAR);
+    ctx.data_mut(|data| data.insert_temp(id, texture.clone()));
+
+    texture
+}
+
+pub fn app_icon() -> image::RgbaImage {
+    image::load_from_memory_with_format(ICON_BYTES, image::ImageFormat::Ico)
+        .expect("bundled icon is a valid ico")
+        .into_rgba8()
 }
 
 fn show_open_button(ui: &mut Ui, open_shortcut: &str) -> Option<WelcomeAction> {
