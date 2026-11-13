@@ -28,15 +28,9 @@ Required: [trunk](https://trunkrs.dev) and `emscripten`.
 
 Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 
-## Planned Features 
+## Potential future features 
 
-- keyboard navigation / shortcuts?
 - autosave the project (in browser storage)
-- discard stale preview compiles after loading images
-- rotated and flipped copies for groups?
-
-## Further Ideas
-
 - .map export (via ddnet-rs / twmap ?)
 - (live) .r source preview -> could be used as an interactive tool to learn r++?
 - DDNet install integration (native only) -> we could use twstorage

@@ -9,31 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Opening a .rules file without an embedded blueprint explains why it can't be edited.
-- A new button in the rule sets section allows you to append the rule sets of an automapper file.
+- Rules can have an empty or any center, so the tile goes into empty spots or into both. Right-click the center sets it to empty, left-click switches between solid and any.
+- Rules can have a neighborhood larger than 3×3, with rows and columns added on any side.
+- Groups can have rotated and flipped copies and their own neighborhood, like single tile rules. Parts of a group can be empty.
+- Groups can have any shape. Shift+drag adds tiles to the selected group, Ctrl+drag removes them.
+- Append the rulesets of another automapper file to the current one (ruleset ⏷ menu).
 - Custom preview map: draw your own shape to test your rules with.
-- Rules can now have an empty center tile. Right-click the center tile to turn this on, left-click to turn it off.
 - Undo and redo with Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z).
-- The app warns you before unsaved changes get lost on quit, doesn't work in the web version :(.
-- Preview is visible now, even without any active rules.
-- A power button next to the tile name turns a tile off or back on.
-- Hovering a tile in the tileset view shows all its rules.
-- Press Esc or click the selected tile again to deselect it and see a new overview sidebar.
-- Major rework of the welcome screen and help menu with many instructions.
+- The app warns you about unsaved changes before quitting. Not in the web version :(
+- Hovering a tile in the tileset view shows its index and all its rules.
+- Press Esc or click the selected tile again to deselect it and see an overview in the sidebar.
+- Reworked welcome screen and Help window, with step by step instructions.
+- Various small UI/UX improvements
 
 ### Changed
 
-- Saving (Ctrl+S) and opening now use .rules files that also hold an embedded blueprint.
-- Various UI/UX improvements (export menu, popups, top bar, preview).
-- Moved rule actions (duplicate, delete, copy and paste) into an expandable menu.
-- Split view is now the default view.
-- Minimal is now the default preview map.
-- The first rule set is now called "default".
+- Saving (Ctrl+S) and opening now use automapper files with an embedded blueprint.
+- If the neighbors look the same after rotating or flipping, the rotated and flipped tiles are now mixed in randomly and share the rule's chance.
+- New defaults (Split view, Minimal preview map, first ruleset called "default").
+- New blueprint format. Older blueprints no longer load.
+- Warnings now pop up as notifications in the top right, with shorter texts.
+- Various small UI/UX improvements (export window, popups, menu bar, preview view, rule menu for duplicate, copy and paste, clearer and more consistent texts).
 
 ### Removed
 
-- The bundle .zip export. Saving the automapper now ships with an embedded blueprint.
-- The "Always show orientation buttons" toggle. It was kinda useless.
+- The bundle .zip export. Saved automappers now include an embedded blueprint.
+- Small cleanups (tile index above the rules, "Always show orientation buttons" toggle).
 
 ### Fixed
 
