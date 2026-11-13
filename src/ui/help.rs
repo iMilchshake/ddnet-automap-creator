@@ -63,7 +63,7 @@ const GETTING_STARTED: [(&str, &str); 5] = [
         "The preview view (left) allows you to immediately check your rules. An orange question mark means no rule fits that spot yet. Click any tile in the preview to jump to its rule.",
     ),
     (
-        "5. Save your rule set",
+        "5. Save your ruleset",
         "Save the automapper ({save}) as a .rules file. It also embeds a blueprint of your rules, so you can open it again and edit it later.",
     ),
 ];
@@ -96,16 +96,16 @@ const OTHER_CONCEPTS: [(&str, &str); 8] = [
         "Tiles with the exact same neighbors conflict with each other. In this case DDNet picks between them using their chances. With Normalize chances on, the chances always add up to 100%. You can re-generate the preview view to retry the automapper for multiple seeds.",
     ),
     (
-        "Turning a tile off",
-        "Right-click a tile in the tileset to deactivate it without losing the configured rules. Right-click again to turn it back on.",
+        "Deactivating a tile",
+        "Right-click a tile in the tileset to deactivate it without losing the configured rules. Right-click again to activate it.",
     ),
     (
         "Groups",
-        "A rectangle of tiles that gets placed as one piece. Fill only needs its own area to be solid. Decorate also needs the blocks around it to be solid. Groups higher up in the list are applied first. Groups are applied after single tile rules.",
+        "A rectangle of tiles that gets placed as one piece. Fill only needs its own area to be solid. Decorate also needs the blocks around it to be solid. On floor needs its own area to be empty and the blocks below it to be solid. Groups higher up in the list are applied first. Groups are applied after single tile rules.",
     ),
     (
-        "Rule sets",
-        "Each rule set is its own automapper. They all end up in the same .rules file, and you pick one in the DDNet editor.",
+        "Rulesets",
+        "Each ruleset is its own automapper. They all end up in the same .rules file, and you pick one in the DDNet editor.",
     ),
 ];
 
@@ -121,12 +121,12 @@ const PASTE_ACTION: &str = "Paste over the selected rule";
 const NEIGHBOR_STATE_ACTION: &str = "Set the neighbor under the mouse to empty, solid or any";
 const MOUSE_ROWS: [(&str, &str); 11] = [
     ("Left-click a tile", "Select it, click again to deselect"),
-    ("Right-click a tile", "Turn the tile off or back on"),
+    ("Right-click a tile", "Deactivate or activate the tile"),
     ("Left-click a neighbor", "Switch between solid and any"),
     ("Right-click a neighbor", "Set it to empty"),
     ("Ctrl+click a neighbor", "Pick a specific tile for it"),
-    ("Left-click the center", "Place the tile on solid spots"),
-    ("Right-click the center", "Place the tile on empty spots"),
+    ("Left-click the center", "Switch between solid and any"),
+    ("Right-click the center", "Set it to empty"),
     (
         "Left / right-click a copy",
         "Turn a rotated or flipped copy on or off",

@@ -12,14 +12,14 @@ const OPTIONS_ROW_GAP: f32 = 8.0;
 
 const HEADING: &str = "Advanced export";
 const RULES_LABEL: &str = "Export .rules";
-const RULES_EMBEDDED_NOTE: &str = "DDNet automapper (with embedded blueprint)";
-const RULES_PLAIN_NOTE: &str = "Raw DDNet automapper (without embedded blueprint)";
+const RULES_EMBEDDED_NOTE: &str = "Automapper with embedded blueprint";
+const RULES_PLAIN_NOTE: &str = "Automapper without blueprint";
 const SOURCE_LABEL: &str = "Export .r";
-const SOURCE_NOTE: &str = "r++ source used for rules generation";
+const SOURCE_NOTE: &str = "r++ source of the rules";
 const BLUEPRINT_LABEL: &str = "Export .json";
-const BLUEPRINT_NOTE: &str = "Raw blueprint (without DDNet rules)";
+const BLUEPRINT_NOTE: &str = "Blueprint without rules";
 const EMBED_LABEL: &str = "Embed blueprint";
-const RULE_SETS_HEADING: &str = "Rule sets";
+const RULE_SETS_HEADING: &str = "Rulesets";
 const FILES_HEADING: &str = "Files";
 
 pub enum ExportRequest {

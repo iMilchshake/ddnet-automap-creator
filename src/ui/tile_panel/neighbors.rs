@@ -28,30 +28,30 @@ const ROW_TOP_SPACING: f32 = 4.0;
 const OUTLINE_WIDTH: f32 = 2.0;
 const BUTTON_MARGIN: f32 = 1.0;
 
-const CELL_TOOLTIP: &str = "Left-click switches between solid and any. Right-click makes it empty. \
-                            You can also press 1, 2 or 3 while hovering. \
+const CELL_TOOLTIP: &str = "Left-click switches between solid and any.\n\
+                            Right-click sets it to empty.\n\
+                            Keys 1, 2 and 3 set it to empty, solid or any.\n\
                             Ctrl+click picks a specific tile.";
-const CHANCE_TOOLTIP: &str = "Tiles with the same neighbors share the spot by their chances. \
-                              With Normalize chances off, a total below 100% can leave some \
-                              spots as they are.";
+const CHANCE_TOOLTIP: &str = "Rules with the exact same neighborhood conflict, and only one can be \
+                              chosen per spot. The chance sets how likely each one is to be chosen.";
 const CHANCE_LABEL: &str = "Chance";
 const RESET_TOOLTIP: &str = "Reset tile orientation";
 const RESIZE_TOOLTIP: &str = "Change neighborhood size";
-const ORIENTATION_HINT: &str = "The buttons turn or flip only this tile.";
-const CENTER_HINT: &str = "Left-click switches between solid and any. Right-click makes it empty. \
-                           With an empty center the tile goes into empty spots.";
+const ORIENTATION_HINT: &str = "The buttons rotate or flip only this tile.";
+const CENTER_HINT: &str = "Left-click switches between solid and any.\n\
+                           Right-click sets it to empty, so the tile goes into empty spots.";
 const CENTER_TOGGLE_SIZE: f32 = 16.0;
 const CENTER_TOGGLE_PADDING: f32 = 3.0;
 const CENTER_TOGGLES: [(RuleCenter, NeighborState, &str); 2] = [
     (
         RuleCenter::Any,
         NeighborState::Any,
-        "Any center, matches solid and empty cells",
+        "Any center, the tile goes into solid and empty spots",
     ),
     (
         RuleCenter::Empty,
         NeighborState::Empty,
-        "Empty center, only matches empty cells",
+        "Empty center, the tile goes into empty spots",
     ),
 ];
 
@@ -210,7 +210,7 @@ impl TilePanel {
             .or_else(|| clicked_center(&response, self.center))
             .filter(|center| *center != self.center);
         response.on_hover_text(format!(
-            "{}\n{ORIENTATION_HINT}\n{CENTER_HINT}",
+            "{}\n{CENTER_HINT}\n{ORIENTATION_HINT}",
             drawn_name(self.drawn)
         ));
 

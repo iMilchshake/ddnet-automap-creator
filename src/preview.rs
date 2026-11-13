@@ -83,7 +83,7 @@ pub enum PreviewError {
     #[error("could not read the compiled rules: {0}")]
     Syntax(String),
 
-    #[error("the compiled rules hold no rule set")]
+    #[error("the compiled rules hold no ruleset")]
     NoRuleSet,
 
     #[error("could not read the sample map: {0}")]

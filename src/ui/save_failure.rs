@@ -11,7 +11,7 @@ const HEADING: &str = "Could not save automapper";
 const PROBLEM_HEADING: &str = "What went wrong";
 const PROBLEM: &str = "The rules could not be built.";
 const FALLBACK_HEADING: &str = "Keep your work";
-const FALLBACK: &str = "You can save the raw blueprint instead, so no work is lost.";
+const FALLBACK: &str = "Save the blueprint instead to keep your work.";
 const SAVE_BLUEPRINT: &str = "Save blueprint";
 
 pub enum SaveFailureDecision {

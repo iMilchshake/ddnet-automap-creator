@@ -32,10 +32,10 @@ const ZOOM_LABEL: &str = "Zoom";
 const ZOOM_IN_LABEL: &str = "+";
 const ZOOM_OUT_LABEL: &str = "-";
 
-const PREVIEW_TOOLTIP: &str = "Tileset is where you edit the rules. Preview shows them on a test \
-                               map, the way DDNet would. Split shows both.";
-const NORMALIZE_TOOLTIP: &str = "On: chances get scaled so they always add up to 100%.\n\
-                                 Off: if they add up to less, some spots can stay as they are.";
+const PREVIEW_TOOLTIP: &str =
+    "Tileset to edit rules, Preview to test them, Split shows both views.";
+const NORMALIZE_TOOLTIP: &str = "On: the chances of conflicting rules always add up to 100%.\n\
+                                 Off: if they add up to less, some spots remain unchanged.";
 const ZOOM_TOOLTIP: &str = "Ctrl + and Ctrl - zoom, Ctrl 0 resets.";
 const PERCENT: f32 = 100.0;
 

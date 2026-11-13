@@ -157,13 +157,13 @@ impl GroupCopy {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum GroupError {
-    #[error("`{0}` must start with letter, can only have letters/digits")]
+    #[error("`{0}`: use letters and digits, starting with a letter")]
     Name(String),
 
     #[error("Group needs at least 2 tiles")]
     TooSmall,
 
-    #[error("Group can't overlap with Tile {AIR_TILE} (air)")]
+    #[error("Group can't overlap with tile {AIR_TILE} (air)")]
     CoversAirTile,
 
     #[error("Group exceeds tileset bounds")]

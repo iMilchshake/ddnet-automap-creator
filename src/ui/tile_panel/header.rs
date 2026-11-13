@@ -6,8 +6,8 @@ use super::{TileContext, TileEdit, TilePanel};
 use crate::ui::{ADD_ICON, BUTTON_GAP, REMOVE_ICON, SWITCH_ICON, compact_button, icon_button_size};
 
 const PADDED_SIDES: f32 = 2.0;
-const TURNED_OFF_TOOLTIP: &str =
-    "This tile is turned off. Right-click it in the tileset to use it again.";
+const DEACTIVATED_TOOLTIP: &str =
+    "This tile is deactivated. Right-click it in the tileset view to activate it again.";
 const NO_RULE_LABEL: &str = "No rule";
 const NO_RULE_TOOLTIP: &str = "Edit the neighborhood below to create a rule";
 const ADD_RULE_TOOLTIP: &str = "Add another rule for this tile";
@@ -87,7 +87,7 @@ impl TilePanel {
             }
             let mut tab = ui.selectable_label(index == self.index, label);
             if context.deactivated {
-                tab = tab.on_hover_text(TURNED_OFF_TOOLTIP);
+                tab = tab.on_hover_text(DEACTIVATED_TOOLTIP);
             }
             if tab.clicked() {
                 edit = Some(TileEdit::Select(index));

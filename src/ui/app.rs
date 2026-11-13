@@ -66,9 +66,9 @@ const DROP_OVERLAY_ALPHA: u8 = 160;
 const DROP_HINT_SIZE: f32 = 24.0;
 const FLASH_SECONDS: f64 = 0.4;
 
-const SHARED_NAME_HINT: &str = "Another rule set has this name";
+const SHARED_NAME_HINT: &str = "Another ruleset has this name";
 const DEFAULT_RULE_SET_NAME: &str = "default";
-const RULE_SET_SECTION: &str = "Rule set";
+const RULE_SET_SECTION: &str = "Ruleset";
 const OVERVIEW_SECTION: &str = "Overview";
 const TILE_SECTION: &str = "Tile";
 const GROUP_SECTION: &str = "Group";
@@ -76,31 +76,32 @@ const GROUPS_SECTION: &str = "Groups";
 const GROUP_ORDER_NOTE: &str = "top one is applied first";
 const DROP_HINT: &str = "Drop a tileset image or an automapper";
 const NO_IMAGE_FOR_BLUEPRINT: &str = "Open a tileset first";
-const APPEND_HOVER: &str = "Append rule sets from an automapper file";
-const RULE_SET_MORE_HOVER: &str = "More rule set actions";
-const RULE_SET_DUPLICATE_LABEL: &str = "Duplicate this rule set";
-const RULE_SET_APPEND_LABEL: &str = "Append rule sets from file…";
-const RULE_SET_REMOVE_HOVER: &str = "Remove this rule set";
-const RULE_SET_ADD_HOVER: &str = "Add new empty rule set";
+const APPEND_HOVER: &str = "Append rulesets from an automapper file";
+const RULE_SET_MORE_HOVER: &str = "More ruleset actions";
+const RULE_SET_DUPLICATE_LABEL: &str = "Duplicate this ruleset";
+const RULE_SET_APPEND_LABEL: &str = "Append rulesets from file…";
+const RULE_SET_REMOVE_HOVER: &str = "Remove this ruleset";
+const RULE_SET_ADD_HOVER: &str = "Add an empty ruleset";
 const APPEND_HEADING: &str = "Append automapper";
 const APPEND_CONFIRM: &str = "Append anyway";
 const APPEND_CANCELLED: &str = "Append cancelled";
 const LOAD_HEADING: &str = "Open automapper";
 const LOAD_CONFIRM: &str = "Open anyway";
 const LOAD_CANCELLED: &str = "Open cancelled";
-const SAVE_QUEUED: &str = "Saving as soon as the current compile is done.";
-const COMPILING: &str = "Compiling with rpp…";
-const PLACEMENT_HINT: &str = " Help shows where DDNet looks for it.";
-const MISMATCH_MADE_FOR: &str = " was made for the tileset ";
-const MISMATCH_BUT_CURRENT: &str = ", but your current tileset is ";
+const SAVE_QUEUED: &str = "Saving once compiling is done";
+const COMPILING: &str = "Compiling…";
+const PLACEMENT_HINT: &str = " See Help for where to put the automapper file";
+const MISMATCH_MADE_FOR: &str = " was made for ";
+const MISMATCH_BUT_CURRENT: &str = ", but your tileset is ";
 const MISMATCH_END: &str = ".";
-const MISMATCH_REASON: &str = "Rules are tied to explicit tile positions, so they only work if both tilesets have the same layout.";
+const MISMATCH_REASON: &str =
+    "Rules point to tile positions, so both tilesets need the same layout.";
 const UNDONE: &str = "Undone";
 const REDONE: &str = "Redone";
 const NOTHING_TO_UNDO: &str = "Nothing to undo";
 const NOTHING_TO_REDO: &str = "Nothing to redo";
-const CLOSE_PENDING: &str = "Handle pending prompt first";
-const OPEN_PENDING: &str = "Handle pending prompt first";
+const CLOSE_PENDING: &str = "Close the open dialog first";
+const OPEN_PENDING: &str = "Close the open dialog first";
 const UNSAVED_MARK: char = '*';
 
 struct Flash {
@@ -548,8 +549,10 @@ impl AutomapperApp {
         if AUTOMAPPER.matches(&picked.name) {
             return self.load_blueprint(ctx, picked);
         }
-        self.status
-            .warning(ctx, format!("{} has unknown extension", picked.name));
+        self.status.warning(
+            ctx,
+            format!("Can't open {}, unknown file type", picked.name),
+        );
     }
 
     fn load_blueprint(&mut self, ctx: &Context, picked: PickedFile) {
@@ -729,7 +732,7 @@ impl AutomapperApp {
         let appended = self.rule_sets.append(rule_sets);
         self.status.info(
             ctx,
-            format!("Appended {appended} rule sets from {file_name}"),
+            format!("Appended {appended} rulesets from {file_name}"),
         );
     }
 
@@ -1008,14 +1011,14 @@ impl AutomapperApp {
         let [width, height] = tileset.image_size;
         let [tile_width, tile_height] = tileset.tile_size;
         let message = format!(
-            "Loaded {} ({width}×{height}, {tile_width}×{tile_height} per tile).",
+            "Loaded {} ({width}×{height}, {tile_width}×{tile_height} per tile)",
             picked.name
         );
         match width == height {
             true => self.status.info(ctx, message),
             false => self
                 .status
-                .warning(ctx, "Image isn't square, tiles will look stretched!"),
+                .warning(ctx, "Image isn't square, tiles will look stretched"),
         }
 
         self.rule_sets = RuleSets::new(DEFAULT_RULE_SET_NAME.to_owned());
@@ -1578,7 +1581,7 @@ impl AutomapperApp {
             }
             (DragEdit::Create, Some(_)) => self
                 .status
-                .warning(ctx, "Group can't overlap with other group"),
+                .warning(ctx, "Groups can't overlap with other groups or tiles"),
             (DragEdit::Create, None) => self.create_group(ctx, tiles),
             (DragEdit::Shape(shape), _) => self.edit_selected_group(ctx, shape, &tiles),
         }
@@ -1606,7 +1609,7 @@ impl AutomapperApp {
                     .all(|&tile| group.covers(tile) || project.is_free(tile))
                 {
                     self.status
-                        .warning(ctx, "Group can't overlap with other group/tiles");
+                        .warning(ctx, "Groups can't overlap with other groups or tiles");
                     return;
                 }
                 group.tiles.union(tiles).copied().collect()
@@ -1639,7 +1642,7 @@ impl AutomapperApp {
             .all(|tile| self.rule_sets.active().is_free(*tile))
         {
             self.status
-                .warning(ctx, "Group can't overlap with other group/tiles");
+                .warning(ctx, "Groups can't overlap with other groups or tiles");
             return;
         }
 
@@ -1661,11 +1664,12 @@ impl AutomapperApp {
         match state {
             TileState::Deactivated(_) => {
                 self.rule_sets.active_mut().reactivate(tile);
-                self.status.info(ctx, format!("Tile {tile} is used again"));
+                self.status
+                    .info(ctx, format!("Tile {tile} is activated again"));
             }
             _ => {
                 self.rule_sets.active_mut().deactivate(tile);
-                self.status.info(ctx, format!("Tile {tile} is turned off"));
+                self.status.info(ctx, format!("Tile {tile} is deactivated"));
             }
         }
     }
@@ -1689,7 +1693,7 @@ fn blueprint_text<'a>(
 
     std::str::from_utf8(&picked.bytes)
         .map(|text| (text, loaded.tileset.stem.as_str()))
-        .map_err(|_| format!("{}: no valid text file", picked.name))
+        .map_err(|_| format!("Can't read {}, not a text file", picked.name))
 }
 
 fn show_drop_hint(ctx: &Context) {
@@ -1763,7 +1767,7 @@ fn show_rule_set_row(ui: &mut Ui, rule_sets: &mut RuleSets, command: &mut Option
             ui.add_space(size);
             let switch = ui
                 .add(compact_button(SWITCH_ICON, size))
-                .on_hover_text("Switch rule set");
+                .on_hover_text("Switch ruleset");
 
             let shared = rule_sets.is_name_shared(rule_sets.active_index());
             let mut field = egui::TextEdit::singleline(rule_sets.active_name_mut());

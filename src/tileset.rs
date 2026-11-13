@@ -5,7 +5,7 @@ use crate::model::tile::{TILE_COUNT, TILESET_SIDE};
 
 #[derive(Debug, Error)]
 pub enum TilesetError {
-    #[error("no valid image: {0}")]
+    #[error("not a valid image: {0}")]
     Decode(#[from] image::ImageError),
 
     #[error("Image size not divisible by {TILESET_SIDE}")]

@@ -27,14 +27,14 @@ const CROSS_COLOR: Color32 =
     Color32::from_rgba_premultiplied(CROSS_ALPHA, CROSS_ALPHA, CROSS_ALPHA, CROSS_ALPHA);
 
 const NO_MODS: TileMods = TileMods::new(false, false, false);
-const LAST_ORIENTATION: &str = "Keep at least one direction.";
+const LAST_ORIENTATION: &str = "Keep at least one orientation on.";
 pub(crate) const ORIENTATIONS_LABEL: &str = "Rotated and flipped copies";
-const ROTATE_FLAG_TOOLTIP: &str = "Also place it rotated by 90°, 180° and 270°";
-const X_FLIP_FLAG_TOOLTIP: &str = "Also place it mirrored left-right";
-const Y_FLIP_FLAG_TOOLTIP: &str = "Also place it mirrored top-bottom";
-const FLIP_FLAG_TOOLTIP: &str = "Also place the mirrored copies";
-const ORIENTATIONS_TOOLTIP: &str = "Every highlighted copy gets placed too, wherever the \
-                                    neighbors match the same way turned or mirrored.";
+const ROTATE_FLAG_TOOLTIP: &str = "Add copies rotated by 90°, 180° and 270°";
+const X_FLIP_FLAG_TOOLTIP: &str = "Add a copy flipped horizontally";
+const Y_FLIP_FLAG_TOOLTIP: &str = "Add a copy flipped vertically";
+const FLIP_FLAG_TOOLTIP: &str = "Also add the flipped copies";
+const ORIENTATIONS_TOOLTIP: &str = "Each highlighted copy adds another rule, with the tile and \
+                                    its neighborhood rotated or flipped the same way.";
 
 struct Flag {
     label: &'static str,
@@ -307,9 +307,9 @@ fn transform_name(transform: Transform) -> &'static str {
         (false, false, true) => "rotated 90°",
         (true, true, false) => "rotated 180°",
         (true, true, true) => "rotated 270°",
-        (true, false, false) => "mirrored left-right",
-        (false, true, false) => "mirrored top-bottom",
-        (true, false, true) => "mirrored anti-diagonally",
-        (false, true, true) => "mirrored diagonally",
+        (true, false, false) => "flipped horizontally",
+        (false, true, false) => "flipped vertically",
+        (true, false, true) => "flipped anti-diagonally",
+        (false, true, true) => "flipped diagonally",
     }
 }

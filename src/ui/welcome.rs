@@ -19,7 +19,7 @@ const FIRST_STEP: &str =
     "Open a tileset image to get started. You can also drop it anywhere in this window.";
 const OPEN_LABEL: &str = "Open tileset image…";
 const FIRST_STEPS_LABEL: &str = "New here? Read the first steps";
-const DISCLAIMER: &str = "This is still a test version, made for testing and feedback. Automappers you save now might no longer be supported in newer versions. As soon as v1.0 is out, I will guarantee backwards compatibility.";
+const DISCLAIMER: &str = "This is a preview build, intended for testing and feedback. Automappers you save now may not open in newer versions. From v1.0 on, every saved automapper will open in all later versions.";
 
 pub enum WelcomeAction {
     OpenImage,

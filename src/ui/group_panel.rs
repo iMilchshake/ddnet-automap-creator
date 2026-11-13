@@ -11,14 +11,16 @@ const MAX_CHANCE_PERCENT: f32 = 100.0;
 const CHANCE_DRAG_SPEED: f64 = 0.5;
 
 const SURROUNDINGS_LABEL: &str = "Surroundings";
-const ORIENTATIONS_HINT: &str = "Also places the group turned or mirrored where it fits.";
-const CHANCE_HINT: &str = "Shared across the group and its rotated and flipped copies.";
+const ORIENTATIONS_HINT: &str = "Also adds rotated and flipped copies of the group.";
+const CHANCE_HINT: &str = "Chance of the group, shared with its rotated and flipped copies.";
 
 fn preset_hint(preset: GroupPreset) -> &'static str {
     match preset {
-        GroupPreset::Fill => "Placed wherever its own tiles are solid.",
-        GroupPreset::Decorate => "Also needs a solid ring of tiles around it.",
-        GroupPreset::OnFloor => "Placed on air, standing on solid ground.",
+        GroupPreset::Fill => "Only needs its own area to be solid.",
+        GroupPreset::Decorate => "Also needs the blocks around it to be solid.",
+        GroupPreset::OnFloor => {
+            "Needs its own area to be empty and the blocks below it to be solid."
+        }
     }
 }
 

@@ -183,7 +183,9 @@ mod web {
                 file_name: output_file,
                 rules,
             }),
-            None => Err(CompileError::Unavailable("rpp returned no text".to_owned())),
+            None => Err(CompileError::Unavailable(
+                "The compiler returned nothing".to_owned(),
+            )),
         }
     }
 

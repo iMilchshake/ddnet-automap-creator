@@ -10,8 +10,9 @@ const MAX_CELL_SIZE: f32 = 40.0;
 const CELL_GAP: f32 = 2.0;
 const OUTLINE_WIDTH: f32 = 2.0;
 
-const CELL_TOOLTIP: &str = "Left-click switches between solid and any. Right-click makes it empty. \
-                            You can also press 1, 2 or 3 while hovering.";
+const CELL_TOOLTIP: &str = "Left-click switches between solid and any.\n\
+                            Right-click sets it to empty.\n\
+                            Keys 1, 2 and 3 set it to empty, solid or any.";
 
 pub fn show(
     ui: &mut Ui,

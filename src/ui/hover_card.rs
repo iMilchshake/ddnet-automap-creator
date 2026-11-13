@@ -9,7 +9,7 @@ const CARD_CELL_SIZE: f32 = 18.0;
 const RULES_PER_ROW: usize = 4;
 
 const IN_GROUP: &str = "is in group";
-const TURNED_OFF: &str = "turned off";
+const DEACTIVATED: &str = "deactivated";
 
 pub fn show(ui: &mut Ui, view: &GridView, tile: usize) {
     let state = tile_state(view.tileset, view.project, tile);
@@ -80,7 +80,7 @@ fn summary(view: &GridView, tile: usize, state: &TileState) -> String {
             let name = group_of(view.project, tile).map_or("", |group| group.name.as_str());
             format!("Tile {tile} {IN_GROUP} {name}")
         }
-        TileState::Deactivated(_) => format!("Tile {tile}, {TURNED_OFF}"),
+        TileState::Deactivated(_) => format!("Tile {tile}, {DEACTIVATED}"),
         TileState::Locked | TileState::Unconfigured | TileState::Configured(_) => {
             format!("Tile {tile}")
         }

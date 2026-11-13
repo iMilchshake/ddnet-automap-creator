@@ -42,7 +42,7 @@ const BARE_COMMENT: &str = "#";
 
 #[derive(Debug, Error)]
 pub enum BlueprintError {
-    #[error("no valid blueprint: {0}")]
+    #[error("not a valid blueprint: {0}")]
     Json(#[from] serde_json::Error),
 
     #[error("old blueprint that is no longer supported")]
@@ -78,10 +78,10 @@ pub enum BlueprintError {
     #[error("group `{0}` can't have tile neighbors, only E/F/A")]
     GroupNeighborTile(String),
 
-    #[error("`{0}` is no valid neighbor, only E/F/A/[tile]")]
+    #[error("`{0}` isn't a valid neighbor, only E/F/A/[tile]")]
     NeighborLetter(char),
 
-    #[error("`{0}` is no valid neighbor tile")]
+    #[error("`{0}` isn't a valid neighbor tile")]
     NeighborTileText(String),
 
     #[error("tile {0} has wrong neighborhood size")]

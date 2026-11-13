@@ -11,10 +11,10 @@ use crate::ui::neighbor_paint::paint_turned_tile;
 
 const SECTION_SPACING: f32 = 6.0;
 const MEMBER_SIZE: f32 = 20.0;
-const POOL_TOOLTIP: &str = "All tiles that have exactly these neighbors, including rotated and \
-                            flipped ones.";
+const POOL_TOOLTIP: &str = "Other rules with the exact same neighborhood, including rotated \
+                            and flipped copies. Only one can be chosen per spot, based on their chances.";
 const UNCHANGED: &str = "stays as it is";
-const SHARED_POOLS_HEADING: &str = "Shared with other tiles";
+const SHARED_POOLS_HEADING: &str = "Conflicting rules";
 
 fn member_label(tile: usize, transform: Transform) -> String {
     let tag: String = [

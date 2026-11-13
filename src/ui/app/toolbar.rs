@@ -5,11 +5,10 @@ use crate::preview::{CUSTOM_SIZE_RANGE, Sample};
 use crate::ui::DRAW_ICON;
 
 const PADDED_SIDES: f32 = 2.0;
-const SELECTION_TOOLTIP: &str = "Choose what clicks on the tileset do. Tiles edits single tiles. \
-                                 Groups lets you drag out rectangles that get placed as one piece. \
-                                 Click a group to edit it, right-click to remove it. \
-                                 Shift+drag adds tiles to the selected group, Ctrl+drag removes tiles.";
-const GENERATE_TOOLTIP: &str = "Roll the chances again.";
+const SELECTION_TOOLTIP: &str = "Tiles: click a tile to edit its rules.\n\
+                                 Groups: drag over tiles to create a group, click a group to edit it, right-click to remove it.\n\
+                                 Shift+drag adds tiles to the selected group, Ctrl+drag removes them.";
+const GENERATE_TOOLTIP: &str = "Run the automapper again with a new seed.";
 const DRAW_TOOLTIP: &str = "Left-click draws blocks, right-click erases them.";
 const MAP_LABEL: &str = "Map:";
 const REGENERATE_LABEL: &str = "Re-generate";

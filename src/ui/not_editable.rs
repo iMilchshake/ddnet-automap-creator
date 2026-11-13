@@ -8,8 +8,8 @@ const MODAL_ID: &str = "not_editable";
 const WIDTH: f32 = 360.0;
 
 const HEADING: &str = "Can't open automapper";
-const CONTAINS_NO_BLUEPRINT: &str = " contains no embedded blueprint.";
-const REASON: &str = "Only .rules files created using ddnet-automap-creator with an embedded blueprint can be opened.";
+const CONTAINS_NO_BLUEPRINT: &str = " has no embedded blueprint.";
+const REASON: &str = "Only automappers with an embedded blueprint can be opened.";
 const CONFIRM: &str = "OK";
 
 pub fn show(ctx: &Context, file_name: &str) -> bool {
