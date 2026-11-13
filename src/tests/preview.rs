@@ -13,7 +13,7 @@ use crate::model::neighbor::{Extent, NEIGHBORS, NeighborState, Neighborhood, Off
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{Centre, Chance, TILE_COUNT, TileMods, TileRule};
+use crate::model::tile::{Center, Chance, RuleCenter, TILE_COUNT, TileMods, TileRule};
 use crate::model::transform::Transform;
 use crate::preview::{
     Automapped, CustomShape, FALLBACK_UNMATCHED_MARKER, PlacedTile, PreviewCell, PreviewError,
@@ -54,16 +54,16 @@ const MAX_TOTAL_SHARE: f32 = 1.05;
 const READS_LATER_CELL: &str = "[Test]\nNoLayerCopy\nIndex 1\nIndex 2\nPos 1 0 INDEX 1\n";
 const SHARE_TOLERANCE: f32 = 0.12;
 
-fn placed(index: usize, centre: Centre) -> PreviewCell {
+fn placed(index: usize, center: Center) -> PreviewCell {
     PreviewCell::Placed(PlacedTile {
         index,
         transform: Transform::IDENTITY,
-        centre,
+        center,
     })
 }
 
 fn plain(index: usize) -> PreviewCell {
-    placed(index, Centre::Full)
+    placed(index, Center::Full)
 }
 
 fn compiled(source: String) -> String {
@@ -87,7 +87,7 @@ fn empty_above_ground() -> String {
     let tiles = [(
         AIR_DECORATION,
         TileRule {
-            centre: Centre::Empty,
+            center: RuleCenter::Empty,
             ..TileRule::new(neighborhood)
         },
     )];
@@ -200,7 +200,7 @@ fn a_rule_without_conditions_replaces_every_solid_cell() {
             y_flip: false,
             rot: false,
         },
-        centre: Centre::Full,
+        center: Center::Full,
     });
 
     for sample in Sample::ALL {
@@ -379,7 +379,7 @@ fn an_exported_rule_with_outer_cells_compiles_to_positioned_tests() {
 }
 
 #[test]
-fn an_exported_empty_centre_rule_places_into_the_air_above_ground() {
+fn an_exported_empty_center_rule_places_into_the_air_above_ground() {
     let rules = compiled(empty_above_ground());
     assert!(rules.contains("NoDefaultRule"), "{rules}");
     assert!(rules.contains("Pos 0 0 EMPTY"), "{rules}");
@@ -409,7 +409,7 @@ fn an_exported_empty_centre_rule_places_into_the_air_above_ground() {
 
     assert_eq!(
         automapped.cell(0, GROUND_ROWS.start - 1),
-        placed(AIR_DECORATION, Centre::Empty)
+        placed(AIR_DECORATION, Center::Empty)
     );
     assert_eq!(automapped.cell(0, 0), PreviewCell::Air);
     assert_eq!(
@@ -456,7 +456,7 @@ fn a_flipped_placement_of_a_symmetric_rule_resolves_to_that_rule() {
     let solid_above = solid_at(&["top"]);
 
     for transform in [Transform::IDENTITY, Transform::FLIP_HORIZONTALLY] {
-        let placed = placed_tile(transform, Centre::Full);
+        let placed = placed_tile(transform, Center::Full);
 
         assert_eq!(placing_rule(&project, placed, &solid_above), Some(0));
     }
@@ -552,11 +552,11 @@ fn solid_at(names: &[&str]) -> impl Fn(Offset) -> bool {
     move |offset| solid.contains(&offset)
 }
 
-fn placed_tile(transform: Transform, centre: Centre) -> PlacedTile {
+fn placed_tile(transform: Transform, center: Center) -> PlacedTile {
     PlacedTile {
         index: 1,
         transform,
-        centre,
+        center,
     }
 }
 
@@ -584,7 +584,7 @@ fn a_rule_requiring_a_solid_cell_two_away_matches_only_where_the_map_has_it() {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any).grown(Side::Right);
     neighborhood.set_state((2, 0), NeighborState::Full);
     let project = project_with(&[TileRule::new(neighborhood)]);
-    let placed = placed_tile(Transform::IDENTITY, Centre::Full);
+    let placed = placed_tile(Transform::IDENTITY, Center::Full);
 
     let solid_two_away = |offset: Offset| offset == (2, 0);
 
@@ -604,7 +604,7 @@ fn project_with(rules: &[TileRule]) -> Project {
 #[test]
 fn the_more_specific_rule_is_the_one_that_placed_the_tile() {
     let project = project_with(&[rule_with(&[]), rule_with(&[("top", NeighborState::Empty)])]);
-    let placed = placed_tile(Transform::IDENTITY, Centre::Full);
+    let placed = placed_tile(Transform::IDENTITY, Center::Full);
 
     assert_eq!(placing_rule(&project, placed, solid_at(&[])), Some(1));
     assert_eq!(placing_rule(&project, placed, solid_at(&["top"])), Some(0));
@@ -613,7 +613,7 @@ fn the_more_specific_rule_is_the_one_that_placed_the_tile() {
 #[test]
 fn a_rule_repeated_by_a_later_one_stays_with_the_earlier_one() {
     let project = project_with(&[rule_with(&[]), rule_with(&[])]);
-    let placed = placed_tile(Transform::IDENTITY, Centre::Full);
+    let placed = placed_tile(Transform::IDENTITY, Center::Full);
 
     assert_eq!(placing_rule(&project, placed, solid_at(&[])), Some(0));
 }
@@ -621,7 +621,7 @@ fn a_rule_repeated_by_a_later_one_stays_with_the_earlier_one() {
 #[test]
 fn a_specific_tile_neighbor_counts_as_solid() {
     let project = project_with(&[rule_with(&[("top", NeighborState::Is(3))])]);
-    let placed = placed_tile(Transform::IDENTITY, Centre::Full);
+    let placed = placed_tile(Transform::IDENTITY, Center::Full);
 
     assert_eq!(placing_rule(&project, placed, solid_at(&["top"])), Some(0));
     assert_eq!(placing_rule(&project, placed, solid_at(&[])), None);
@@ -637,7 +637,7 @@ fn a_tile_specific_rule_beats_a_more_specific_plain_rule() {
         ]),
         rule_with(&[("bottom", NeighborState::Is(3))]),
     ]);
-    let placed = placed_tile(Transform::IDENTITY, Centre::Full);
+    let placed = placed_tile(Transform::IDENTITY, Center::Full);
 
     assert_eq!(
         placing_rule(&project, placed, solid_at(&["bottom"])),
@@ -655,8 +655,8 @@ fn a_rotated_variant_reads_the_turned_neighborhood() {
         ])
     };
     let project = project_with(&[rotating]);
-    let rotated = placed_tile(Transform::ROTATE_CLOCKWISE, Centre::Full);
-    let upright = placed_tile(Transform::IDENTITY, Centre::Full);
+    let rotated = placed_tile(Transform::ROTATE_CLOCKWISE, Center::Full);
+    let upright = placed_tile(Transform::IDENTITY, Center::Full);
 
     assert_eq!(
         placing_rule(&project, rotated, solid_at(&["left"])),
@@ -670,17 +670,17 @@ fn a_rotated_variant_reads_the_turned_neighborhood() {
 }
 
 #[test]
-fn only_rules_with_the_placed_centre_are_considered() {
+fn only_rules_with_the_placed_center_are_considered() {
     let project = project_with(&[
         rule_with(&[]),
         TileRule {
-            centre: Centre::Empty,
+            center: RuleCenter::Empty,
             ..rule_with(&[])
         },
     ]);
 
-    let empty = placed_tile(Transform::IDENTITY, Centre::Empty);
-    let full = placed_tile(Transform::IDENTITY, Centre::Full);
+    let empty = placed_tile(Transform::IDENTITY, Center::Empty);
+    let full = placed_tile(Transform::IDENTITY, Center::Full);
 
     assert_eq!(placing_rule(&project, empty, solid_at(&[])), Some(1));
     assert_eq!(placing_rule(&project, full, solid_at(&[])), Some(0));
@@ -953,7 +953,7 @@ fn an_on_floor_group_lands_on_air_above_solid_ground_and_never_inside_it() {
     assert!(!covered.is_empty());
     for (_, row, placed) in covered {
         assert_eq!(row, GROUND_ROWS.start - 1);
-        assert_eq!(placed.centre, Centre::Empty);
+        assert_eq!(placed.center, Center::Empty);
     }
 }
 
@@ -995,13 +995,13 @@ fn on_floor_domino(mods: TileMods, percent: f32) -> TileGroup {
 }
 
 #[test]
-fn an_empty_centre_tile_never_lands_right_of_a_group_tile_on_air() {
+fn an_empty_center_tile_never_lands_right_of_a_group_tile_on_air() {
     let mut neighborhood = Neighborhood::uniform(NeighborState::Any);
     neighborhood.set_state(offset_of("left"), NeighborState::Full);
     let tiles = [(
         AIR_DECORATION,
         TileRule {
-            centre: Centre::Empty,
+            center: RuleCenter::Empty,
             ..TileRule::new(neighborhood)
         },
     )];
@@ -1029,7 +1029,7 @@ fn an_empty_centre_tile_never_lands_right_of_a_group_tile_on_air() {
     )
     .unwrap();
 
-    assert_eq!(automapped.cell(1, 1), placed(AIR_DECORATION, Centre::Empty));
+    assert_eq!(automapped.cell(1, 1), placed(AIR_DECORATION, Center::Empty));
     let covered: Vec<(usize, usize)> = group_cells(&automapped)
         .into_iter()
         .map(|(column, row, _)| (column, row))
@@ -1060,7 +1060,7 @@ fn a_rotating_on_floor_group_at_half_chance_only_covers_air() {
         .collect();
 
     assert!(!group_tiles.is_empty());
-    assert!(group_tiles.iter().all(|p| p.centre == Centre::Empty));
+    assert!(group_tiles.iter().all(|p| p.center == Center::Empty));
 }
 
 #[test]

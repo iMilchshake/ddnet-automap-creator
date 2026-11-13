@@ -4,7 +4,7 @@ use crate::model::neighbor::{Extent, NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{AIR_TILE, Centre, Chance, TILE_COUNT, TileMods, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, RuleCenter, TILE_COUNT, TileMods, TileRule};
 use crate::tests::support::{HALF_TURN, mods, offset_of, outer_corner};
 
 fn rule(neighborhood: Neighborhood, percent: f32, can_rotate: bool) -> TileRule {
@@ -865,20 +865,20 @@ fn full_at_right() -> Neighborhood {
     neighborhood
 }
 
-const EMPTY_CENTRE_AT_RIGHT: &str =
+const EMPTY_CENTER_AT_RIGHT: &str =
     ".NoDefaultPosRule().If(IndexAt([0, 0]).IsEmpty().IsFullAt(right), IndexAt([1, 0]).IsNotOut())";
 
-fn empty_centred(neighborhood: Neighborhood, percent: f32) -> TileRule {
+fn empty_centered(neighborhood: Neighborhood, percent: f32) -> TileRule {
     TileRule {
-        centre: Centre::Empty,
+        center: RuleCenter::Empty,
         ..rule(neighborhood, percent, false)
     }
 }
 
 #[test]
-fn empty_centre_rules_get_a_copy_run_before_the_group_runs() {
+fn empty_center_rules_get_a_copy_run_before_the_group_runs() {
     let groups = [tile_group("bones", 64, GroupPreset::Fill, 100.0)];
-    let tiles = [(2, empty_centred(full_at_right(), 100.0))];
+    let tiles = [(2, empty_centered(full_at_right(), 100.0))];
 
     let source = emit_with_groups(&tiles, &groups).unwrap();
 
@@ -898,36 +898,36 @@ fn empty_centre_rules_get_a_copy_run_before_the_group_runs() {
 }
 
 #[test]
-fn an_empty_centre_rule_without_neighbors_tests_only_the_centre() {
+fn an_empty_center_rule_without_neighbors_tests_only_the_center() {
     let source = emit(&[(
         52,
-        empty_centred(Neighborhood::uniform(NeighborState::Any), 100.0),
+        empty_centered(Neighborhood::uniform(NeighborState::Any), 100.0),
     )]);
 
     assert!(source.contains("\nInsert(52).NoDefaultPosRule().If(IndexAt([0, 0]).IsEmpty());\n"));
 }
 
 #[test]
-fn empty_centre_pools_split_their_cells_like_other_copy_runs() {
+fn empty_center_pools_split_their_cells_like_other_copy_runs() {
     let tiles = [
-        (2, empty_centred(full_at_right(), 100.0)),
-        (3, empty_centred(full_at_right(), 100.0)),
+        (2, empty_centered(full_at_right(), 100.0)),
+        (3, empty_centered(full_at_right(), 100.0)),
     ];
 
     let source = emit(&tiles);
 
-    assert!(source.contains(&format!("Insert(2){EMPTY_CENTRE_AT_RIGHT};\n")));
+    assert!(source.contains(&format!("Insert(2){EMPTY_CENTER_AT_RIGHT};\n")));
     assert!(source.contains(&format!(
-        "Insert(3){EMPTY_CENTRE_AT_RIGHT}; util:Chance(2);\n"
+        "Insert(3){EMPTY_CENTER_AT_RIGHT}; util:Chance(2);\n"
     )));
     assert!(!source.contains("g:mask"));
 }
 
 #[test]
-fn a_full_and_an_empty_centre_rule_on_one_neighborhood_do_not_compete() {
+fn a_full_and_an_empty_center_rule_on_one_neighborhood_do_not_compete() {
     let tiles = [
         (1, rule(full_at_right(), 100.0, false)),
-        (2, empty_centred(full_at_right(), 100.0)),
+        (2, empty_centered(full_at_right(), 100.0)),
     ];
 
     let source = emit(&tiles);
@@ -936,25 +936,25 @@ fn a_full_and_an_empty_centre_rule_on_one_neighborhood_do_not_compete() {
         body(&source),
         [
             "Insert(1).If(IndexAt([0, 0]).IsFullAt(right));",
-            &format!("Insert(2){EMPTY_CENTRE_AT_RIGHT};"),
+            &format!("Insert(2){EMPTY_CENTER_AT_RIGHT};"),
         ]
     );
     assert!(!source.contains("g:mask"));
 }
 
 #[test]
-fn only_empty_centre_rules_keep_full_neighbors_inside_the_map() {
+fn only_empty_center_rules_keep_full_neighbors_inside_the_map() {
     let tiles = [
         (1, rule(full_at_right(), 100.0, false)),
         (2, rule(tile_specific(), 100.0, false)),
-        (3, empty_centred(empty_at(&["top"]), 100.0)),
+        (3, empty_centered(empty_at(&["top"]), 100.0)),
     ];
 
     assert!(!emit(&tiles).contains("IsNotOut"));
 }
 
 #[test]
-fn rule_sets_without_empty_centres_never_mention_the_default_rule() {
+fn rule_sets_without_empty_centers_never_mention_the_default_rule() {
     let tiles = [
         (1, anywhere(100.0)),
         (2, rule(tile_specific(), 100.0, false)),

@@ -1,5 +1,5 @@
 use crate::model::neighbor::{
-    CENTRE, Extent, NEIGHBORS, NeighborState, Neighborhood, Side, neighbor_at, offset_label,
+    CENTER, Extent, NEIGHBORS, NeighborState, Neighborhood, Side, neighbor_at, offset_label,
 };
 
 const DIRECT_NEIGHBORS: usize = 8;
@@ -70,7 +70,7 @@ fn cells_walk_the_rectangle_in_reading_order_without_the_center() {
     assert_eq!(offsets.len(), extent.cell_count());
     assert_eq!(offsets[0], (-2, -1));
     assert_eq!(offsets[2], (0, -1));
-    assert!(!offsets.contains(&CENTRE));
+    assert!(!offsets.contains(&CENTER));
     assert_eq!(offsets.last(), Some(&(1, 1)));
 }
 
@@ -115,7 +115,7 @@ fn direct_neighbors_are_named_and_outer_cells_are_not() {
         Some("top")
     );
     assert!(neighbor_at((2, 0)).is_none());
-    assert!(neighbor_at(CENTRE).is_none());
+    assert!(neighbor_at(CENTER).is_none());
 }
 
 #[test]

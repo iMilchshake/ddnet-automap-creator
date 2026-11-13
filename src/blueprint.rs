@@ -7,7 +7,9 @@ use crate::model::neighbor::{Extent, NeighborState, Neighborhood};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{AIR_TILE, Centre, Chance, InvalidChance, TILE_COUNT, TileMods, TileRule};
+use crate::model::tile::{
+    AIR_TILE, Chance, InvalidChance, RuleCenter, TILE_COUNT, TileMods, TileRule,
+};
 use crate::model::transform::{Orientations, Transform};
 
 const VERSION: u32 = 1;
@@ -148,8 +150,8 @@ pub struct BlueprintRule {
     pub orientations: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawn: Option<String>,
-    #[serde(default, skip_serializing_if = "BlueprintCentre::is_full")]
-    pub centre: BlueprintCentre,
+    #[serde(default, skip_serializing_if = "BlueprintCenter::is_full")]
+    pub center: BlueprintCenter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,16 +187,40 @@ impl From<BlueprintExtent> for Extent {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum BlueprintCentre {
+#[serde(into = "char", try_from = "char")]
+pub enum BlueprintCenter {
     #[default]
     Full,
     Empty,
+    Any,
 }
 
-impl BlueprintCentre {
+impl BlueprintCenter {
     fn is_full(&self) -> bool {
         *self == Self::Full
+    }
+}
+
+impl From<BlueprintCenter> for char {
+    fn from(center: BlueprintCenter) -> Self {
+        match center {
+            BlueprintCenter::Full => FULL_LETTER,
+            BlueprintCenter::Empty => EMPTY_LETTER,
+            BlueprintCenter::Any => ANY_LETTER,
+        }
+    }
+}
+
+impl TryFrom<char> for BlueprintCenter {
+    type Error = String;
+
+    fn try_from(letter: char) -> Result<Self, Self::Error> {
+        match letter {
+            FULL_LETTER => Ok(Self::Full),
+            EMPTY_LETTER => Ok(Self::Empty),
+            ANY_LETTER => Ok(Self::Any),
+            other => Err(format!("unknown center letter {other}")),
+        }
     }
 }
 
@@ -387,9 +413,10 @@ fn store_rule(rule: &TileRule) -> BlueprintRule {
         chance: rule.chance.percent(),
         orientations: orientations.into_iter().map(orientation_name).collect(),
         drawn: (rule.drawn != Transform::IDENTITY).then(|| orientation_name(rule.drawn)),
-        centre: match rule.centre {
-            Centre::Full => BlueprintCentre::Full,
-            Centre::Empty => BlueprintCentre::Empty,
+        center: match rule.center {
+            RuleCenter::Full => BlueprintCenter::Full,
+            RuleCenter::Empty => BlueprintCenter::Empty,
+            RuleCenter::Any => BlueprintCenter::Any,
         },
     }
 }
@@ -453,9 +480,10 @@ fn load_rule(tile: usize, rule: &BlueprintRule) -> Result<TileRule, BlueprintErr
 
     Ok(TileRule {
         neighborhood,
-        centre: match rule.centre {
-            BlueprintCentre::Full => Centre::Full,
-            BlueprintCentre::Empty => Centre::Empty,
+        center: match rule.center {
+            BlueprintCenter::Full => RuleCenter::Full,
+            BlueprintCenter::Empty => RuleCenter::Empty,
+            BlueprintCenter::Any => RuleCenter::Any,
         },
         mods,
         custom,

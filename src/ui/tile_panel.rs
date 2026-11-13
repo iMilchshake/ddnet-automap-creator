@@ -2,7 +2,7 @@ use egui::{TextureHandle, Ui};
 
 use crate::model::neighbor::{NeighborState, Neighborhood, Offset, offset_label};
 use crate::model::pool::{ChanceMode, Pool};
-use crate::model::tile::{Centre, Chance, TileMods, TileRule};
+use crate::model::tile::{Chance, RuleCenter, TileMods, TileRule};
 use crate::model::transform::{Orientations, Transform};
 use crate::tileset::Tileset;
 
@@ -65,7 +65,7 @@ pub struct TilePanel {
     tile: usize,
     index: usize,
     neighborhood: Neighborhood,
-    centre: Centre,
+    center: RuleCenter,
     mods: TileMods,
     custom: Option<Orientations>,
     drawn: Transform,
@@ -83,7 +83,7 @@ impl TilePanel {
             tile,
             index,
             neighborhood: rule.neighborhood,
-            centre: rule.centre,
+            center: rule.center,
             mods: rule.mods,
             custom: rule.custom,
             drawn: rule.drawn,
@@ -205,7 +205,7 @@ impl TilePanel {
     fn rule(&self, chance: Chance) -> TileRule {
         TileRule {
             neighborhood: self.neighborhood.clone(),
-            centre: self.centre,
+            center: self.center,
             mods: self.mods,
             custom: self.custom,
             drawn: self.drawn,

@@ -81,16 +81,34 @@ impl TileMods {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Centre {
+pub enum Center {
     #[default]
     Full,
     Empty,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RuleCenter {
+    #[default]
+    Full,
+    Empty,
+    Any,
+}
+
+impl RuleCenter {
+    pub fn centers(self) -> &'static [Center] {
+        match self {
+            Self::Full => &[Center::Full],
+            Self::Empty => &[Center::Empty],
+            Self::Any => &[Center::Full, Center::Empty],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TileRule {
     pub neighborhood: Neighborhood,
-    pub centre: Centre,
+    pub center: RuleCenter,
     pub mods: TileMods,
     pub custom: Option<Orientations>,
     pub drawn: Transform,
@@ -101,7 +119,7 @@ impl TileRule {
     pub fn new(neighborhood: Neighborhood) -> Self {
         Self {
             neighborhood,
-            centre: Centre::default(),
+            center: RuleCenter::default(),
             mods: TileMods::default(),
             custom: None,
             drawn: Transform::IDENTITY,

@@ -88,8 +88,8 @@ const OTHER_CONCEPTS: [(&str, &str); 8] = [
         "Ctrl+click a neighbor cell and pick a specific tile in the tileset view. That neighbor cell then has to be exactly this tile. These rules are applied in a following sweep after all other tiles are already placed (NewRun) and can overwrite what's already there.",
     ),
     (
-        "Empty center",
-        "Right-click the middle cell of a rule. The tile then goes into empty spots instead of solid ones, which is relevant for e.g. grass on top of blocks.",
+        "Empty and any center",
+        "Right-click the middle cell of a rule, or use the small buttons that appear in its corner on hover. With an empty center the tile goes into empty spots instead of solid ones, which is relevant for e.g. grass on top of blocks. With an any center it goes into both.",
     ),
     (
         "Chance and conflicting rules",

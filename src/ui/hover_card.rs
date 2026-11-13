@@ -2,7 +2,7 @@ use egui::Ui;
 
 use crate::model::tile::TileRule;
 use crate::ui::grid::{GridView, describe_group, group_of};
-use crate::ui::neighbor_paint::{paint_centre, paint_neighbor, show_pattern};
+use crate::ui::neighbor_paint::{paint_center, paint_neighbor, show_pattern};
 use crate::ui::tile_state::{TileState, tile_state};
 
 const CARD_CELL_SIZE: f32 = 18.0;
@@ -55,12 +55,12 @@ fn show_rule_picture(ui: &mut Ui, view: &GridView, tile: usize, rule: &TileRule)
                 view.texture,
                 view.tileset,
             ),
-            None => paint_centre(
+            None => paint_center(
                 ui,
                 rect,
                 view.texture,
                 &view.tileset.tiles[tile],
-                rule.centre,
+                rule.center,
                 rule.drawn,
             ),
         },

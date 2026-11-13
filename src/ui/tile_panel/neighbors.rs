@@ -1,7 +1,7 @@
 use egui::containers::Sides;
 use egui::{
-    Align2, PointerButton, Rect, Response, ScrollArea, Sense, Stroke, StrokeKind, TextureHandle,
-    Ui, Vec2, pos2,
+    Align2, CursorIcon, PointerButton, Rect, Response, ScrollArea, Sense, Stroke, StrokeKind,
+    TextureHandle, Ui, Vec2, pos2,
 };
 
 use super::icons::{
@@ -9,14 +9,14 @@ use super::icons::{
 };
 use super::orientations::drawn_name;
 use super::{CELL_GAP, FlashKind, GridFlash, TileContext, TilePanel};
-use crate::model::neighbor::{CENTRE, Extent, NeighborState, Neighborhood, Offset, Side};
-use crate::model::tile::{Centre, TileRule};
+use crate::model::neighbor::{CENTER, Extent, NeighborState, Neighborhood, Offset, Side};
+use crate::model::tile::{RuleCenter, TileRule};
 use crate::model::transform::Transform;
 use crate::tileset::Tileset;
 use crate::ui::BUTTON_GAP;
 use crate::ui::grid;
 use crate::ui::neighbor_input::{pressed_state, released_on};
-use crate::ui::neighbor_paint::{CORNER_RADIUS, paint_centre, paint_neighbor};
+use crate::ui::neighbor_paint::{CORNER_RADIUS, paint_center, paint_neighbor, paint_state};
 
 const MIN_CELL_SIZE: f32 = 16.0;
 const EDGE_MARGIN: f32 = TURN_BUTTON_SIZE + CELL_GAP;
@@ -38,8 +38,22 @@ const CHANCE_LABEL: &str = "Chance";
 const RESET_TOOLTIP: &str = "Reset tile orientation";
 const RESIZE_TOOLTIP: &str = "Change neighborhood size";
 const ORIENTATION_HINT: &str = "The buttons turn or flip only this tile.";
-const CENTRE_HINT: &str = "Left-click for a solid center, right-click for an empty one. \
+const CENTER_HINT: &str = "Left-click switches between solid and any. Right-click makes it empty. \
                            With an empty center the tile goes into empty spots.";
+const CENTER_TOGGLE_SIZE: f32 = 16.0;
+const CENTER_TOGGLE_PADDING: f32 = 3.0;
+const CENTER_TOGGLES: [(RuleCenter, NeighborState, &str); 2] = [
+    (
+        RuleCenter::Any,
+        NeighborState::Any,
+        "Any center, matches solid and empty cells",
+    ),
+    (
+        RuleCenter::Empty,
+        NeighborState::Empty,
+        "Empty center, only matches empty cells",
+    ),
+];
 
 impl TilePanel {
     pub(super) fn show_neighborhood(
@@ -103,7 +117,7 @@ impl TilePanel {
         for offset in extent.offsets() {
             let rect = cell_rect(grid, size, extent, offset);
             changed |= match offset {
-                CENTRE => self.show_centre_cell(ui, tileset, texture, rect),
+                CENTER => self.show_center_cell(ui, tileset, texture, rect),
                 _ => self.show_state_cell(ui, tileset, texture, offset, rect),
             };
         }
@@ -163,21 +177,23 @@ impl TilePanel {
         true
     }
 
-    fn show_centre_cell(
+    fn show_center_cell(
         &mut self,
         ui: &mut Ui,
         tileset: &Tileset,
         texture: &TextureHandle,
         rect: Rect,
     ) -> bool {
-        let response = ui.interact(rect, ui.id().with(CENTRE), Sense::click());
+        let response = ui.interact(rect, ui.id().with(CENTER), Sense::click());
         let slice = &tileset.tiles[self.tile];
-        paint_centre(ui, rect, texture, slice, self.centre, self.drawn);
+        paint_center(ui, rect, texture, slice, self.center, self.drawn);
 
         let bounds = rect.shrink(BUTTON_MARGIN);
+        let hovered = ui.rect_contains_pointer(rect);
+        let toggled = show_center_toggles(ui, bounds, self.center, hovered);
         let mut turn = None;
         let mut reset = false;
-        if ui.rect_contains_pointer(rect) {
+        if hovered {
             for (index, button) in TURN_BUTTONS.into_iter().enumerate() {
                 let area = button_rect(bounds, Align2::CENTER_BOTTOM, index);
                 if turn_button(ui, area, button.icon, button.tile_tooltip) {
@@ -190,9 +206,11 @@ impl TilePanel {
                 reset = turn_button(ui, area, Icon::Reset, RESET_TOOLTIP);
             }
         }
-        let clicked = clicked_centre(&response).filter(|centre| *centre != self.centre);
+        let clicked = toggled
+            .or_else(|| clicked_center(&response, self.center))
+            .filter(|center| *center != self.center);
         response.on_hover_text(format!(
-            "{}\n{ORIENTATION_HINT}\n{CENTRE_HINT}",
+            "{}\n{ORIENTATION_HINT}\n{CENTER_HINT}",
             drawn_name(self.drawn)
         ));
 
@@ -202,8 +220,8 @@ impl TilePanel {
         if let Some(by) = turn {
             self.turn(TileRule::turned_tile, by);
         }
-        if let Some(centre) = clicked {
-            self.centre = centre;
+        if let Some(center) = clicked {
+            self.center = center;
             self.picking = None;
         }
         reset || turn.is_some() || clicked.is_some()
@@ -388,14 +406,67 @@ fn paint_flash(ui: &Ui, rect: Rect, flash: Option<GridFlash>) {
     ui.painter().rect_filled(rect, CORNER_RADIUS, color);
 }
 
-fn clicked_centre(response: &Response) -> Option<Centre> {
+fn show_center_toggles(
+    ui: &Ui,
+    bounds: Rect,
+    center: RuleCenter,
+    hovered: bool,
+) -> Option<RuleCenter> {
+    for (index, (target, icon, tooltip)) in CENTER_TOGGLES.into_iter().enumerate() {
+        let active = center == target;
+        if !active && !hovered {
+            continue;
+        }
+
+        let slot = if hovered { index } else { 0 };
+        let offset = Vec2::X * slot as f32 * (CENTER_TOGGLE_SIZE + BUTTON_GAP);
+        let area = Rect::from_min_size(bounds.min + offset, Vec2::splat(CENTER_TOGGLE_SIZE));
+        if icon_toggle(ui, area, icon, tooltip, active) {
+            return Some(match active {
+                true => RuleCenter::Full,
+                false => target,
+            });
+        }
+    }
+
+    None
+}
+
+fn icon_toggle(ui: &Ui, rect: Rect, icon: NeighborState, tooltip: &str, active: bool) -> bool {
+    let response = ui.interact(rect, ui.id().with(tooltip), Sense::click());
+    let visuals = ui.style().interact(&response);
+    let fill = match active {
+        true => ui.visuals().selection.bg_fill,
+        false => visuals.weak_bg_fill,
+    };
+    ui.painter().rect(
+        rect,
+        CORNER_RADIUS,
+        fill,
+        visuals.bg_stroke,
+        StrokeKind::Inside,
+    );
+    paint_state(ui, rect.shrink(CENTER_TOGGLE_PADDING), icon);
+
+    let clicked = response.clicked();
+    response
+        .on_hover_cursor(CursorIcon::PointingHand)
+        .on_hover_text(tooltip);
+
+    clicked
+}
+
+fn clicked_center(response: &Response, current: RuleCenter) -> Option<RuleCenter> {
     if response.clicked_by(PointerButton::Primary) {
-        return Some(Centre::Full);
+        return Some(match current {
+            RuleCenter::Full => RuleCenter::Any,
+            RuleCenter::Any | RuleCenter::Empty => RuleCenter::Full,
+        });
     }
 
     response
         .clicked_by(PointerButton::Secondary)
-        .then_some(Centre::Empty)
+        .then_some(RuleCenter::Empty)
 }
 
 fn cell_tooltip(state: NeighborState) -> String {

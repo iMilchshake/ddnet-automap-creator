@@ -1,7 +1,7 @@
-use egui::{Color32, Painter, Rect, Sense, Stroke, StrokeKind, TextureHandle, Ui, Vec2};
+use egui::{Color32, Painter, Rect, Sense, Shape, Stroke, StrokeKind, TextureHandle, Ui, Vec2};
 
-use crate::model::neighbor::{CENTRE, Extent, NeighborState, Offset};
-use crate::model::tile::Centre;
+use crate::model::neighbor::{CENTER, Extent, NeighborState, Offset};
+use crate::model::tile::RuleCenter;
 use crate::model::transform::Transform;
 use crate::tileset::{TileSlice, Tileset};
 use crate::ui::{grid, preview};
@@ -22,12 +22,23 @@ const ANY_LIGHT: Color32 = Color32::from_gray(96);
 const ANY_DARK: Color32 = Color32::from_gray(64);
 const PREVIEW_LIGHT: Color32 = Color32::from_gray(64);
 const PREVIEW_DARK: Color32 = Color32::from_gray(48);
-const EMPTY_CENTRE_ALPHA: u8 = 150;
-const EMPTY_CENTRE_TINT: Color32 = Color32::from_rgba_premultiplied(
-    EMPTY_CENTRE_ALPHA,
-    EMPTY_CENTRE_ALPHA,
-    EMPTY_CENTRE_ALPHA,
-    EMPTY_CENTRE_ALPHA,
+const EMPTY_CENTER_ALPHA: u8 = 150;
+const ANY_CENTER_ALPHA: u8 = 140;
+const ANY_CENTER_TINT: Color32 = Color32::from_rgba_premultiplied(
+    ANY_CENTER_ALPHA,
+    ANY_CENTER_ALPHA,
+    ANY_CENTER_ALPHA,
+    ANY_CENTER_ALPHA,
+);
+const ANY_BORDER_WIDTH: f32 = 2.0;
+const ANY_BORDER_COLOR: Color32 = Color32::from_gray(220);
+const DASH_LENGTH: f32 = 5.0;
+const DASH_GAP: f32 = 3.0;
+const EMPTY_CENTER_TINT: Color32 = Color32::from_rgba_premultiplied(
+    EMPTY_CENTER_ALPHA,
+    EMPTY_CENTER_ALPHA,
+    EMPTY_CENTER_ALPHA,
+    EMPTY_CENTER_ALPHA,
 );
 
 const LEGEND: [(NeighborState, &str); 3] = [
@@ -119,19 +130,25 @@ pub fn paint_turned_tile(
     preview::paint_turned(painter, rect, texture, slice, transform);
 }
 
-pub fn paint_centre(
+pub fn paint_center(
     ui: &Ui,
     rect: Rect,
     texture: &TextureHandle,
     slice: &TileSlice,
-    centre: Centre,
+    center: RuleCenter,
     drawn: Transform,
 ) {
-    match centre {
-        Centre::Full => paint_turned_tile(ui.painter(), rect, texture, slice, drawn),
-        Centre::Empty => {
+    match center {
+        RuleCenter::Full => paint_turned_tile(ui.painter(), rect, texture, slice, drawn),
+        RuleCenter::Any => {
+            let painter = ui.painter();
+            paint_checker(painter, rect, PREVIEW_LIGHT, PREVIEW_DARK);
+            preview::paint_tinted(painter, rect, texture, slice, drawn, ANY_CENTER_TINT);
+            paint_dashed_border(painter, rect);
+        }
+        RuleCenter::Empty => {
             paint_state(ui, rect, NeighborState::Empty);
-            preview::paint_tinted(ui.painter(), rect, texture, slice, drawn, EMPTY_CENTRE_TINT);
+            preview::paint_tinted(ui.painter(), rect, texture, slice, drawn, EMPTY_CENTER_TINT);
         }
     }
 }
@@ -149,7 +166,7 @@ pub fn show_pattern(
                 for dx in -extent.left..=extent.right {
                     let (rect, _response) =
                         ui.allocate_exact_size(Vec2::splat(cell_size), Sense::hover());
-                    paint_cell(ui, rect, ((dx, dy) != CENTRE).then_some((dx, dy)));
+                    paint_cell(ui, rect, ((dx, dy) != CENTER).then_some((dx, dy)));
                 }
             });
         }
@@ -168,6 +185,19 @@ pub fn show_legend(ui: &mut Ui) {
             ui.add_space(LEGEND_GAP);
         }
     });
+}
+
+fn paint_dashed_border(painter: &Painter, rect: Rect) {
+    let outline = rect.shrink(ANY_BORDER_WIDTH / 2.0);
+    let corners = [
+        outline.left_top(),
+        outline.right_top(),
+        outline.right_bottom(),
+        outline.left_bottom(),
+        outline.left_top(),
+    ];
+    let stroke = Stroke::new(ANY_BORDER_WIDTH, ANY_BORDER_COLOR);
+    painter.extend(Shape::dashed_line(&corners, stroke, DASH_LENGTH, DASH_GAP));
 }
 
 fn paint_checker(painter: &Painter, rect: Rect, light: Color32, dark: Color32) {

@@ -1,6 +1,6 @@
 use crate::model::neighbor::{NeighborState, Neighborhood, Side};
 use crate::model::pool::{ChanceMode, Pool, Variant, base_shares, pools, pools_of};
-use crate::model::tile::{Centre, Chance, TileRule};
+use crate::model::tile::{Center, Chance, RuleCenter, TileRule};
 use crate::model::transform::{Orientations, Transform};
 use crate::tests::support::{HALF_TURN, QUARTER_TURN, half_turn, mods, offset_of};
 
@@ -396,26 +396,26 @@ fn a_fully_symmetric_rule_splits_its_chance_over_all_eight_orientations() {
     }
 }
 
-fn empty_centred(neighborhood: Neighborhood) -> TileRule {
+fn empty_centered(neighborhood: Neighborhood) -> TileRule {
     TileRule {
-        centre: Centre::Empty,
+        center: RuleCenter::Empty,
         ..TileRule::new(neighborhood)
     }
 }
 
 #[test]
-fn rules_only_share_a_pool_when_neighborhood_and_centre_match() {
+fn rules_only_share_a_pool_when_neighborhood_and_center_match() {
     let pools = pools(&[
         (1, TileRule::new(only("left"))),
-        (2, empty_centred(only("left"))),
+        (2, empty_centered(only("left"))),
         (3, TileRule::new(only("left"))),
     ]);
 
-    let members: Vec<(Centre, Vec<usize>)> = pools
+    let members: Vec<(Center, Vec<usize>)> = pools
         .iter()
         .map(|pool| {
             (
-                pool.centre,
+                pool.center,
                 pool.members.iter().map(|member| member.tile).collect(),
             )
         })
@@ -423,31 +423,31 @@ fn rules_only_share_a_pool_when_neighborhood_and_centre_match() {
 
     assert_eq!(
         members,
-        [(Centre::Full, vec![1, 3]), (Centre::Empty, vec![2])]
+        [(Center::Full, vec![1, 3]), (Center::Empty, vec![2])]
     );
 }
 
 #[test]
-fn a_tile_keeps_its_full_and_its_empty_centre_rule_on_one_neighborhood() {
+fn a_tile_keeps_its_full_and_its_empty_center_rule_on_one_neighborhood() {
     let variants = variants(&[
         (3, TileRule::new(only("left"))),
-        (3, empty_centred(only("left"))),
+        (3, empty_centered(only("left"))),
     ]);
 
-    let centres: Vec<Centre> = variants.iter().map(|variant| variant.centre).collect();
+    let centers: Vec<Center> = variants.iter().map(|variant| variant.center).collect();
 
-    assert_eq!(centres, [Centre::Full, Centre::Empty]);
+    assert_eq!(centers, [Center::Full, Center::Empty]);
 }
 
 #[test]
-fn turning_a_rule_leaves_its_centre_alone() {
-    let rule = empty_centred(only("left"));
+fn turning_a_rule_leaves_its_center_alone() {
+    let rule = empty_centered(only("left"));
 
     assert_eq!(
-        rule.clone().turned_neighbors(HALF_TURN).centre,
-        Centre::Empty
+        rule.clone().turned_neighbors(HALF_TURN).center,
+        RuleCenter::Empty
     );
-    assert_eq!(rule.turned_tile(HALF_TURN).centre, Centre::Empty);
+    assert_eq!(rule.turned_tile(HALF_TURN).center, RuleCenter::Empty);
 }
 
 #[test]

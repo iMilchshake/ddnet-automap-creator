@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::model::neighbor::Neighborhood;
-use crate::model::tile::{Centre, Chance, TileRule};
+use crate::model::tile::{Center, Chance, TileRule};
 use crate::model::transform::Transform;
 
 const ALL_CELLS: f32 = 100.0;
@@ -24,14 +24,14 @@ pub struct Variant {
     pub transform: Transform,
     pub primary: bool,
     pub neighborhood: Neighborhood,
-    pub centre: Centre,
+    pub center: Center,
     pub chance: Chance,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pool {
     pub neighborhood: Neighborhood,
-    pub centre: Centre,
+    pub center: Center,
     pub members: Vec<Variant>,
 }
 
@@ -119,12 +119,12 @@ pub fn pools(tiles: &[(usize, TileRule)]) -> Vec<Pool> {
     for variant in expand(tiles) {
         let constraints = variant.neighborhood.constraints();
         match pools.iter_mut().find(|pool| {
-            pool.neighborhood.constraints() == constraints && pool.centre == variant.centre
+            pool.neighborhood.constraints() == constraints && pool.center == variant.center
         }) {
             Some(pool) => pool.members.push(variant),
             None => pools.push(Pool {
                 neighborhood: variant.neighborhood.clone(),
-                centre: variant.centre,
+                center: variant.center,
                 members: vec![variant],
             }),
         }
@@ -136,21 +136,21 @@ pub fn pools(tiles: &[(usize, TileRule)]) -> Vec<Pool> {
 pub struct PoolRuns<'a> {
     pub plain: Vec<&'a Pool>,
     pub specific: Vec<&'a Pool>,
-    pub empty_centred: Vec<&'a Pool>,
+    pub empty_centered: Vec<&'a Pool>,
 }
 
 impl<'a> PoolRuns<'a> {
     pub fn split(pools: &'a [Pool]) -> Self {
-        let (empty_centred, full_centred): (Vec<&Pool>, Vec<&Pool>) =
-            pools.iter().partition(|pool| pool.centre == Centre::Empty);
-        let (specific, plain) = full_centred
+        let (empty_centered, full_centered): (Vec<&Pool>, Vec<&Pool>) =
+            pools.iter().partition(|pool| pool.center == Center::Empty);
+        let (specific, plain) = full_centered
             .into_iter()
             .partition(|pool| pool.neighborhood.is_tile_specific());
 
         Self {
             plain,
             specific,
-            empty_centred,
+            empty_centered,
         }
     }
 
@@ -158,7 +158,7 @@ impl<'a> PoolRuns<'a> {
         self.plain
             .iter()
             .chain(&self.specific)
-            .chain(&self.empty_centred)
+            .chain(&self.empty_centered)
             .copied()
     }
 }
@@ -202,21 +202,21 @@ fn rule_variants(tile: usize, index: usize, rule: &TileRule) -> Vec<Variant> {
 
     placements
         .iter()
-        .map(|(neighborhood, transform)| {
+        .flat_map(|(neighborhood, transform)| {
             let sharing = placements
                 .iter()
                 .filter(|(other, _)| other.constraints() == neighborhood.constraints())
                 .count();
 
-            Variant {
+            rule.center.centers().iter().map(move |&center| Variant {
                 tile,
                 rule: index,
                 transform: *transform,
                 primary: false,
                 neighborhood: neighborhood.clone(),
-                centre: rule.centre,
+                center,
                 chance: rule.chance.split(sharing),
-            }
+            })
         })
         .collect()
 }

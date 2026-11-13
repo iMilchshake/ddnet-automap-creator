@@ -1,6 +1,6 @@
 pub type Offset = (i32, i32);
 
-pub const CENTRE: Offset = (0, 0);
+pub const CENTER: Offset = (0, 0);
 pub const MIN_EXTENT: i32 = 1;
 
 const NEIGHBOR_COUNT: usize = 8;
@@ -174,15 +174,15 @@ impl Extent {
     }
 
     fn cell_index(self, offset: Offset) -> Option<usize> {
-        if !self.contains(offset) || offset == CENTRE {
+        if !self.contains(offset) || offset == CENTER {
             return None;
         }
 
         let (dx, dy) = offset;
         let position = (dy + self.up) * self.width() + dx + self.left;
-        let centre = self.up * self.width() + self.left;
+        let center = self.up * self.width() + self.left;
 
-        Some((position - i32::from(position > centre)) as usize)
+        Some((position - i32::from(position > center)) as usize)
     }
 }
 
@@ -237,7 +237,7 @@ impl Neighborhood {
     pub fn cells(&self) -> impl Iterator<Item = (Offset, NeighborState)> {
         self.extent
             .offsets()
-            .filter(|offset| *offset != CENTRE)
+            .filter(|offset| *offset != CENTER)
             .zip(self.states.iter().copied())
     }
 

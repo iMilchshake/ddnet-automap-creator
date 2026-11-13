@@ -197,17 +197,21 @@ pub fn show(ui: &mut egui::Ui, view: GridView<'_>) -> GridResponse {
         pixels_per_point,
     };
     for &index in view.pool_mates {
-        outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, POOL_MATE_OUTLINE);
+        outliner.paint_centered_on_border(index, SELECTED_OUTLINE_WIDTH, POOL_MATE_OUTLINE);
     }
     if let Some(index) = view.picked {
         let color = ui.visuals().selection.bg_fill;
-        outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, color);
+        outliner.paint_centered_on_border(index, SELECTED_OUTLINE_WIDTH, color);
     }
     if let Some(index) = view.selected {
-        outliner.paint_centred_on_border(index, SELECTED_OUTLINE_WIDTH, SELECTED_OUTLINE);
+        outliner.paint_centered_on_border(index, SELECTED_OUTLINE_WIDTH, SELECTED_OUTLINE);
     }
     if let Some(index) = hovered {
-        outliner.paint_centred_on_border(index, OUTLINE_WIDTH, ui.visuals().selection.stroke.color);
+        outliner.paint_centered_on_border(
+            index,
+            OUTLINE_WIDTH,
+            ui.visuals().selection.stroke.color,
+        );
     }
 
     let label_pos = response
@@ -514,7 +518,7 @@ struct BorderOutliner {
 }
 
 impl BorderOutliner {
-    fn paint_centred_on_border(&self, index: usize, width: f32, color: Color32) {
+    fn paint_centered_on_border(&self, index: usize, width: f32, color: Color32) {
         let half = (width / 2.0 * self.pixels_per_point).round().max(1.0) / self.pixels_per_point;
         let cell = self.geometry.cell_rect(index);
         let outer = cell.expand(half);

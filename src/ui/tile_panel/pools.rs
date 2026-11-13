@@ -3,7 +3,7 @@ use egui::{Sense, TextureHandle, Ui, Vec2};
 use super::orientations::drawn_name;
 use super::{TileContext, TilePanel};
 use crate::model::pool::{ChanceMode, Pool};
-use crate::model::tile::{Centre, Chance};
+use crate::model::tile::{Center, Chance};
 use crate::model::transform::Transform;
 use crate::tileset::Tileset;
 use crate::ui::grid;
@@ -83,9 +83,9 @@ impl TilePanel {
         let number = index + 1;
         let open = index == 0;
         let share = self.share_label(pool, view.mode);
-        let title = match pool.centre {
-            Centre::Full => format!("Pool {number}: {share}"),
-            Centre::Empty => format!("Pool {number}, empty center: {share}"),
+        let title = match pool.center {
+            Center::Full => format!("Pool {number}: {share}"),
+            Center::Empty => format!("Pool {number}, empty center: {share}"),
         };
         let title = match share == view.own_share {
             true => egui::RichText::new(title),
@@ -100,7 +100,7 @@ impl TilePanel {
                         "pool",
                         self.tile,
                         pool.neighborhood.constraints(),
-                        pool.centre,
+                        pool.center,
                     ))
                     .default_open(open)
                     .show(ui, |ui| {
@@ -113,7 +113,7 @@ impl TilePanel {
     }
 
     fn show_members(&self, ui: &mut Ui, view: &PoolView, pool: &Pool) {
-        egui::Grid::new(("pool_members", pool.neighborhood.constraints(), pool.centre)).show(
+        egui::Grid::new(("pool_members", pool.neighborhood.constraints(), pool.center)).show(
             ui,
             |ui| {
                 for (member, share) in pool.members.iter().zip(pool.shares(view.mode)) {

@@ -4,7 +4,7 @@ use crate::model::neighbor::{NeighborState, Neighborhood, Side};
 use crate::model::pool::ChanceMode;
 use crate::model::project::Project;
 use crate::model::rule_sets::RuleSets;
-use crate::model::tile::{AIR_TILE, Centre, Chance, TILE_COUNT, TileMods, TileRule};
+use crate::model::tile::{AIR_TILE, Chance, RuleCenter, TILE_COUNT, TileMods, TileRule};
 use crate::model::transform::{Orientations, Transform};
 use crate::tests::support::{half_turn, mods, offset_of, outer_corner};
 
@@ -122,12 +122,12 @@ fn a_drawn_orientation_survives_a_round_trip() {
     assert!(written(project).contains(r#""drawn": "VR""#));
 }
 
-fn centred(centre: Centre) -> Project {
+fn centered(center: RuleCenter) -> Project {
     let mut project = Project::default();
     project.add_rule(
         5,
         TileRule {
-            centre,
+            center,
             ..TileRule::new(outer_corner())
         },
     );
@@ -136,26 +136,34 @@ fn centred(centre: Centre) -> Project {
 }
 
 #[test]
-fn an_empty_centre_survives_a_round_trip() {
-    let project = centred(Centre::Empty);
+fn an_empty_center_survives_a_round_trip() {
+    let project = centered(RuleCenter::Empty);
 
     assert_eq!(round_trip(&project), project);
-    assert!(written(project).contains(r#""centre": "empty""#));
+    assert!(written(project).contains(r#""center": "E""#));
 }
 
 #[test]
-fn a_full_centre_is_not_written() {
-    assert!(!written(centred(Centre::Full)).contains("centre"));
+fn an_any_center_survives_a_round_trip() {
+    let project = centered(RuleCenter::Any);
+
+    assert_eq!(round_trip(&project), project);
+    assert!(written(project).contains(r#""center": "A""#));
 }
 
 #[test]
-fn a_missing_centre_loads_as_full() {
-    assert_eq!(loaded_rule(r#"["N"]"#).centre, Centre::Full);
+fn a_full_center_is_not_written() {
+    assert!(!written(centered(RuleCenter::Full)).contains("center"));
 }
 
 #[test]
-fn an_unknown_centre_is_refused() {
-    let rule = format!(r#"{RULE_HEAD}, "orientations": ["N"], "centre": "any"}}"#);
+fn a_missing_center_loads_as_full() {
+    assert_eq!(loaded_rule(r#"["N"]"#).center, RuleCenter::Full);
+}
+
+#[test]
+fn an_unknown_center_is_refused() {
+    let rule = format!(r#"{RULE_HEAD}, "orientations": ["N"], "center": "S"}}"#);
 
     assert!(matches!(
         load(&one_tile(&tile_of(5, &rule))).unwrap_err(),

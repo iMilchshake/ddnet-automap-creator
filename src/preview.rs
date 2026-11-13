@@ -8,7 +8,7 @@ use twmap::{GameLayer, Tile, TileFlags, TwMap};
 use crate::model::neighbor::{NeighborState, Neighborhood, Offset};
 use crate::model::pool::{self, PoolRuns};
 use crate::model::project::Project;
-use crate::model::tile::{AIR_TILE, Centre, TILE_COUNT, referenced_tiles};
+use crate::model::tile::{AIR_TILE, Center, TILE_COUNT, referenced_tiles};
 use crate::model::transform::Transform;
 
 mod execute;
@@ -198,7 +198,7 @@ impl CustomShape {
 pub struct PlacedTile {
     pub index: usize,
     pub transform: Transform,
-    pub centre: Centre,
+    pub center: Center,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -270,7 +270,7 @@ pub fn placing_rule(
             pool.members.iter().find(|member| {
                 member.tile == placed.index
                     && member.transform == placed.transform
-                    && member.centre == placed.centre
+                    && member.center == placed.center
             })
         })
         .last()
@@ -381,9 +381,9 @@ fn cell(tile: Tile, was_solid: bool, unmatched_marker: u8) -> PreviewCell {
 
     PreviewCell::Placed(PlacedTile {
         index: usize::from(tile.id),
-        centre: match was_solid {
-            true => Centre::Full,
-            false => Centre::Empty,
+        center: match was_solid {
+            true => Center::Full,
+            false => Center::Empty,
         },
         transform: Transform {
             x_flip: tile.flags.contains(TileFlags::FLIP_X),

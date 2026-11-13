@@ -5,7 +5,7 @@ use crate::model::neighbor::{NeighborState, Neighborhood, neighbor_at};
 use crate::model::pool::{self, ChanceMode, Pool, PoolRuns, Variant};
 use crate::model::project::{Project, is_free_tile};
 use crate::model::tile::{
-    AIR_TILE, Centre, Chance, TILESET_SIDE, TileRule, highest_free_tile, referenced_tiles,
+    AIR_TILE, Center, Chance, TILESET_SIDE, TileRule, highest_free_tile, referenced_tiles,
 };
 use crate::model::transform::Transform;
 
@@ -19,7 +19,7 @@ const REPOSITORY_URL: &str = "https://github.com/iMilchshake/ddnet-automap-creat
 
 const MASK: &str = "g:mask";
 const ON_MASK: &str = ".If(IndexAt([0, 0]).Is(g:mask))";
-const CENTRE_TEST: &str = "IndexAt([0, 0])";
+const CENTER_TEST: &str = "IndexAt([0, 0])";
 const NO_DEFAULT_POS_RULE: &str = ".NoDefaultPosRule()";
 const FILL_OBJECTS: &str = "Run().FillObjects();";
 const HAS_SPACE: &str = "Object().HasSpace()";
@@ -77,7 +77,7 @@ impl RuleSet<'_> {
 
     fn needs_mask(&self) -> bool {
         pool::pools(&self.active_tiles()).iter().any(|pool| {
-            pool.centre == Centre::Full
+            pool.center == Center::Full
                 && !pool.neighborhood.is_tile_specific()
                 && pool.members.len() > 1
         })
@@ -197,7 +197,7 @@ fn render_rule_set(
     let PoolRuns {
         plain,
         specific,
-        empty_centred,
+        empty_centered,
     } = PoolRuns::split(&pools);
 
     let mut runs: Vec<Vec<String>> = Vec::new();
@@ -213,8 +213,8 @@ fn render_rule_set(
             .flat_map(|pool| copy_run_lines(pool, rule_set.chance_mode));
         runs.push(new_run(false, rules));
     }
-    if !empty_centred.is_empty() {
-        let rules = empty_centred
+    if !empty_centered.is_empty() {
+        let rules = empty_centered
             .iter()
             .flat_map(|pool| copy_run_lines(pool, rule_set.chance_mode));
         runs.push(new_run(false, rules));
@@ -489,7 +489,7 @@ fn pool_chance(pool: &Pool) -> String {
 }
 
 fn test_clause(neighborhood: &Neighborhood) -> String {
-    if_clause(&centre_tests(neighborhood, Centre::Full))
+    if_clause(&center_tests(neighborhood, Center::Full))
 }
 
 fn if_clause(tests: &[String]) -> String {
@@ -499,14 +499,14 @@ fn if_clause(tests: &[String]) -> String {
     }
 }
 
-fn centre_tests(neighborhood: &Neighborhood, centre: Centre) -> Vec<String> {
+fn center_tests(neighborhood: &Neighborhood, center: Center) -> Vec<String> {
     let full = names_with(neighborhood, NeighborState::Full);
     let empty = names_with(neighborhood, NeighborState::Empty);
-    let empty_centre = centre == Centre::Empty;
+    let empty_center = center == Center::Empty;
 
-    let named = (empty_centre || !full.is_empty() || !empty.is_empty()).then(|| {
-        let mut test = CENTRE_TEST.to_owned();
-        if empty_centre {
+    let named = (empty_center || !full.is_empty() || !empty.is_empty()).then(|| {
+        let mut test = CENTER_TEST.to_owned();
+        if empty_center {
             test.push_str(".IsEmpty()");
         }
         if !full.is_empty() {
@@ -569,7 +569,7 @@ fn picked_tests(neighborhood: &Neighborhood) -> Vec<String> {
 }
 
 fn inside_map_test(member: &Variant) -> Option<String> {
-    if member.centre != Centre::Empty {
+    if member.center != Center::Empty {
         return None;
     }
 
@@ -621,11 +621,11 @@ fn copy_run_lines(pool: &Pool, mode: ChanceMode) -> Vec<String> {
 }
 
 fn index_rule_line(member: &Variant, odds: Option<f32>) -> String {
-    let no_default = match member.centre {
-        Centre::Full => "",
-        Centre::Empty => NO_DEFAULT_POS_RULE,
+    let no_default = match member.center {
+        Center::Full => "",
+        Center::Empty => NO_DEFAULT_POS_RULE,
     };
-    let tests: Vec<String> = centre_tests(&member.neighborhood, member.centre)
+    let tests: Vec<String> = center_tests(&member.neighborhood, member.center)
         .into_iter()
         .chain(picked_tests(&member.neighborhood))
         .chain(inside_map_test(member))
