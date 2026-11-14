@@ -34,11 +34,23 @@ Running `trunk serve` will automatically compile r++ to wasm using `emscripten`.
 
 ## Potential future features 
 
+### Application
 - autosave the project (in browser storage)
 - .map export (via ddnet-rs / twmap ?)
 - (live) .r source preview -> could be used as an interactive tool to learn r++?
 - DDNet install integration (native only) -> we could use twstorage
-- do we want to support modulo rules? how are they used?
+
+### Ruleset features
+_Some of these offer little value but require very complex ui additions, so idk which are worth to add. If you think some of them are particularly important, feel free to reach out and let me know._
+
+- support modulo operations
+- allow rules to require a neighbor to not be a specific tile
+- let a neighbor match one of several specific tiles
+- match specific tile neighbors in one orientation only
+- option to skip a rule at the map edge (as DDNet repeats it, which can look odd)
+- rules that replace specific tiles instead of solid ones
+- option to never place a tile/group next to itself or within some radius of specific tiles/groups
+- user-defined run order and repeated runs
 
 ## Acknowledgements 
 

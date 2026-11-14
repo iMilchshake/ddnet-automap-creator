@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## Unreleased
 
 ### Added
 
@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hovering a tile in the tileset view shows its index and all its rules.
 - Press Esc or click the selected tile again to deselect it and see an overview in the sidebar.
 - Reworked welcome screen and Help window, with step by step instructions.
+- App icon for the welcome screen, the desktop window and the web favicon.
 - Various small UI/UX improvements
 
 ### Changed
@@ -27,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Saving (Ctrl+S) and opening now use automapper files with an embedded blueprint.
 - If the neighbors look the same after rotating or flipping, the rotated and flipped tiles are now mixed in randomly and share the rule's chance.
 - New defaults (Split view, Minimal preview map, first ruleset called "default").
-- New blueprint format. Older blueprints no longer load.
+- New blueprint format. Older blueprints no longer load. But blueprints saved from this version on will keep working in future versions.
 - Warnings now pop up as notifications in the top right, with shorter texts.
 - Various small UI/UX improvements (export window, popups, menu bar, preview view, rule menu for duplicate, copy and paste, clearer and more consistent texts).
 

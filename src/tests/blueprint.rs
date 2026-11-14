@@ -557,7 +557,7 @@ fn load(json: &str) -> Result<Project, BlueprintError> {
 
 fn document(tiles: &str, deactivated: &str, groups: &str) -> String {
     format!(
-        r#"{{"version": 1, "image": "grass_main", "active": 0,
+        r#"{{"version": 2, "image": "grass_main", "active": 0,
             "rule_sets": [{{"name": "Grass Main", "normalize": true,
                 "tiles": [{tiles}], "deactivated": [{deactivated}],
                 "groups": [{groups}]}}]}}"#
@@ -568,7 +568,31 @@ fn one_tile(body: &str) -> String {
     document(body, "", "")
 }
 
-const DESERT_BLUEPRINT: &str = r#"{"version": 1, "image": "desert_main", "active": 0,
+fn fixtures() -> Vec<(String, String)> {
+    let directory = concat!(env!("CARGO_MANIFEST_DIR"), "/src/tests/fixtures");
+
+    std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .map(|path| {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            (name, std::fs::read_to_string(path).unwrap())
+        })
+        .collect()
+}
+
+fn fixture_version(name: &str) -> u32 {
+    name.strip_prefix("blueprint_v")
+        .and_then(|rest| rest.strip_suffix(".json"))
+        .and_then(|number| number.parse().ok())
+        .unwrap_or_else(|| panic!("{name} is not named blueprint_v<N>.json"))
+}
+
+const DESERT_BLUEPRINT: &str = r#"{"version": 2, "image": "desert_main", "active": 0,
     "rule_sets": [{"name": "Desert", "normalize": true, "tiles": [],
                    "deactivated": [], "groups": []}]}"#;
 
@@ -590,8 +614,45 @@ fn an_unsupported_version_is_refused() {
 }
 
 #[test]
-fn a_blueprint_with_no_rule_sets_is_refused() {
+fn a_version_1_blueprint_is_refused() {
     let json = r#"{"version": 1, "image": "grass_main", "active": 0, "rule_sets": []}"#;
+    assert!(matches!(
+        load(json).unwrap_err(),
+        BlueprintError::UnsupportedVersion(1)
+    ));
+}
+
+#[test]
+fn every_fixture_blueprint_loads() {
+    let fixtures = fixtures();
+
+    assert!(!fixtures.is_empty());
+    for (name, text) in fixtures {
+        if let Err(error) = blueprint::parse(&text) {
+            panic!("{name}: {error}");
+        }
+    }
+}
+
+#[test]
+fn the_newest_fixture_blueprint_round_trips_byte_for_byte() {
+    let (name, text) = fixtures()
+        .into_iter()
+        .max_by_key(|(name, _)| fixture_version(name))
+        .unwrap();
+
+    let loaded = blueprint::parse(&text).unwrap();
+
+    assert_eq!(
+        blueprint::to_json(&loaded.rule_sets, &loaded.image).unwrap(),
+        text,
+        "{name}"
+    );
+}
+
+#[test]
+fn a_blueprint_with_no_rule_sets_is_refused() {
+    let json = r#"{"version": 2, "image": "grass_main", "active": 0, "rule_sets": []}"#;
     assert!(matches!(
         load(json).unwrap_err(),
         BlueprintError::NoRuleSets

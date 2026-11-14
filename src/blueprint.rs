@@ -12,7 +12,7 @@ use crate::model::tile::{
 };
 use crate::model::transform::{Orientations, Transform};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 // for serialization of orientations
 const IDENTITY_LETTER: char = 'N';

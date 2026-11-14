@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "image": "tileset",
+  "active": 1,
+  "rule_sets": [
+    {
+      "name": "First",
+      "normalize": true,
+      "tiles": [
+        {
+          "id": 1,
+          "rules": [
+            { "neighbors": "AEAEFAFF", "chance": 2.5, "orientations": [ "N", "R", "VH", "VHR" ], "drawn": "VR" },
+            { "neighbors": "FFFFFFFF", "chance": 100.0, "orientations": [ "VH" ], "center": "E" }
+          ]
+        },
+        {
+          "id": 2,
+          "rules": [
+            { "neighbors": "[17]AAAAAAAAAA", "extent": [ 2, 1, 1, 1 ], "chance": 50.0, "orientations": [ "N" ], "center": "A" },
+            { "neighbors": "EEEEEEEE", "chance": 100.0, "orientations": [ "R" ] }
+          ]
+        }
+      ],
+      "deactivated": [ 7, 9 ],
+      "groups": [
+        { "name": "fill", "tiles": [ 64, 65 ], "neighbors": "AAAAAFFAAAAA", "chance": 100.0 },
+        { "name": "decorate", "tiles": [ 66, 67 ], "neighbors": "FFFFFFFFFFFF", "chance": 1.0 },
+        { "name": "onfloor", "tiles": [ 68, 84 ], "neighbors": "AAAAEAAEAAFA", "chance": 33.5 },
+        { "name": "custom", "tiles": [ 96, 97, 113 ], "neighbors": "FAAAAFEAAEFAAAFA", "chance": 20.0 },
+        { "name": "rotate", "tiles": [ 40, 56 ], "neighbors": "AAAAFAAFAAAA", "chance": 75.0, "orientations": [ "N", "R", "VH", "VHR" ] }
+      ]
+    },
+    {
+      "name": "Second",
+      "normalize": false,
+      "tiles": [
+        {
+          "id": 5,
+          "rules": [
+            { "neighbors": "EEEAAAAAAAAAAAF", "extent": [ 1, 2, 1, 2 ], "chance": 60.0, "orientations": [ "N" ] },
+            { "neighbors": "FFFFFFFF", "chance": 40.0, "orientations": [ "N" ], "center": "A" },
+            { "neighbors": "AAAAAAAA", "chance": 10.0, "orientations": [ "R", "V", "HR" ] },
+            { "neighbors": "FEFEFEFE", "chance": 5.0, "orientations": [ "N", "R", "VH", "VHR", "V", "VR", "H", "HR" ] }
+          ]
+        }
+      ],
+      "deactivated": [ 5, 12 ],
+      "groups": [
+        { "name": "fill", "tiles": [ 200, 201 ], "neighbors": "AAAAAFFAAAAA", "chance": 100.0 },
+        { "name": "decorate", "tiles": [ 216, 217 ], "neighbors": "FFFFFFFFFFFF", "chance": 10.0 },
+        { "name": "flipx", "tiles": [ 220, 221 ], "neighbors": "AAAAAFFAAAAA", "chance": 50.0, "orientations": [ "N", "V" ] },
+        { "name": "flipy", "tiles": [ 222, 223 ], "neighbors": "AAAAAFFAAAAA", "chance": 50.0, "orientations": [ "N", "H" ] },
+        { "name": "flipxy", "tiles": [ 224, 225 ], "neighbors": "AAAAAFFAAAAA", "chance": 50.0, "orientations": [ "N", "VH", "V", "H" ] },
+        {
+          "name": "rotateflip",
+          "tiles": [ 240, 241, 242 ],
+          "neighbors": "AAAAAAFFFAAAAAA",
+          "chance": 100.0,
+          "orientations": [ "N", "R", "VH", "VHR", "V", "VR", "H", "HR" ]
+        }
+      ]
+    }
+  ]
+}
