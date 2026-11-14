@@ -65,6 +65,7 @@ impl RuleSets {
         &mut self.sets[self.active].1
     }
 
+    #[cfg(test)]
     pub fn active_name(&self) -> &str {
         &self.sets[self.active].0
     }

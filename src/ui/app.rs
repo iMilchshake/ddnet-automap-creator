@@ -2027,15 +2027,15 @@ fn render_selected_source(
     r_source::render_rule_sets(&rule_sets.selected(selection), image_stem)
 }
 
-// We have a separate function which only considers the active rule set, so it works
-// regardless of errors in other rule sets.
+const PREVIEW_RULE_SET_NAME: &str = "Preview";
+
 fn render_active_source(rule_sets: &RuleSets, image_stem: &str) -> Result<String, ExportError> {
     let project = rule_sets.active();
     let tiles = project.all_rules();
     let deactivated = project.deactivated_tiles();
     let rule_set = RuleSet {
         image_stem,
-        name: rule_sets.active_name(),
+        name: PREVIEW_RULE_SET_NAME,
         tiles: &tiles,
         deactivated: &deactivated,
         groups: project.groups(),
